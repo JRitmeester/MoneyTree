@@ -31,3 +31,6 @@ frontend/build/
 
 # Personal files
 *.pdf
+*.csv
+*.xml
+!backend/**
