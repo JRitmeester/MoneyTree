@@ -130,26 +130,47 @@
 		}
 	}
 
+	// For the "add category" picker
+	let addCategoryId: number | null = $state(null);
+
+	let availableCategories = $derived.by(() => {
+		const usedIds = new Set(editLines.map(l => l.category_id));
+		return flatCategories(categories).filter(c => !usedIds.has(c.id));
+	});
+
 	function startEditing() {
-		const flat = flatCategories(categories);
-		// Pre-fill from existing budget lines
-		const budgetMap = new Map<number, number>();
+		// Only include categories that already have budget lines
+		editLines = [];
 		if (budget) {
 			for (const line of budget.lines) {
-				budgetMap.set(line.category_id, line.amount);
+				editLines.push({
+					category_id: line.category_id,
+					category_name: line.category_name,
+					category_type: line.category_type,
+					amount: line.amount,
+				});
 			}
 		}
-
-		editLines = flat
-			.filter(c => !categories.find(root => root.children?.some(ch => ch.id === c.id) && c.depth === 0))
-			.map(c => ({
-				category_id: c.id,
-				category_name: c.name,
-				category_type: c.category_type,
-				amount: budgetMap.get(c.id) ?? 0,
-			}));
-
+		addCategoryId = null;
 		editing = true;
+	}
+
+	function addBudgetLine() {
+		if (addCategoryId == null) return;
+		const flat = flatCategories(categories);
+		const cat = flat.find(c => c.id === addCategoryId);
+		if (!cat) return;
+		editLines = [...editLines, {
+			category_id: cat.id,
+			category_name: cat.name,
+			category_type: cat.category_type,
+			amount: 0,
+		}];
+		addCategoryId = null;
+	}
+
+	function removeBudgetLine(index: number) {
+		editLines = editLines.filter((_, i) => i !== index);
 	}
 
 	async function saveEditing() {
@@ -174,8 +195,16 @@
 		editing = false;
 	}
 
+	// Split lines into budgeted vs unbudgeted
+	let budgetedExpenses = $derived(data?.expense_lines.filter(l => l.budgeted > 0) ?? []);
+	let unbudgetedExpenses = $derived(data?.expense_lines.filter(l => l.budgeted === 0) ?? []);
+	let unbudgetedExpenseTotal = $derived(unbudgetedExpenses.reduce((s, l) => s + l.actual, 0));
+	let budgetedIncome = $derived(data?.income_lines.filter(l => l.budgeted > 0) ?? []);
+	let unbudgetedIncome = $derived(data?.income_lines.filter(l => l.budgeted === 0) ?? []);
+	let unbudgetedIncomeTotal = $derived(unbudgetedIncome.reduce((s, l) => s + l.actual, 0));
+
 	function progressWidth(line: BudgetVsActualLine): string {
-		if (line.budgeted === 0) return '100%';
+		if (line.budgeted === 0) return '0%';
 		return `${Math.min(line.percentage, 100)}%`;
 	}
 
@@ -220,42 +249,37 @@
 		<div class="error">{error}</div>
 	{:else if editing}
 		<!-- EDIT MODE -->
-		<div class="edit-section">
-			<div class="section">
-				<h2>Income Categories</h2>
-				<div class="edit-table">
-					<div class="edit-header">
-						<span>Category</span>
-						<span class="right">Monthly Budget</span>
-					</div>
-					{#each editLines.filter(l => l.category_type === 'income') as line}
-						<div class="edit-row">
-							<span>{line.category_name}</span>
-							<input type="number" step="0.01" min="0" bind:value={line.amount} />
-						</div>
-					{/each}
-					{#if editLines.filter(l => l.category_type === 'income').length === 0}
-						<p class="muted">No income categories. Create them on the <a href="/categories">Categories page</a>.</p>
-					{/if}
+		<div class="section">
+			<div class="edit-table">
+				<div class="edit-header-3">
+					<span>Category</span>
+					<span>Type</span>
+					<span class="right">Monthly Budget</span>
+					<span></span>
 				</div>
+				{#each editLines as line, i}
+					<div class="edit-row-3">
+						<span class="cat-name">{line.category_name}</span>
+						<span class="type-label" class:income-text={line.category_type === 'income'} class:expense-text={line.category_type === 'expense'}>
+							{line.category_type === 'income' ? 'Income' : 'Expense'}
+						</span>
+						<input type="number" step="0.01" min="0" bind:value={line.amount} />
+						<button class="remove-line-btn" onclick={() => removeBudgetLine(i)} title="Remove">&times;</button>
+					</div>
+				{/each}
+				{#if editLines.length === 0}
+					<p class="muted" style="padding: 1rem 0">No budget lines yet. Add categories below.</p>
+				{/if}
 			</div>
-			<div class="section">
-				<h2>Expense Categories</h2>
-				<div class="edit-table">
-					<div class="edit-header">
-						<span>Category</span>
-						<span class="right">Monthly Budget</span>
-					</div>
-					{#each editLines.filter(l => l.category_type === 'expense') as line}
-						<div class="edit-row">
-							<span>{line.category_name}</span>
-							<input type="number" step="0.01" min="0" bind:value={line.amount} />
-						</div>
+
+			<div class="add-line-row">
+				<select bind:value={addCategoryId}>
+					<option value={null}>-- Select category --</option>
+					{#each availableCategories as cat}
+						<option value={cat.id}>{'—'.repeat(cat.depth)}{cat.depth ? ' ' : ''}{cat.name} ({cat.category_type})</option>
 					{/each}
-					{#if editLines.filter(l => l.category_type === 'expense').length === 0}
-						<p class="muted">No expense categories. Create them on the <a href="/categories">Categories page</a>.</p>
-					{/if}
-				</div>
+				</select>
+				<button class="btn primary small" onclick={addBudgetLine} disabled={addCategoryId == null}>Add</button>
 			</div>
 		</div>
 	{:else if !budget}
@@ -320,7 +344,7 @@
 			</div>
 		</div>
 
-		{#if data.income_lines.length > 0}
+		{#if budgetedIncome.length > 0}
 			<div class="section">
 				<h2>Income</h2>
 				<div class="bva-table">
@@ -331,7 +355,7 @@
 						<span class="right">Difference</span>
 						<span class="bar-col">Progress</span>
 					</div>
-					{#each data.income_lines as line}
+					{#each budgetedIncome as line}
 						<div class="bva-row">
 							<span class="cat-name">{line.category_name}</span>
 							<span class="right">{formatEuro(line.budgeted)}</span>
@@ -349,11 +373,20 @@
 							</span>
 						</div>
 					{/each}
+					{#if unbudgetedIncomeTotal > 0}
+						<div class="bva-row unbudgeted-row">
+							<span class="cat-name muted">Other income</span>
+							<span class="right">—</span>
+							<span class="right">{formatEuro(unbudgetedIncomeTotal)}</span>
+							<span class="right"></span>
+							<span class="bar-col"></span>
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}
 
-		{#if data.expense_lines.length > 0}
+		{#if budgetedExpenses.length > 0}
 			<div class="section">
 				<h2>Expenses</h2>
 				<div class="bva-table">
@@ -364,7 +397,7 @@
 						<span class="right">Remaining</span>
 						<span class="bar-col">Progress</span>
 					</div>
-					{#each data.expense_lines as line}
+					{#each budgetedExpenses as line}
 						<div class="bva-row" class:over-budget={isOverBudget(line)}>
 							<span class="cat-name">{line.category_name}</span>
 							<span class="right">{formatEuro(line.budgeted)}</span>
@@ -384,6 +417,15 @@
 							</span>
 						</div>
 					{/each}
+					{#if unbudgetedExpenseTotal > 0}
+						<div class="bva-row unbudgeted-row">
+							<span class="cat-name muted">Other expenses</span>
+							<span class="right">—</span>
+							<span class="right">{formatEuro(unbudgetedExpenseTotal)}</span>
+							<span class="right"></span>
+							<span class="bar-col"></span>
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}
@@ -510,6 +552,7 @@
 		align-items: center;
 	}
 	.bva-row.over-budget { background: #fef2f2; }
+	.bva-row.unbudgeted-row { border-top: 2px dashed #e5e7eb; }
 	.right { text-align: right; }
 	.cat-name { font-weight: 500; }
 
@@ -549,32 +592,26 @@
 	.actuals-preview { margin-top: 1rem; }
 
 	/* Edit mode */
-	.edit-section {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 1.5rem;
-	}
-	@media (max-width: 768px) {
-		.edit-section { grid-template-columns: 1fr; }
-	}
 	.edit-table { font-size: 0.9rem; }
-	.edit-header {
+	.edit-header-3 {
 		display: grid;
-		grid-template-columns: 2fr 1fr;
+		grid-template-columns: 2fr 0.8fr 1fr 2rem;
 		padding: 0.5rem 0;
 		border-bottom: 2px solid #e5e7eb;
 		font-weight: 600;
 		font-size: 0.8rem;
 		color: #666;
+		gap: 0.5rem;
 	}
-	.edit-row {
+	.edit-row-3 {
 		display: grid;
-		grid-template-columns: 2fr 1fr;
+		grid-template-columns: 2fr 0.8fr 1fr 2rem;
 		padding: 0.4rem 0;
 		border-bottom: 1px solid #f0f0f0;
 		align-items: center;
+		gap: 0.5rem;
 	}
-	.edit-row input {
+	.edit-row-3 input {
 		width: 100%;
 		padding: 0.35rem 0.5rem;
 		border: 1px solid #ddd;
@@ -582,7 +619,36 @@
 		font-size: 0.9rem;
 		text-align: right;
 	}
-	.edit-row input:focus { outline: none; border-color: #2d6a4f; }
+	.edit-row-3 input:focus { outline: none; border-color: #2d6a4f; }
+	.type-label { font-size: 0.8rem; font-weight: 500; }
+	.remove-line-btn {
+		background: none;
+		border: none;
+		color: #9ca3af;
+		cursor: pointer;
+		font-size: 1.1rem;
+		padding: 0;
+		line-height: 1;
+	}
+	.remove-line-btn:hover { color: #dc2626; }
+
+	.add-line-row {
+		display: flex;
+		gap: 0.5rem;
+		margin-top: 0.75rem;
+		align-items: center;
+	}
+	.add-line-row select {
+		flex: 1;
+		padding: 0.4rem 0.5rem;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		font-size: 0.85rem;
+	}
+	.btn.small {
+		padding: 0.4rem 0.75rem;
+		font-size: 0.85rem;
+	}
 
 	@media (max-width: 768px) {
 		.bva-header, .bva-row {

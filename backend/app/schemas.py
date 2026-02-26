@@ -39,6 +39,8 @@ class TransactionDetail(TransactionOut):
     afschriftnummer: str
     receipt: Optional["ReceiptOut"] = None
     line_items: list["LineItemOut"] = []
+    offsets: list["TransactionOut"] = []
+    offsets_expense: Optional["TransactionOut"] = None
 
 
 class TransactionListResponse(BaseModel):
@@ -129,6 +131,7 @@ class LineItemOut(BaseModel):
     quantity: int
     category: Optional[str]
     sort_order: int
+    is_remaining: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -182,14 +185,42 @@ class DashboardSummary(BaseModel):
 
 class CategorySpending(BaseModel):
     category: str
+    category_id: Optional[int] = None
     total: float
     count: int
+    has_children: bool = False
 
 
 class SubcategorySpending(BaseModel):
     category: str
     total: float
     count: int
+
+
+class SpendingLineItem(BaseModel):
+    line_item_id: int
+    description: str
+    amount: float
+    quantity: int
+    category: Optional[str]
+    is_remaining: bool
+    transaction_id: int
+    transaction_date: date
+    transaction_merchant: Optional[str]
+    transaction_amount: float
+
+
+class BreadcrumbItem(BaseModel):
+    id: int
+    name: str
+
+
+class CategoryDetail(BaseModel):
+    category_id: int
+    category_name: str
+    breadcrumb: list[BreadcrumbItem]
+    total: float
+    line_items: list[SpendingLineItem]
 
 
 class MonthlyTrend(BaseModel):

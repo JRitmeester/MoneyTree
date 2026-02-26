@@ -96,9 +96,9 @@ def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):
 @router.get("/unmapped", response_model=list[str])
 def get_unmapped(db: Session = Depends(get_db)):
     """List bank categories that have no mapping."""
-    # Get all distinct bank categories from transactions
-    all_bank_cats = db.execute(
-        select(Transaction.categorie).distinct()
+    # Get bank categories from the Category table (is_bank_category=True)
+    bank_cats = db.execute(
+        select(Category.name).where(Category.is_bank_category == True)  # noqa: E712
     ).scalars().all()
 
     # Get all mapped bank categories
@@ -107,4 +107,4 @@ def get_unmapped(db: Session = Depends(get_db)):
     ).scalars().all()
     mapped_set = set(mapped_cats)
 
-    return sorted(c for c in all_bank_cats if c and c not in mapped_set)
+    return sorted(c for c in bank_cats if c and c not in mapped_set)

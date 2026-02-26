@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { uploadReceipt, bulkReplaceLineItems, updateReceipt, type ReceiptCreateResponse, type LineItemCreate } from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
+	import { resolveAmount, evaluateExpression } from '$lib/calc';
 	import { goto } from '$app/navigation';
 
 	// Steps: 1=upload, 2=review OCR, 3=done
@@ -77,7 +78,7 @@
 				.filter((li) => li.description.trim())
 				.map((li) => ({
 					description: li.description,
-					amount: parseFloat(li.amount) || 0,
+					amount: evaluateExpression(li.amount) || 0,
 					quantity: li.quantity,
 					category: li.category || null,
 				}));
@@ -149,7 +150,7 @@
 				{#each lineItems as item, i}
 					<div class="line-item-row">
 						<input type="text" placeholder="Description" bind:value={item.description} class="desc" />
-						<input type="number" step="0.01" placeholder="Amount" bind:value={item.amount} class="amt" />
+						<input type="text" placeholder="Amount" bind:value={item.amount} class="amt" onblur={() => { item.amount = resolveAmount(item.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); item.amount = resolveAmount(item.amount); }}} />
 						<input type="number" min="1" bind:value={item.quantity} class="qty" />
 						<div class="cat"><CategoryInput value={item.category} onchange={(v) => { item.category = v; }} placeholder="Category" /></div>
 						<button class="remove-btn" onclick={() => removeLineItem(i)}>x</button>

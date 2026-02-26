@@ -5,7 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Category, LineItem, Receipt, Transaction
+from ..models import Category, LineItem, Receipt, Transaction, TransactionOffset
+from ..services.remaining import recalculate_remaining
 from ..schemas import (
     ImportResult,
     LineItemCreate,
@@ -43,9 +44,16 @@ async def import_csv(
 
         if existing:
             if update_duplicates:
+                old_categorie = existing.categorie
                 for key, value in tx_data.items():
                     if key != "import_hash":
                         setattr(existing, key, value)
+                # If categorie changed, sync remaining line item
+                if old_categorie != existing.categorie and existing.receipt:
+                    for li in existing.receipt.line_items:
+                        if li.is_remaining:
+                            li.category = existing.categorie
+                            break
                 updated += 1
             else:
                 skipped += 1
@@ -54,6 +62,28 @@ async def import_csv(
         if not existing:
             tx = Transaction(**tx_data)
             db.add(tx)
+            db.flush()
+
+            # Auto-create receipt + remaining line item
+            receipt = Receipt(
+                transaction_id=tx.id,
+                date=tx.datum,
+                total_amount=abs(tx.bedrag),
+                merchant_name=tx.merchant_name or tx.naam,
+            )
+            db.add(receipt)
+            db.flush()
+
+            remaining_li = LineItem(
+                receipt_id=receipt.id,
+                description="Remaining",
+                amount=abs(tx.bedrag),
+                quantity=1,
+                category=tx_data["categorie"],
+                sort_order=999,
+                is_remaining=True,
+            )
+            db.add(remaining_li)
             imported += 1
 
         # Seed bank categories
@@ -136,7 +166,14 @@ def list_transactions(
     if date_to:
         query = query.where(Transaction.datum <= date_to)
     if categorie:
-        query = query.where(Transaction.categorie == categorie)
+        # Match transactions where any line item has this category
+        matching_tx_ids = (
+            select(Transaction.id)
+            .join(Receipt, Receipt.transaction_id == Transaction.id)
+            .join(LineItem, LineItem.receipt_id == Receipt.id)
+            .where(LineItem.category == categorie)
+        )
+        query = query.where(Transaction.id.in_(matching_tx_ids))
     if search:
         pattern = f"%{search}%"
         query = query.where(
@@ -186,7 +223,7 @@ def list_transactions(
 
 @router.get("/{transaction_id}", response_model=TransactionDetail)
 def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
-    """Get a single transaction with its receipt."""
+    """Get a single transaction with its receipt and offsets."""
     tx = db.get(Transaction, transaction_id)
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -195,6 +232,33 @@ def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
     detail.has_receipt = tx.receipt is not None
     if tx.receipt and tx.receipt.line_items:
         detail.line_items = [LineItemOut.model_validate(li) for li in tx.receipt.line_items]
+
+    # Load offsets (income txs that offset this expense)
+    offset_rows = db.execute(
+        select(TransactionOffset).where(
+            TransactionOffset.expense_transaction_id == tx.id
+        )
+    ).scalars().all()
+    for offset in offset_rows:
+        income_tx = db.get(Transaction, offset.income_transaction_id)
+        if income_tx:
+            out = TransactionOut.model_validate(income_tx)
+            out.has_receipt = income_tx.receipt is not None
+            detail.offsets.append(out)
+
+    # Check if this tx is an offset for an expense
+    offset_of = db.execute(
+        select(TransactionOffset).where(
+            TransactionOffset.income_transaction_id == tx.id
+        )
+    ).scalar_one_or_none()
+    if offset_of:
+        expense_tx = db.get(Transaction, offset_of.expense_transaction_id)
+        if expense_tx:
+            out = TransactionOut.model_validate(expense_tx)
+            out.has_receipt = expense_tx.receipt is not None
+            detail.offsets_expense = out
+
     return detail
 
 
@@ -207,6 +271,12 @@ def update_transaction(transaction_id: int, data: dict, db: Session = Depends(ge
 
     if "categorie" in data:
         tx.categorie = data["categorie"]
+        # Sync to remaining line item
+        if tx.receipt:
+            for li in tx.receipt.line_items:
+                if li.is_remaining:
+                    li.category = data["categorie"]
+                    break
 
     db.commit()
     db.refresh(tx)
@@ -237,12 +307,26 @@ def save_transaction_line_items(
         )
         db.add(receipt)
         db.flush()
+
+        # Create remaining line item
+        remaining_li = LineItem(
+            receipt_id=receipt.id,
+            description="Remaining",
+            amount=abs(tx.bedrag),
+            quantity=1,
+            category=tx.categorie,
+            sort_order=999,
+            is_remaining=True,
+        )
+        db.add(remaining_li)
+        db.flush()
     else:
         receipt = tx.receipt
 
-    # Bulk-replace line items
+    # Only delete non-remaining line items
     for existing in list(receipt.line_items):
-        db.delete(existing)
+        if not existing.is_remaining:
+            db.delete(existing)
     db.flush()
 
     new_items = []
@@ -254,12 +338,98 @@ def save_transaction_line_items(
             quantity=item_data.quantity,
             category=item_data.category,
             sort_order=item_data.sort_order if item_data.sort_order else i,
+            is_remaining=False,
         )
         db.add(li)
         new_items.append(li)
+
+    db.flush()
+    recalculate_remaining(db, receipt, tx.bedrag)
 
     db.commit()
     for li in new_items:
         db.refresh(li)
 
-    return [LineItemOut.model_validate(li) for li in new_items]
+    # Include remaining item in response
+    remaining = next((li for li in receipt.line_items if li.is_remaining), None)
+    result = [LineItemOut.model_validate(li) for li in new_items]
+    if remaining:
+        db.refresh(remaining)
+        result.append(LineItemOut.model_validate(remaining))
+    return result
+
+
+@router.post("/{expense_id}/offsets/{income_id}")
+def link_offset(expense_id: int, income_id: int, db: Session = Depends(get_db)):
+    """Link an income transaction as an offset to an expense transaction."""
+    expense_tx = db.get(Transaction, expense_id)
+    if not expense_tx:
+        raise HTTPException(status_code=404, detail="Expense transaction not found")
+    income_tx = db.get(Transaction, income_id)
+    if not income_tx:
+        raise HTTPException(status_code=404, detail="Income transaction not found")
+
+    if expense_tx.bedrag >= 0:
+        raise HTTPException(status_code=400, detail="Expense transaction must have negative amount")
+    if income_tx.bedrag <= 0:
+        raise HTTPException(status_code=400, detail="Offset transaction must have positive amount")
+
+    # Check income tx not already an offset
+    existing = db.execute(
+        select(TransactionOffset).where(
+            TransactionOffset.income_transaction_id == income_id
+        )
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="This transaction is already linked as an offset")
+
+    # Create offset link
+    offset = TransactionOffset(
+        expense_transaction_id=expense_id,
+        income_transaction_id=income_id,
+    )
+    db.add(offset)
+    db.flush()
+
+    # Remove income tx's remaining line item
+    if income_tx.receipt:
+        for li in list(income_tx.receipt.line_items):
+            if li.is_remaining:
+                db.delete(li)
+        db.flush()
+
+    # Recalculate expense tx's remaining (now factors in this offset)
+    if expense_tx.receipt:
+        recalculate_remaining(db, expense_tx.receipt, expense_tx.bedrag)
+
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{expense_id}/offsets/{income_id}")
+def unlink_offset(expense_id: int, income_id: int, db: Session = Depends(get_db)):
+    """Remove an offset link between transactions."""
+    offset = db.execute(
+        select(TransactionOffset).where(
+            TransactionOffset.expense_transaction_id == expense_id,
+            TransactionOffset.income_transaction_id == income_id,
+        )
+    ).scalar_one_or_none()
+    if not offset:
+        raise HTTPException(status_code=404, detail="Offset link not found")
+
+    db.delete(offset)
+    db.flush()
+
+    # Recreate income tx's remaining line item
+    income_tx = db.get(Transaction, income_id)
+    if income_tx and income_tx.receipt:
+        recalculate_remaining(db, income_tx.receipt, income_tx.bedrag)
+
+    # Recalculate expense tx's remaining (offset removed, remaining goes up)
+    expense_tx = db.get(Transaction, expense_id)
+    if expense_tx and expense_tx.receipt:
+        recalculate_remaining(db, expense_tx.receipt, expense_tx.bedrag)
+
+    db.commit()
+    return {"ok": True}

@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import {
-		getTransaction, saveTransactionLineItems, updateTransaction,
+		getTransaction, getTransactions, saveTransactionLineItems, updateTransaction, updateLineItem,
+		linkOffset, unlinkOffset,
 		getCategories,
 		formatEuro, formatDate,
-		type TransactionDetail, type LineItem, type LineItemCreate, type Category
+		type TransactionDetail, type Transaction, type LineItem, type LineItemCreate, type Category
 	} from '$lib/api';
+	import { resolveAmount, evaluateExpression } from '$lib/calc';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 
 	let tx: TransactionDetail | null = $state(null);
@@ -42,23 +44,15 @@
 
 	$effect(() => { load(); });
 
-	function flatCats(cats: Category[], depth = 0): { name: string; depth: number }[] {
-		let result: { name: string; depth: number }[] = [];
-		for (const c of cats) {
-			result.push({ name: c.name, depth });
-			if (c.children?.length) {
-				result = result.concat(flatCats(c.children, depth + 1));
-			}
-		}
-		return result;
-	}
-
-	async function handleCategoryChange() {
-		if (!tx || selectedCategory === tx.categorie) return;
+	async function handleCategoryChange(newCategory: string) {
+		if (!tx || newCategory === tx.categorie || !newCategory) return;
+		selectedCategory = newCategory;
 		savingCategory = true;
 		try {
-			await updateTransaction(tx.id, { categorie: selectedCategory });
-			tx.categorie = selectedCategory;
+			await updateTransaction(tx.id, { categorie: newCategory });
+			tx.categorie = newCategory;
+			// Reload to get updated remaining line item
+			await load();
 		} catch (e: any) {
 			error = e.message;
 			selectedCategory = tx.categorie;
@@ -67,17 +61,34 @@
 		}
 	}
 
+	async function handleRemainingCategoryChange(itemId: number, newCategory: string) {
+		if (!tx || !newCategory) return;
+		savingCategory = true;
+		try {
+			await updateLineItem(itemId, { category: newCategory });
+			// Reload to get synced tx.categorie
+			await load();
+		} catch (e: any) {
+			error = e.message;
+		} finally {
+			savingCategory = false;
+		}
+	}
+
 	function startEditing() {
 		if (!tx) return;
-		editItems = tx.line_items.map(li => ({
-			description: li.description,
-			amount: (li.amount * li.quantity).toString(),
-			category: li.category || '',
-		}));
+		editItems = tx.line_items
+			.filter(li => !li.is_remaining)
+			.map(li => ({
+				description: li.description,
+				amount: (li.amount * li.quantity).toString(),
+				category: li.category || '',
+			}));
 		editing = true;
 	}
 
 	function addRow() {
+		if (!editing) startEditing();
 		editItems = [...editItems, { description: '', amount: '', category: '' }];
 	}
 
@@ -98,7 +109,7 @@
 				.filter(it => it.description.trim())
 				.map((it, i) => ({
 					description: it.description.trim(),
-					amount: parseFloat(it.amount) || 0,
+					amount: evaluateExpression(it.amount) || 0,
 					quantity: 1,
 					category: it.category || null,
 					sort_order: i,
@@ -109,6 +120,68 @@
 			await load();
 		} finally {
 			saving = false;
+		}
+	}
+
+	// Computed: separate remaining from explicit items
+	let explicitItems = $derived(tx?.line_items.filter(li => !li.is_remaining) ?? []);
+	let remainingItem = $derived(tx?.line_items.find(li => li.is_remaining) ?? null);
+
+	// Offsets
+	let offsetSearch = $state('');
+	let offsetResults: Transaction[] = $state([]);
+	let offsetSearching = $state(false);
+	let showOffsetSearch = $state(false);
+	let offsetSearchTimeout: ReturnType<typeof setTimeout>;
+
+	let offsetTotal = $derived(tx?.offsets.reduce((s, o) => s + o.bedrag, 0) ?? 0);
+	let netAmount = $derived(tx ? tx.bedrag + offsetTotal : 0); // bedrag is negative, offsets are positive
+
+	function handleOffsetSearch(e: Event) {
+		const val = (e.target as HTMLInputElement).value;
+		offsetSearch = val;
+		clearTimeout(offsetSearchTimeout);
+		if (!val.trim()) {
+			offsetResults = [];
+			return;
+		}
+		offsetSearchTimeout = setTimeout(async () => {
+			offsetSearching = true;
+			try {
+				const res = await getTransactions({ search: val, per_page: 10 });
+				// Only show income transactions not already linked
+				const linkedIds = new Set(tx?.offsets.map(o => o.id) ?? []);
+				offsetResults = res.items.filter(t => t.bedrag > 0 && t.id !== tx?.id && !linkedIds.has(t.id));
+			} finally {
+				offsetSearching = false;
+			}
+		}, 300);
+	}
+
+	async function handleLinkOffset(incomeId: number) {
+		if (!tx) return;
+		try {
+			await linkOffset(tx.id, incomeId);
+			offsetSearch = '';
+			offsetResults = [];
+			showOffsetSearch = false;
+			await load();
+		} catch (e: any) {
+			if (e.message?.includes('409')) {
+				error = 'This transaction is already linked as an offset elsewhere.';
+			} else {
+				error = e.message;
+			}
+		}
+	}
+
+	async function handleUnlinkOffset(incomeId: number) {
+		if (!tx) return;
+		try {
+			await unlinkOffset(tx.id, incomeId);
+			await load();
+		} catch (e: any) {
+			error = e.message;
 		}
 	}
 </script>
@@ -133,14 +206,13 @@
 
 		<div class="category-selector">
 			<label class="cat-label">Category</label>
-			<select bind:value={selectedCategory} onchange={handleCategoryChange} disabled={savingCategory}>
-				<option value={tx.categorie}>{tx.categorie}</option>
-				{#each flatCats(categories) as cat}
-					{#if cat.name !== tx.categorie}
-						<option value={cat.name}>{'—'.repeat(cat.depth)}{cat.depth ? ' ' : ''}{cat.name}</option>
-					{/if}
-				{/each}
-			</select>
+			<div class="cat-input-wrap">
+				<CategoryInput
+					value={selectedCategory}
+					onchange={handleCategoryChange}
+					placeholder="Select category..."
+				/>
+			</div>
 			{#if savingCategory}
 				<span class="saving-indicator">Saving...</span>
 			{/if}
@@ -187,15 +259,69 @@
 		{/if}
 	</div>
 
-	<div class="card">
-		<div class="section-header">
-			<h2>Line Items</h2>
-			{#if !editing}
-				<button class="edit-btn" onclick={startEditing}>
-					{tx.line_items.length > 0 ? 'Edit' : 'Add items'}
-				</button>
+	{#if tx.offsets_expense}
+		<div class="card offset-section">
+			<h2>Offset</h2>
+			<p>This transaction offsets:
+				<a href="/transactions/{tx.offsets_expense.id}">
+					{tx.offsets_expense.merchant_name || tx.offsets_expense.naam || 'Transaction'}
+					— {formatEuro(tx.offsets_expense.bedrag)} ({formatDate(tx.offsets_expense.datum)})
+				</a>
+			</p>
+		</div>
+	{:else if tx.bedrag < 0}
+		<div class="card offset-section">
+			<h2>Offsets</h2>
+			{#if tx.offsets.length > 0}
+				<div class="offset-list">
+					{#each tx.offsets as offset}
+						<div class="offset-row">
+							<a href="/transactions/{offset.id}" class="offset-link">
+								{offset.merchant_name || offset.naam || 'Transaction'}
+								— {formatDate(offset.datum)}
+							</a>
+							<span class="offset-amount positive">{formatEuro(offset.bedrag)}</span>
+							<button class="offset-unlink" onclick={() => handleUnlinkOffset(offset.id)} title="Remove offset">&times;</button>
+						</div>
+					{/each}
+					<div class="offset-net">
+						<span>Net amount:</span>
+						<span class="offset-net-value">{formatEuro(netAmount)}</span>
+					</div>
+				</div>
+			{/if}
+
+			{#if showOffsetSearch}
+				<div class="offset-search">
+					<input
+						type="text"
+						placeholder="Search income transactions..."
+						value={offsetSearch}
+						oninput={handleOffsetSearch}
+					/>
+					{#if offsetResults.length > 0}
+						<div class="offset-results">
+							{#each offsetResults as result}
+								<button class="offset-result-row" onclick={() => handleLinkOffset(result.id)}>
+									<span>{result.merchant_name || result.naam || result.omschrijving.substring(0, 40)}</span>
+									<span class="positive">{formatEuro(result.bedrag)}</span>
+									<span class="offset-result-date">{formatDate(result.datum)}</span>
+								</button>
+							{/each}
+						</div>
+					{:else if offsetSearch.trim() && !offsetSearching}
+						<p class="muted" style="margin: 0.5rem 0 0">No income transactions found.</p>
+					{/if}
+					<button class="cancel-btn" style="margin-top: 0.5rem" onclick={() => { showOffsetSearch = false; offsetSearch = ''; offsetResults = []; }}>Cancel</button>
+				</div>
+			{:else}
+				<button class="add-row-btn" onclick={() => { showOffsetSearch = true; }}>+ Link offset</button>
 			{/if}
 		</div>
+	{/if}
+
+	<div class="card">
+		<h2>Line Items</h2>
 
 		{#if editing}
 			<table>
@@ -212,12 +338,21 @@
 						<tr>
 							<td><input type="text" bind:value={item.description} placeholder="Description" /></td>
 							<td><CategoryInput value={item.category} onchange={(v) => { editItems[i].category = v; }} placeholder="Category" /></td>
-							<td><input type="number" step="0.01" bind:value={item.amount} class="amt-input" placeholder="0.00" /></td>
+							<td><input type="text" bind:value={item.amount} class="amt-input" placeholder="0.00" onblur={() => { item.amount = resolveAmount(item.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); item.amount = resolveAmount(item.amount); }}} /></td>
 							<td><button class="remove-btn" onclick={() => removeRow(i)}>x</button></td>
 						</tr>
 					{/each}
 				</tbody>
 			</table>
+
+			{#if remainingItem}
+				<div class="remaining-row-edit">
+					<span class="remaining-label">Remaining</span>
+					<span class="remaining-amount">{formatEuro(remainingItem.amount)}</span>
+					<span class="remaining-note">Auto-calculated after save</span>
+				</div>
+			{/if}
+
 			<div class="edit-actions">
 				<button class="add-row-btn" onclick={addRow}>+ Add row</button>
 				<div class="edit-actions-right">
@@ -227,8 +362,6 @@
 					</button>
 				</div>
 			</div>
-		{:else if tx.line_items.length === 0}
-			<p class="muted">No line items yet.</p>
 		{:else}
 			<table>
 				<thead>
@@ -239,14 +372,12 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each tx.line_items as item}
+					{#each explicitItems as item}
 						<tr>
 							<td>{item.description}</td>
 							<td>
 								{#if item.category}
-									{#each item.category.split(',').map((s) => s.trim()).filter(Boolean) as cat}
-										<span class="cat-badge">{cat}</span>
-									{/each}
+									<span class="cat-badge">{item.category}</span>
 								{:else}
 									<span class="muted">-</span>
 								{/if}
@@ -254,16 +385,40 @@
 							<td class="right">{formatEuro(item.amount * item.quantity)}</td>
 						</tr>
 					{/each}
+					{#if remainingItem}
+						<tr class="remaining-row">
+							<td><span class="remaining-label">Remaining</span></td>
+							<td>
+								<div class="remaining-cat-input">
+									<CategoryInput
+										value={remainingItem.category || ''}
+										onchange={(v) => handleRemainingCategoryChange(remainingItem!.id, v)}
+										placeholder="Category"
+									/>
+								</div>
+							</td>
+							<td class="right">{formatEuro(remainingItem.amount * remainingItem.quantity)}</td>
+						</tr>
+					{/if}
 				</tbody>
-				<tfoot>
-					<tr>
-						<td colspan="2"><strong>Total</strong></td>
-						<td class="right">
-							<strong>{formatEuro(tx.line_items.reduce((s, i) => s + i.amount * i.quantity, 0))}</strong>
-						</td>
-					</tr>
-				</tfoot>
+				{#if tx.line_items.length > 0}
+					<tfoot>
+						<tr>
+							<td colspan="2"><strong>Total</strong></td>
+							<td class="right">
+								<strong>{formatEuro(tx.line_items.reduce((s, i) => s + i.amount * i.quantity, 0))}</strong>
+							</td>
+						</tr>
+					</tfoot>
+				{/if}
 			</table>
+
+			<div class="edit-actions">
+				<button class="add-row-btn" onclick={addRow}>+ Add row</button>
+				{#if explicitItems.length > 0}
+					<button class="edit-btn" onclick={startEditing}>Edit</button>
+				{/if}
+			</div>
 		{/if}
 	</div>
 {/if}
@@ -318,15 +473,11 @@
 		color: #666;
 		flex: 0 0 auto;
 	}
-	.category-selector select {
-		padding: 0.35rem 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
-		font-size: 0.9rem;
-		background: white;
+	.cat-input-wrap {
 		min-width: 200px;
+		max-width: 350px;
+		flex: 1;
 	}
-	.category-selector select:focus { outline: none; border-color: #2d6a4f; }
 	.saving-indicator { font-size: 0.8rem; color: #666; }
 	.details {
 		margin-top: 1.25rem;
@@ -394,6 +545,40 @@
 		border-radius: 4px;
 		font-size: 0.8rem;
 		margin: 0.1rem 0.15rem 0.1rem 0;
+	}
+
+	/* Remaining line item styling */
+	.remaining-row {
+		background: #f8fafc;
+		border-top: 2px dashed #d1d5db;
+	}
+	.remaining-label {
+		color: #6b7280;
+		font-style: italic;
+		font-size: 0.85rem;
+	}
+	.remaining-cat-input {
+		max-width: 250px;
+	}
+
+	.remaining-row-edit {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding: 0.75rem 0.5rem;
+		margin-top: 0.5rem;
+		background: #f8fafc;
+		border-top: 2px dashed #d1d5db;
+		border-radius: 0 0 4px 4px;
+	}
+	.remaining-amount {
+		font-weight: 500;
+		font-size: 0.9rem;
+	}
+	.remaining-note {
+		color: #9ca3af;
+		font-size: 0.8rem;
+		font-style: italic;
 	}
 
 	td input[type="text"], td input[type="number"] {
@@ -464,4 +649,73 @@
 		cursor: pointer;
 		font-size: 1rem;
 	}
+
+	/* Offsets */
+	.offset-section h2 { margin-bottom: 0.75rem; }
+	.offset-list { margin-bottom: 0.75rem; }
+	.offset-row {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.4rem 0;
+		border-bottom: 1px solid #f0f0f0;
+	}
+	.offset-link {
+		flex: 1;
+		color: #2d6a4f;
+		text-decoration: none;
+		font-size: 0.9rem;
+	}
+	.offset-link:hover { text-decoration: underline; }
+	.offset-amount { font-weight: 600; font-size: 0.9rem; }
+	.offset-unlink {
+		background: none;
+		border: none;
+		color: #9ca3af;
+		cursor: pointer;
+		font-size: 1.1rem;
+		padding: 0;
+	}
+	.offset-unlink:hover { color: #dc2626; }
+	.offset-net {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 0.6rem 0 0;
+		margin-top: 0.25rem;
+		border-top: 2px solid #e5e7eb;
+		font-weight: 600;
+		font-size: 0.9rem;
+	}
+	.offset-net-value { font-size: 1rem; }
+	.offset-search { margin-top: 0.5rem; }
+	.offset-search input {
+		width: 100%;
+		padding: 0.4rem 0.6rem;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		font-size: 0.9rem;
+	}
+	.offset-results {
+		border: 1px solid #ddd;
+		border-top: none;
+		border-radius: 0 0 6px 6px;
+		max-height: 200px;
+		overflow-y: auto;
+	}
+	.offset-result-row {
+		display: flex;
+		gap: 0.75rem;
+		width: 100%;
+		padding: 0.5rem 0.6rem;
+		background: none;
+		border: none;
+		border-bottom: 1px solid #f0f0f0;
+		cursor: pointer;
+		text-align: left;
+		font-size: 0.85rem;
+	}
+	.offset-result-row:hover { background: #f0fdf4; }
+	.offset-result-row span:first-child { flex: 1; }
+	.offset-result-date { color: #999; font-size: 0.8rem; }
 </style>

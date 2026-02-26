@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..config import UPLOADS_DIR
 from ..database import get_db
 from ..models import LineItem, Receipt, Transaction
+from ..services.remaining import recalculate_remaining
 from ..schemas import (
     ReceiptCreateResponse,
     ReceiptDetail,
@@ -93,9 +94,41 @@ async def create_receipt(file: UploadFile = File(...), db: Session = Depends(get
     matches = find_matches([receipt], list(unlinked_txs))
     for match in matches:
         if match["auto_link"]:
+            tx = db.get(Transaction, match["transaction_id"])
+
+            # If transaction already has a virtual receipt, merge it
+            existing_receipt = db.execute(
+                select(Receipt).where(
+                    Receipt.transaction_id == match["transaction_id"],
+                    Receipt.id != receipt.id,
+                )
+            ).scalar_one_or_none()
+            if existing_receipt:
+                # Delete old virtual receipt's items (including remaining)
+                for old_li in list(existing_receipt.line_items):
+                    db.delete(old_li)
+                db.delete(existing_receipt)
+                db.flush()
+
             receipt.transaction_id = match["transaction_id"]
             receipt.match_confidence = match["confidence"]
+            db.flush()
+
+            # Add remaining line item
+            remaining_li = LineItem(
+                receipt_id=receipt.id,
+                description="Remaining",
+                amount=0,
+                quantity=1,
+                category=tx.categorie,
+                sort_order=999,
+                is_remaining=True,
+            )
+            db.add(remaining_li)
+            db.flush()
+            recalculate_remaining(db, receipt, tx.bedrag)
             db.commit()
+            break
 
     return ReceiptCreateResponse(
         id=receipt.id,
@@ -200,7 +233,7 @@ def link_receipt(receipt_id: int, transaction_id: int, db: Session = Depends(get
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    # Check transaction doesn't already have a receipt
+    # Check for existing virtual receipt on the transaction
     existing = db.execute(
         select(Receipt).where(
             Receipt.transaction_id == transaction_id,
@@ -208,10 +241,35 @@ def link_receipt(receipt_id: int, transaction_id: int, db: Session = Depends(get
         )
     ).scalar_one_or_none()
     if existing:
-        raise HTTPException(status_code=409, detail="Transaction already has a receipt")
+        # Migrate explicit line items from virtual receipt to new receipt
+        for li in list(existing.line_items):
+            if not li.is_remaining:
+                li.receipt_id = receipt.id
+            else:
+                db.delete(li)
+        db.delete(existing)
+        db.flush()
 
     receipt.transaction_id = transaction_id
     receipt.match_confidence = 1.0  # Manual link = full confidence
+    db.flush()
+
+    # Add remaining line item to the linked receipt
+    remaining = next((li for li in receipt.line_items if li.is_remaining), None)
+    if not remaining:
+        remaining = LineItem(
+            receipt_id=receipt.id,
+            description="Remaining",
+            amount=0,
+            quantity=1,
+            category=tx.categorie,
+            sort_order=999,
+            is_remaining=True,
+        )
+        db.add(remaining)
+        db.flush()
+    recalculate_remaining(db, receipt, tx.bedrag)
+
     db.commit()
     db.refresh(receipt)
     return receipt
@@ -223,6 +281,11 @@ def unlink_receipt(receipt_id: int, db: Session = Depends(get_db)):
     receipt = db.get(Receipt, receipt_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
+
+    # Remove remaining line item (no transaction amount to reference)
+    for li in list(receipt.line_items):
+        if li.is_remaining:
+            db.delete(li)
 
     receipt.transaction_id = None
     receipt.match_confidence = None

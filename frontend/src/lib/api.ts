@@ -39,6 +39,8 @@ export interface TransactionDetail extends Transaction {
 	afschriftnummer: string;
 	receipt: Receipt | null;
 	line_items: LineItem[];
+	offsets: Transaction[];
+	offsets_expense: Transaction | null;
 }
 
 export interface TransactionListResponse {
@@ -114,6 +116,14 @@ export async function updateTransaction(id: number, data: { categorie?: string }
 	});
 }
 
+export async function linkOffset(expenseId: number, incomeId: number): Promise<void> {
+	return request(`/api/transactions/${expenseId}/offsets/${incomeId}`, { method: 'POST' });
+}
+
+export async function unlinkOffset(expenseId: number, incomeId: number): Promise<void> {
+	return request(`/api/transactions/${expenseId}/offsets/${incomeId}`, { method: 'DELETE' });
+}
+
 export async function saveTransactionLineItems(txId: number, items: LineItemCreate[]): Promise<LineItem[]> {
 	return request(`/api/transactions/${txId}/line-items`, {
 		method: 'PUT',
@@ -150,6 +160,7 @@ export interface LineItem {
 	quantity: number;
 	category: string | null;
 	sort_order: number;
+	is_remaining: boolean;
 }
 
 export interface LineItemCreate {
@@ -270,8 +281,10 @@ export interface DashboardSummary {
 
 export interface CategorySpending {
 	category: string;
+	category_id: number | null;
 	total: number;
 	count: number;
+	has_children: boolean;
 }
 
 export interface SubcategorySpending {
@@ -307,6 +320,54 @@ export async function getByCategory(params: {
 		if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
 	}
 	return request(`/api/dashboard/by-category?${qs}`);
+}
+
+export interface SpendingLineItem {
+	line_item_id: number;
+	description: string;
+	amount: number;
+	quantity: number;
+	category: string | null;
+	is_remaining: boolean;
+	transaction_id: number;
+	transaction_date: string;
+	transaction_merchant: string | null;
+	transaction_amount: number;
+}
+
+export interface BreadcrumbItem {
+	id: number;
+	name: string;
+}
+
+export interface CategoryDetail {
+	category_id: number;
+	category_name: string;
+	breadcrumb: BreadcrumbItem[];
+	total: number;
+	line_items: SpendingLineItem[];
+}
+
+export async function getCategoryDetail(categoryId: number, params: {
+	date_from?: string;
+	date_to?: string;
+} = {}): Promise<CategoryDetail> {
+	const qs = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) {
+		if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+	}
+	return request(`/api/dashboard/category/${categoryId}/line-items?${qs}`);
+}
+
+export async function getCategoryChildren(categoryId: number, params: {
+	date_from?: string;
+	date_to?: string;
+} = {}): Promise<CategorySpending[]> {
+	const qs = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) {
+		if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+	}
+	return request(`/api/dashboard/by-category-children/${categoryId}?${qs}`);
 }
 
 export async function getBySubcategory(params: {

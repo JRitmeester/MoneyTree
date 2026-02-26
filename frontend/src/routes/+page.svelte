@@ -1,22 +1,24 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import {
-		getDashboardSummary, getByCategory, getBySubcategory, getMonthlyTrend,
-		formatEuro, type DashboardSummary, type CategorySpending, type SubcategorySpending, type MonthlyTrend
+		getDashboardSummary, getByCategory, getCategoryChildren, getMonthlyTrend,
+		formatEuro, type DashboardSummary, type CategorySpending, type MonthlyTrend
 	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 
 	let summary: DashboardSummary | null = $state(null);
 	let categories: CategorySpending[] = $state([]);
-	let subcategories: SubcategorySpending[] = $state([]);
 	let monthlyTrend: MonthlyTrend[] = $state([]);
 	let loading = $state(true);
-	let selectedCategory: string | null = $state(null);
 	let dateFrom = $state('');
 	let dateTo = $state('');
 
+	// Tracks expanded categories: category_id -> loaded children
+	let expandedChildren: Record<number, CategorySpending[]> = $state({});
+
 	async function load() {
 		loading = true;
+		expandedChildren = {};
 		const params: { date_from?: string; date_to?: string } = {};
 		if (dateFrom) params.date_from = dateFrom;
 		if (dateTo) params.date_to = dateTo;
@@ -34,29 +36,48 @@
 
 	$effect(() => { load(); });
 
-	async function selectCategory(cat: string) {
-		if (selectedCategory === cat) {
-			selectedCategory = null;
-			subcategories = [];
-			return;
+	async function toggleCategory(cat: CategorySpending) {
+		if (!cat.has_children || cat.category_id == null) return;
+
+		if (expandedChildren[cat.category_id]) {
+			// Collapse: remove this and all descendants
+			collapseCategory(cat.category_id);
+		} else {
+			// Expand: fetch children
+			const params: { date_from?: string; date_to?: string } = {};
+			if (dateFrom) params.date_from = dateFrom;
+			if (dateTo) params.date_to = dateTo;
+			const children = await getCategoryChildren(cat.category_id, params);
+			expandedChildren[cat.category_id] = children;
 		}
-		selectedCategory = cat;
-		const params: { categorie: string; date_from?: string; date_to?: string } = { categorie: cat };
-		if (dateFrom) params.date_from = dateFrom;
-		if (dateTo) params.date_to = dateTo;
-		subcategories = await getBySubcategory(params);
+	}
+
+	function collapseCategory(catId: number) {
+		const children = expandedChildren[catId];
+		if (children) {
+			// Recursively collapse children
+			for (const child of children) {
+				if (child.category_id != null && expandedChildren[child.category_id]) {
+					collapseCategory(child.category_id);
+				}
+			}
+		}
+		delete expandedChildren[catId];
+		expandedChildren = expandedChildren; // trigger reactivity
 	}
 
 	function handleDateChange() {
-		selectedCategory = null;
-		subcategories = [];
+		expandedChildren = {};
 		load();
 	}
 
-	// For the bar chart
 	function barWidth(value: number, max: number): string {
 		if (max === 0) return '0%';
 		return `${(value / max) * 100}%`;
+	}
+
+	function isExpanded(cat: CategorySpending): boolean {
+		return cat.category_id != null && expandedChildren[cat.category_id] !== undefined;
 	}
 </script>
 
@@ -101,40 +122,50 @@
 					<div class="category-list">
 						{#each categories as cat}
 							{@const maxTotal = categories[0]?.total || 1}
-							<button
-								class="category-row"
-								class:selected={selectedCategory === cat.category}
-								onclick={() => selectCategory(cat.category)}
-							>
-								<div class="cat-info">
-									<span class="cat-name">{cat.category}</span>
-									<span class="cat-amount">{formatEuro(cat.total)}</span>
-								</div>
-								<div class="bar-bg">
-									<div class="bar-fill" style="width: {barWidth(cat.total, maxTotal)}"></div>
-								</div>
-								<span class="cat-count">{cat.count} tx</span>
-							</button>
+							{#snippet categoryBar(item: CategorySpending, maxVal: number, depth: number)}
+								<button
+									class="category-row"
+									class:selected={isExpanded(item)}
+									class:expandable={item.has_children}
+									style="padding-left: {0.75 + depth * 1.25}rem"
+									onclick={() => toggleCategory(item)}
+								>
+									<div class="cat-info">
+										<span class="cat-name">
+											{#if item.has_children}
+												<span class="expand-icon">{isExpanded(item) ? '▼' : '▶'}</span>
+											{/if}
+											{item.category}
+										</span>
+										<span class="cat-amount">{formatEuro(item.total)}</span>
+									</div>
+									<div class="bar-bg">
+										<div class="bar-fill" style="width: {barWidth(item.total, maxVal)}"></div>
+									</div>
+									<div class="cat-footer">
+										<span class="cat-count">{item.count} transactions</span>
+										{#if item.category_id != null}
+											<a
+												class="view-link"
+												href="/spending/category/{item.category_id}?date_from={dateFrom}&date_to={dateTo}"
+												onclick={(e) => e.stopPropagation()}
+											>View &rarr;</a>
+										{/if}
+									</div>
+								</button>
 
-							{#if selectedCategory === cat.category}
-								<div class="subcategory-panel">
-									{#if subcategories.length > 0}
-										{#each subcategories as sub}
-											<div class="sub-row">
-												<span class="sub-name">{sub.category}</span>
-												<span class="sub-amount">{formatEuro(sub.total)}</span>
-												<span class="sub-count">{sub.count} items</span>
-											</div>
+								{#if item.category_id != null && expandedChildren[item.category_id]}
+									{@const children = expandedChildren[item.category_id]}
+									{@const childMax = children[0]?.total || 1}
+									<div class="children-panel" style="margin-left: {0.5 + depth * 0.5}rem">
+										{#each children as child}
+											{@render categoryBar(child, childMax, depth + 1)}
 										{/each}
-									{:else}
-										<p class="muted">No line-item data. Attach receipts to drill down.</p>
-									{/if}
-									<a
-										class="view-tx-link"
-										href="/transactions?categorie={encodeURIComponent(cat.category)}&date_from={dateFrom}&date_to={dateTo}"
-									>View {cat.count} transactions &rarr;</a>
-								</div>
-							{/if}
+									</div>
+								{/if}
+							{/snippet}
+
+							{@render categoryBar(cat, maxTotal, 0)}
 						{/each}
 					</div>
 				{/if}
@@ -233,7 +264,7 @@
 	h2 { margin: 0 0 1rem; font-size: 1.1rem; }
 	.muted { color: #999; font-style: italic; }
 
-	.category-list { display: flex; flex-direction: column; gap: 0.25rem; }
+	.category-list { display: flex; flex-direction: column; gap: 0.15rem; }
 	.category-row {
 		display: block;
 		width: 100%;
@@ -242,10 +273,11 @@
 		border: none;
 		padding: 0.5rem 0.75rem;
 		border-radius: 6px;
-		cursor: pointer;
+		cursor: default;
 		font-size: 0.9rem;
 	}
-	.category-row:hover { background: #f5f5f5; }
+	.category-row.expandable { cursor: pointer; }
+	.category-row.expandable:hover { background: #f5f5f5; }
 	.category-row.selected { background: #f0fdf4; }
 	.cat-info {
 		display: flex;
@@ -266,32 +298,35 @@
 		border-radius: 3px;
 		transition: width 0.3s;
 	}
-	.cat-count { font-size: 0.75rem; color: #999; }
-
-	.subcategory-panel {
-		margin-left: 1rem;
-		padding: 0.5rem 0.75rem;
-		border-left: 3px solid #2d6a4f;
-		margin-bottom: 0.5rem;
-	}
-	.sub-row {
+	.cat-footer {
 		display: flex;
 		justify-content: space-between;
-		padding: 0.3rem 0;
-		font-size: 0.85rem;
+		align-items: center;
 	}
-	.sub-name { flex: 1; }
-	.sub-amount { font-weight: 500; margin: 0 1rem; }
-	.sub-count { color: #999; font-size: 0.8rem; }
-	.view-tx-link {
-		display: block;
-		margin-top: 0.5rem;
-		font-size: 0.85rem;
+	.cat-count { font-size: 0.75rem; color: #999; }
+	.view-link {
+		font-size: 0.75rem;
 		color: #2d6a4f;
 		text-decoration: none;
 		font-weight: 500;
+		opacity: 0;
+		transition: opacity 0.15s;
 	}
-	.view-tx-link:hover { text-decoration: underline; }
+	.category-row:hover .view-link { opacity: 1; }
+	.view-link:hover { text-decoration: underline; }
+
+	.expand-icon {
+		display: inline-block;
+		width: 1em;
+		font-size: 0.65rem;
+		color: #999;
+		margin-right: 0.25rem;
+	}
+
+	.children-panel {
+		border-left: 3px solid #2d6a4f;
+		margin-bottom: 0.25rem;
+	}
 
 	.trend-table { font-size: 0.9rem; }
 	.trend-header {

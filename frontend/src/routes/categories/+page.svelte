@@ -10,9 +10,6 @@
 	let unmapped: string[] = $state([]);
 	let loading = $state(true);
 	let error: string | null = $state(null);
-	let newCatName = $state('');
-	let newCatParentId: number | null = $state(null);
-	let newCatType = $state('expense');
 
 	// Mapping state: bank_category -> selected category_id for each unmapped row
 	let mappingSelections: Record<string, number | null> = $state({});
@@ -37,19 +34,6 @@
 
 	$effect(() => { load(); });
 
-	async function handleCreate() {
-		if (!newCatName.trim()) return;
-		try {
-			await createCategory(newCatName.trim(), newCatParentId ?? undefined, newCatType);
-			newCatName = '';
-			newCatParentId = null;
-			newCatType = 'expense';
-			await load();
-		} catch (e: any) {
-			error = e.message;
-		}
-	}
-
 	async function handleDelete(id: number) {
 		if (!confirm('Delete this category?')) return;
 		try {
@@ -58,6 +42,44 @@
 		} catch (e: any) {
 			error = e.message;
 		}
+	}
+
+	// Inline add subcategory
+	let addingSubTo: number | null = $state(null);
+	let newSubName = $state('');
+	let subInputEl: HTMLInputElement | undefined = $state(undefined);
+
+	function startAddSub(parentId: number) {
+		addingSubTo = parentId;
+		newSubName = '';
+		// Focus after DOM updates
+		setTimeout(() => subInputEl?.focus(), 0);
+	}
+
+	function cancelAddSub() {
+		addingSubTo = null;
+		newSubName = '';
+	}
+
+	async function handleAddSub(parent: Category) {
+		if (!newSubName.trim()) return;
+		try {
+			await createCategory(newSubName.trim(), parent.id, parent.category_type);
+			addingSubTo = null;
+			newSubName = '';
+			await load();
+		} catch (e: any) {
+			if (e.message?.includes('409')) {
+				error = 'This category already exists.';
+			} else {
+				error = e.message;
+			}
+		}
+	}
+
+	function handleSubKeydown(e: KeyboardEvent, parent: Category) {
+		if (e.key === 'Enter') handleAddSub(parent);
+		if (e.key === 'Escape') cancelAddSub();
 	}
 
 	// Inline rename
@@ -145,21 +167,6 @@
 	<div class="error">{error}</div>
 {/if}
 
-<div class="add-form">
-	<input type="text" bind:value={newCatName} placeholder="New category name" />
-	<select bind:value={newCatParentId}>
-		<option value={null}>Top-level</option>
-		{#each flatList(categories) as opt}
-			<option value={opt.id}>{'—'.repeat(opt.depth)} {opt.name}</option>
-		{/each}
-	</select>
-	<select bind:value={newCatType}>
-		<option value="expense">Expense</option>
-		<option value="income">Income</option>
-	</select>
-	<button onclick={handleCreate}>Add</button>
-</div>
-
 {#if loading}
 	<div class="loading">Loading...</div>
 {:else}
@@ -167,8 +174,8 @@
 		<p class="muted">No categories yet. Import a CSV to seed bank categories.</p>
 	{:else}
 		<div class="tree">
-			{#each categories as cat}
-				<div class="cat-item top">
+			{#snippet catNode(cat: Category, depth: number)}
+				<div class="cat-item" class:top={depth === 0} class:child={depth > 0} style={depth > 0 ? `margin-left: ${depth * 1.5}rem` : ''}>
 					<div class="cat-row">
 						{#if editingId === cat.id}
 							<input
@@ -182,58 +189,52 @@
 						{:else}
 							<span class="cat-name" ondblclick={() => startRename(cat)} title="Double-click to rename">{cat.name}</span>
 						{/if}
-						<button
-							class="badge type-badge"
-							class:income-badge={cat.category_type === 'income'}
-							class:expense-badge={cat.category_type === 'expense'}
-							onclick={() => handleToggleType(cat)}
-							title="Click to toggle type"
-						>
-							{cat.category_type}
-						</button>
-						{#if cat.is_bank_category}
-							<span class="badge bank">Bank</span>
-						{/if}
-						{#if !cat.children.length}
-							<button class="del-btn" onclick={() => handleDelete(cat.id)}>Delete</button>
-						{/if}
+						<button class="add-sub-btn" onclick={() => startAddSub(cat.id)} title="Add subcategory">+</button>
+						<span class="col-bank">
+							{#if cat.is_bank_category}
+								<span class="badge bank">Bank</span>
+							{/if}
+						</span>
+						<span class="col-type">
+							<button
+								class="badge type-badge"
+								class:income-badge={cat.category_type === 'income'}
+								class:expense-badge={cat.category_type === 'expense'}
+								onclick={() => handleToggleType(cat)}
+								title="Click to toggle type"
+							>
+								{cat.category_type === 'income' ? 'Income' : 'Expense'}
+							</button>
+						</span>
+						<span class="col-delete">
+							{#if !cat.children.length}
+								<button class="del-btn" onclick={() => handleDelete(cat.id)}>Delete</button>
+							{/if}
+						</span>
 					</div>
 					{#if cat.children.length > 0}
 						{#each cat.children as child}
-							<div class="cat-item child">
-								<div class="cat-row">
-									{#if editingId === child.id}
-									<input
-										class="rename-input"
-										type="text"
-										bind:value={editingName}
-										onblur={() => saveRename(child)}
-										onkeydown={(e) => handleRenameKeydown(e, child)}
-										autofocus
-									/>
-								{:else}
-									<span class="cat-name" ondblclick={() => startRename(child)} title="Double-click to rename">{child.name}</span>
-								{/if}
-									<button
-										class="badge type-badge"
-										class:income-badge={child.category_type === 'income'}
-										class:expense-badge={child.category_type === 'expense'}
-										onclick={() => handleToggleType(child)}
-										title="Click to toggle type"
-									>
-										{child.category_type}
-									</button>
-									{#if child.is_bank_category}
-										<span class="badge bank">Bank</span>
-									{/if}
-									{#if !child.children.length}
-										<button class="del-btn" onclick={() => handleDelete(child.id)}>Delete</button>
-									{/if}
-								</div>
-							</div>
+							{@render catNode(child, depth + 1)}
 						{/each}
 					{/if}
+					{#if addingSubTo === cat.id}
+						<div class="add-sub-inline">
+							<input
+								class="rename-input"
+								type="text"
+								bind:this={subInputEl}
+								bind:value={newSubName}
+								onkeydown={(e) => handleSubKeydown(e, cat)}
+								placeholder="Subcategory name..."
+							/>
+							<button class="cancel-sub-btn" onclick={cancelAddSub} title="Cancel">&times;</button>
+						</div>
+					{/if}
 				</div>
+			{/snippet}
+
+			{#each categories as cat}
+				{@render catNode(cat, 0)}
 			{/each}
 		</div>
 	{/if}
@@ -302,33 +303,6 @@
 	.loading { text-align: center; padding: 3rem; color: #666; }
 	.muted { color: #999; font-style: italic; }
 
-	.add-form {
-		display: flex;
-		gap: 0.5rem;
-		align-items: center;
-		background: white;
-		padding: 1rem;
-		border-radius: 8px;
-		margin-bottom: 1.5rem;
-		flex-wrap: wrap;
-	}
-	.add-form input, .add-form select {
-		padding: 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
-		font-size: 0.9rem;
-	}
-	.add-form input { flex: 1; min-width: 150px; }
-	.add-form button {
-		padding: 0.5rem 1.25rem;
-		background: #2d6a4f;
-		color: white;
-		border: none;
-		border-radius: 6px;
-		cursor: pointer;
-		font-size: 0.9rem;
-	}
-
 	.tree {
 		background: white;
 		border-radius: 8px;
@@ -341,7 +315,6 @@
 		border-bottom: none;
 	}
 	.cat-item.child {
-		margin-left: 1.5rem;
 		border-left: 2px solid #e5e7eb;
 		padding-left: 0.75rem;
 	}
@@ -355,6 +328,24 @@
 		flex: 1;
 		font-weight: 500;
 		cursor: default;
+	}
+	.col-bank {
+		display: inline-block;
+		width: 40px;
+		text-align: center;
+		flex-shrink: 0;
+	}
+	.col-type {
+		display: inline-block;
+		width: 65px;
+		text-align: center;
+		flex-shrink: 0;
+	}
+	.col-delete {
+		display: inline-block;
+		width: 50px;
+		text-align: center;
+		flex-shrink: 0;
 	}
 	.cat-name:hover { text-decoration: underline dotted #ccc; }
 	.rename-input {
@@ -388,6 +379,59 @@
 	.expense-badge {
 		background: #fef2f2;
 		color: #dc2626;
+	}
+	.add-sub-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		padding: 0;
+		background: none;
+		border: 1px solid transparent;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 1rem;
+		font-weight: 600;
+		color: #9ca3af;
+		opacity: 0;
+		transition: opacity 0.15s;
+	}
+	.cat-row:hover .add-sub-btn {
+		opacity: 1;
+	}
+	.add-sub-btn:hover {
+		color: #2d6a4f;
+		border-color: #2d6a4f;
+		background: #f0fdf4;
+	}
+	.add-sub-inline {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.3rem 0.5rem 0.5rem 0.75rem;
+		margin-left: 1.5rem;
+		border-left: 2px solid #e5e7eb;
+	}
+	.cancel-sub-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		padding: 0;
+		background: none;
+		border: 1px solid transparent;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 1rem;
+		font-weight: 600;
+		color: #9ca3af;
+	}
+	.cancel-sub-btn:hover {
+		color: #dc2626;
+		border-color: #dc2626;
+		background: #fef2f2;
 	}
 	.del-btn {
 		padding: 0.2rem 0.6rem;

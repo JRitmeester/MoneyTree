@@ -7,9 +7,9 @@
 		placeholder?: string;
 	}
 
-	let { value, onchange, placeholder = 'Add category...' }: Props = $props();
+	let { value, onchange, placeholder = 'Select category...' }: Props = $props();
 
-	let tags: string[] = $state([]);
+	let currentValue = $derived(value?.trim() || '');
 	let inputValue = $state('');
 	let suggestions: string[] = $state([]);
 	let showDropdown = $state(false);
@@ -17,6 +17,7 @@
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 	let inputEl: HTMLInputElement | undefined = $state(undefined);
 	let containerEl: HTMLDivElement | undefined = $state(undefined);
+	let editing = $state(false);
 
 	// Category tree from the Category table, flattened to "Parent > Child" paths
 	let categoryPaths: string[] = $state([]);
@@ -44,36 +45,33 @@
 		}
 	});
 
-	// Parse initial value into tags
-	$effect(() => {
-		const parsed = value
-			? value.split(',').map((s) => s.trim()).filter(Boolean)
-			: [];
-		if (JSON.stringify(parsed) !== JSON.stringify(tags)) {
-			tags = parsed;
-		}
-	});
-
-	function emitChange(newTags: string[]) {
-		tags = newTags;
-		onchange(newTags.join(', '));
-	}
-
-	async function addTag(tag: string) {
-		const trimmed = tag.trim();
+	function selectCategory(cat: string) {
+		const trimmed = cat.trim();
 		if (!trimmed) return;
-		if (tags.some((t) => t.toLowerCase() === trimmed.toLowerCase())) return;
 
 		// If tag contains ">", ensure the categories exist in the Category table
 		if (trimmed.includes('>')) {
-			await ensureCategoryPath(trimmed);
+			ensureCategoryPath(trimmed);
 		}
 
-		emitChange([...tags, trimmed]);
+		onchange(trimmed);
 		inputValue = '';
 		suggestions = [];
 		showDropdown = false;
 		highlightIndex = -1;
+		editing = false;
+	}
+
+	function clearValue() {
+		onchange('');
+		editing = true;
+		setTimeout(() => inputEl?.focus(), 0);
+	}
+
+	function startEditing() {
+		editing = true;
+		inputValue = '';
+		setTimeout(() => inputEl?.focus(), 0);
 	}
 
 	async function ensureCategoryPath(path: string) {
@@ -81,27 +79,23 @@
 		if (parts.length === 0) return;
 
 		try {
-			// Reload categories to get current state
 			const cats = await getCategories();
 			let parentId: number | undefined = undefined;
 
 			for (const part of parts) {
-				// Search for existing category at this level
 				const existing = findCategory(cats, part, parentId ?? null);
 				if (existing) {
 					parentId = existing.id;
 				} else {
-					// Create it
 					const created = await createCategory(part, parentId);
 					parentId = created.id;
 				}
 			}
 
-			// Refresh paths
 			const updatedCats = await getCategories();
 			categoryPaths = flattenCategories(updatedCats);
 		} catch {
-			// Silently continue — the tag still gets added as a string
+			// Silently continue
 		}
 	}
 
@@ -118,10 +112,6 @@
 		return null;
 	}
 
-	function removeTag(index: number) {
-		emitChange(tags.filter((_, i) => i !== index));
-	}
-
 	async function fetchSuggestions(query: string) {
 		if (!query.trim()) {
 			suggestions = [];
@@ -131,24 +121,17 @@
 		try {
 			const q = query.trim().toLowerCase();
 
-			// Get existing line item tags
 			const lineItemTags = await getLineItemCategories(query);
 
-			// Filter category paths that match
 			const matchingPaths = categoryPaths.filter(p =>
 				p.toLowerCase().includes(q)
 			);
 
-			// Merge and deduplicate
 			const all = new Set<string>();
 			for (const p of matchingPaths) all.add(p);
 			for (const t of lineItemTags) all.add(t);
 
-			// Filter out already-selected tags
-			suggestions = [...all].filter(
-				(r) => !tags.some((t) => t.toLowerCase() === r.toLowerCase())
-			).sort((a, b) => {
-				// Prioritize matches that start with the query
+			suggestions = [...all].sort((a, b) => {
 				const aStarts = a.toLowerCase().startsWith(q) || a.split(' > ').pop()!.toLowerCase().startsWith(q);
 				const bStarts = b.toLowerCase().startsWith(q) || b.split(' > ').pop()!.toLowerCase().startsWith(q);
 				if (aStarts && !bStarts) return -1;
@@ -176,11 +159,11 @@
 		if (e.key === 'Enter') {
 			e.preventDefault();
 			if (highlightIndex >= 0 && highlightIndex < suggestions.length) {
-				addTag(suggestions[highlightIndex]);
+				selectCategory(suggestions[highlightIndex]);
 			} else if (highlightIndex === suggestions.length && hasAddNew) {
-				addTag(inputValue);
+				selectCategory(inputValue);
 			} else if (inputValue.trim()) {
-				addTag(inputValue);
+				selectCategory(inputValue);
 			}
 		} else if (e.key === 'ArrowDown') {
 			e.preventDefault();
@@ -195,8 +178,11 @@
 		} else if (e.key === 'Escape') {
 			showDropdown = false;
 			highlightIndex = -1;
-		} else if (e.key === 'Backspace' && !inputValue && tags.length > 0) {
-			removeTag(tags.length - 1);
+			if (!currentValue) {
+				editing = false;
+			}
+		} else if (e.key === 'Backspace' && !inputValue && currentValue) {
+			clearValue();
 		}
 	}
 
@@ -205,7 +191,11 @@
 			if (!containerEl?.contains(document.activeElement)) {
 				showDropdown = false;
 				if (inputValue.trim()) {
-					addTag(inputValue);
+					selectCategory(inputValue);
+				} else if (!currentValue) {
+					editing = false;
+				} else {
+					editing = false;
 				}
 			}
 		}, 150);
@@ -232,30 +222,33 @@
 </script>
 
 <div class="category-input" bind:this={containerEl}>
-	<div class="tags-area" onclick={() => inputEl?.focus()}>
-		<span class="info-icon" title="Type to search existing categories. Use &quot;>&quot; to create subcategories, e.g. &quot;Hardware Store > Paint&quot; creates Paint as a subcategory of Hardware Store.">i</span>
-		{#each tags as tag, i}
+	{#if currentValue && !editing}
+		<div class="tags-area" onclick={startEditing}>
 			<span class="tag">
-				{tag}
+				{currentValue}
 				<button
 					type="button"
 					class="tag-remove"
-					onclick={(e) => { e.stopPropagation(); removeTag(i); }}
+					onclick={(e) => { e.stopPropagation(); clearValue(); }}
 				>&times;</button>
 			</span>
-		{/each}
-		<input
-			bind:this={inputEl}
-			bind:value={inputValue}
-			oninput={handleInput}
-			onkeydown={handleKeydown}
-			onblur={handleBlur}
-			onfocus={handleFocus}
-			placeholder={tags.length === 0 ? placeholder : ''}
-			type="text"
-			class="tag-input"
-		/>
-	</div>
+		</div>
+	{:else}
+		<div class="tags-area" onclick={() => inputEl?.focus()}>
+			<span class="info-icon" title="Type to search existing categories. Use &quot;>&quot; to create subcategories, e.g. &quot;Hardware Store > Paint&quot;">i</span>
+			<input
+				bind:this={inputEl}
+				bind:value={inputValue}
+				oninput={handleInput}
+				onkeydown={handleKeydown}
+				onblur={handleBlur}
+				onfocus={handleFocus}
+				placeholder={placeholder}
+				type="text"
+				class="tag-input"
+			/>
+		</div>
+	{/if}
 
 	{#if showDropdown}
 		{@const exactMatch = suggestions.some(s => s.toLowerCase() === inputValue.trim().toLowerCase())}
@@ -266,7 +259,7 @@
 						type="button"
 						class="dropdown-item"
 						class:highlighted={i === highlightIndex}
-						onmousedown={(e) => { e.preventDefault(); addTag(suggestion); }}
+						onmousedown={(e) => { e.preventDefault(); selectCategory(suggestion); }}
 					>
 						{#if suggestion.includes(' > ')}
 							{@const parts = suggestion.split(' > ')}
@@ -285,7 +278,7 @@
 						type="button"
 						class="dropdown-item add-new"
 						class:highlighted={highlightIndex === suggestions.length}
-						onmousedown={(e) => { e.preventDefault(); addTag(inputValue); }}
+						onmousedown={(e) => { e.preventDefault(); selectCategory(inputValue); }}
 					>
 						{formatAddNew(inputValue)}
 					</button>

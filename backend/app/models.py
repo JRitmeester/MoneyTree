@@ -38,6 +38,36 @@ class Transaction(Base):
 
     receipt: Mapped["Receipt | None"] = relationship(back_populates="transaction")
 
+    # Offsets: TransactionOffset rows where this tx is the expense
+    offset_links: Mapped[list["TransactionOffset"]] = relationship(
+        foreign_keys="TransactionOffset.expense_transaction_id",
+        cascade="all, delete-orphan",
+    )
+    # If this income transaction is an offset for an expense
+    offset_of_link: Mapped["TransactionOffset | None"] = relationship(
+        foreign_keys="TransactionOffset.income_transaction_id",
+        uselist=False,
+    )
+
+
+class TransactionOffset(Base):
+    __tablename__ = "transaction_offsets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    expense_transaction_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("transactions.id"), nullable=False
+    )
+    income_transaction_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("transactions.id"), nullable=False, unique=True
+    )
+
+    expense_transaction: Mapped["Transaction"] = relationship(
+        foreign_keys=[expense_transaction_id], overlaps="offsets"
+    )
+    income_transaction: Mapped["Transaction"] = relationship(
+        foreign_keys=[income_transaction_id], overlaps="offset_of"
+    )
+
 
 class Receipt(Base):
     __tablename__ = "receipts"
@@ -70,6 +100,7 @@ class LineItem(Base):
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     category: Mapped[str | None] = mapped_column(String(100))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_remaining: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     receipt: Mapped["Receipt"] = relationship(back_populates="line_items")
 

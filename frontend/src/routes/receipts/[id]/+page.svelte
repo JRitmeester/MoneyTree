@@ -7,6 +7,7 @@
 		type ReceiptDetail, type LineItemCreate
 	} from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
+	import { resolveAmount, evaluateExpression } from '$lib/calc';
 
 	let receipt: ReceiptDetail | null = $state(null);
 	let loading = $state(true);
@@ -81,7 +82,7 @@
 		if (editingItemId == null) return;
 		await updateLineItem(editingItemId, {
 			description: editItem.description,
-			amount: parseFloat(editItem.amount) || 0,
+			amount: evaluateExpression(editItem.amount) || 0,
 			category: editItem.category || null,
 		});
 		editingItemId = null;
@@ -171,31 +172,40 @@
 						</thead>
 						<tbody>
 							{#each receipt.line_items as item}
-								{#if editingItemId === item.id}
+								{#if editingItemId === item.id && !item.is_remaining}
 									<tr>
 										<td><input type="text" bind:value={editItem.description} /></td>
 										<td><CategoryInput value={editItem.category} onchange={(v) => { editItem.category = v; }} placeholder="Category" /></td>
-										<td><input type="number" step="0.01" bind:value={editItem.amount} class="amt-input" /></td>
+										<td><input type="text" bind:value={editItem.amount} class="amt-input" onblur={() => { editItem.amount = resolveAmount(editItem.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); editItem.amount = resolveAmount(editItem.amount); }}} /></td>
 										<td>
 											<button class="save-btn" onclick={saveEditItem}>Save</button>
 											<button class="cancel-btn" onclick={() => { editingItemId = null; }}>Cancel</button>
 										</td>
 									</tr>
 								{:else}
-									<tr onclick={() => startEditItem(item)}>
-										<td>{item.description}</td>
+									<tr
+										class:remaining-row={item.is_remaining}
+										onclick={() => { if (!item.is_remaining) startEditItem(item); }}
+									>
+										<td>
+											{#if item.is_remaining}
+												<span class="remaining-label">Remaining</span>
+											{:else}
+												{item.description}
+											{/if}
+										</td>
 										<td>
 											{#if item.category}
-												{#each item.category.split(',').map((s: string) => s.trim()).filter(Boolean) as cat}
-													<span class="badge">{cat}</span>
-												{/each}
+												<span class="badge">{item.category}</span>
 											{:else}
 												<span class="muted">-</span>
 											{/if}
 										</td>
 										<td class="right">{formatEuro(item.amount * item.quantity)}</td>
 										<td>
-											<button class="remove-btn" onclick={(e: MouseEvent) => { e.stopPropagation(); handleDeleteLineItem(item.id); }}>x</button>
+											{#if !item.is_remaining}
+												<button class="remove-btn" onclick={(e: MouseEvent) => { e.stopPropagation(); handleDeleteLineItem(item.id); }}>x</button>
+											{/if}
 										</td>
 									</tr>
 								{/if}
@@ -369,6 +379,16 @@
 		margin: 0.1rem 0.15rem 0.1rem 0;
 	}
 	.muted { color: #999; font-style: italic; }
+	.remaining-row {
+		background: #f8fafc;
+		border-top: 2px dashed #d1d5db;
+		cursor: default !important;
+	}
+	.remaining-label {
+		color: #6b7280;
+		font-style: italic;
+		font-size: 0.85rem;
+	}
 	.remove-btn {
 		background: none;
 		border: none;
