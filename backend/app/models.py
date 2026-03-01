@@ -112,6 +112,7 @@ class Category(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     parent_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
     is_bank_category: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_fixed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     category_type: Mapped[str] = mapped_column(String(10), default="expense", nullable=False)
 
     children: Mapped[list["Category"]] = relationship(back_populates="parent")
@@ -168,3 +169,15 @@ class BudgetLine(Base):
     __table_args__ = (
         UniqueConstraint("budget_id", "category_id", name="uq_budget_line_category"),
     )
+
+
+class BudgetTemplate(Base):
+    __tablename__ = "budget_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    category_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("categories.id"), unique=True, nullable=False
+    )
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+
+    category: Mapped["Category"] = relationship()
