@@ -410,7 +410,7 @@ export async function createCategory(name: string, parent_id?: number, category_
 	});
 }
 
-export async function updateCategory(id: number, data: { name: string; parent_id?: number | null; category_type?: string }): Promise<Category> {
+export async function updateCategory(id: number, data: { name: string; parent_id?: number | null; category_type?: string; is_fixed?: boolean }): Promise<Category> {
 	return request(`/api/categories/${id}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },

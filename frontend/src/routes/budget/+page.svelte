@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import {
-		getBudget, getBudgetTemplate, updateBudget,
+		getBudget, getBudgetTemplate, updateBudget, updateCategory,
 		getBudgetVsActual, getCategories, deleteBudget,
 		formatEuro, formatDate,
 		type Budget, type BudgetTemplate, type BudgetVsActualSummary, type BudgetVsActualLine, type Category
@@ -31,6 +31,7 @@
 	let editLines: { category_id: number; category_name: string; category_type: string; is_fixed: boolean; amount: number }[] = $state([]);
 	let updateTemplateChecked = $state(true);
 	let addCategoryId: number | null = $state(null);
+	let addPlacement: 'income' | 'fixed' | 'flexible' = $state('flexible');
 
 	// --- Derived ---
 	let monthLabel = $derived(`${MONTH_NAMES[currentMonth - 1]} ${currentYear}`);
@@ -154,16 +155,30 @@
 		editing = true;
 	}
 
-	function addBudgetLine() {
+	async function addBudgetLine() {
 		if (addCategoryId == null) return;
 		const flat = flatCategories(categories);
 		const cat = flat.find(c => c.id === addCategoryId);
 		if (!cat) return;
+
+		const newType = addPlacement === 'income' ? 'income' : 'expense';
+		const newFixed = addPlacement === 'fixed';
+
+		// Update category on backend if type or fixed status changed
+		if (cat.category_type !== newType || cat.is_fixed !== newFixed) {
+			try {
+				await updateCategory(cat.id, { name: cat.name, category_type: newType, is_fixed: newFixed });
+			} catch (e: any) {
+				error = e.message;
+				return;
+			}
+		}
+
 		editLines = [...editLines, {
 			category_id: cat.id,
 			category_name: cat.name,
-			category_type: cat.category_type,
-			is_fixed: cat.is_fixed,
+			category_type: newType,
+			is_fixed: newFixed,
 			amount: 0,
 		}];
 		addCategoryId = null;
@@ -388,10 +403,15 @@
 			<div class="edit-controls">
 				<div class="add-line-row">
 					<select bind:value={addCategoryId}>
-						<option value={null}>-- Add a category --</option>
+						<option value={null}>-- Select category --</option>
 						{#each availableCategories as cat}
-							<option value={cat.id}>{'--'.repeat(cat.depth)}{cat.depth ? ' ' : ''}{cat.name} ({cat.category_type}{cat.is_fixed ? ', fixed' : ''})</option>
+							<option value={cat.id}>{'--'.repeat(cat.depth)}{cat.depth ? ' ' : ''}{cat.name}</option>
 						{/each}
+					</select>
+					<select bind:value={addPlacement} class="placement-select">
+						<option value="income">Income</option>
+						<option value="fixed">Fixed Expense</option>
+						<option value="flexible">Flexible Expense</option>
 					</select>
 					<button class="btn primary small" onclick={addBudgetLine} disabled={addCategoryId == null}>+ Add</button>
 				</div>
@@ -898,6 +918,10 @@
 		border: 1px solid #ddd;
 		border-radius: 6px;
 		font-size: 0.85rem;
+	}
+	.placement-select {
+		flex: 0 0 auto !important;
+		width: 160px;
 	}
 	.template-checkbox {
 		display: flex;
