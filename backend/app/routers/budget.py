@@ -3,9 +3,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Budget, BudgetLine, Category
+from ..models import Budget, BudgetLine, BudgetTemplate, Category
 from ..schemas import (
-    BudgetCreate,
     BudgetLineOut,
     BudgetOut,
     BudgetSummary,
@@ -15,17 +14,48 @@ from ..schemas import (
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
 
 
-def _budget_to_out(budget: Budget) -> BudgetOut:
-    lines = [
-        BudgetLineOut(
+def _create_from_template(db: Session, year: int, month: int) -> Budget:
+    """Create a monthly budget from the template."""
+    budget = Budget(year=year, month=month)
+    db.add(budget)
+    db.flush()
+
+    templates = db.execute(select(BudgetTemplate)).scalars().all()
+    for t in templates:
+        db.add(BudgetLine(
+            budget_id=budget.id,
+            category_id=t.category_id,
+            amount=t.amount,
+        ))
+
+    db.commit()
+    db.refresh(budget)
+    return budget
+
+
+def _budget_to_out(budget: Budget, db: Session) -> BudgetOut:
+    """Convert a budget to output format with template-awareness."""
+    # Load template amounts for comparison
+    templates = db.execute(select(BudgetTemplate)).scalars().all()
+    template_by_cat = {t.category_id: t.amount for t in templates}
+
+    lines = []
+    for line in budget.lines:
+        cat = line.category
+        template_amount = template_by_cat.get(line.category_id, 0.0)
+        is_overridden = abs(line.amount - template_amount) > 0.001
+
+        lines.append(BudgetLineOut(
             id=line.id,
             category_id=line.category_id,
-            category_name=line.category.name,
-            category_type=line.category.category_type,
+            category_name=cat.name,
+            category_type=cat.category_type,
+            is_fixed=cat.is_fixed,
             amount=line.amount,
-        )
-        for line in budget.lines
-    ]
+            is_overridden=is_overridden,
+            template_amount=template_amount,
+        ))
+
     return BudgetOut(
         id=budget.id,
         year=budget.year,
@@ -57,49 +87,30 @@ def list_budgets(db: Session = Depends(get_db)):
 
 @router.get("/{year}/{month}", response_model=BudgetOut)
 def get_budget(year: int, month: int, db: Session = Depends(get_db)):
-    """Get a budget for a specific month with all lines."""
+    """Get a budget for a specific month. Auto-creates from template if not exists."""
     budget = db.execute(
         select(Budget).where(Budget.year == year, Budget.month == month)
     ).scalar_one_or_none()
+
     if not budget:
-        raise HTTPException(status_code=404, detail="Budget not found")
-    return _budget_to_out(budget)
+        # Check if template has any lines
+        template_count = db.execute(select(BudgetTemplate)).scalars().all()
+        if not template_count:
+            raise HTTPException(status_code=404, detail="No budget template configured")
+        budget = _create_from_template(db, year, month)
 
-
-@router.post("", response_model=BudgetOut, status_code=201)
-def create_budget(data: BudgetCreate, db: Session = Depends(get_db)):
-    """Create a budget for a month with lines."""
-    existing = db.execute(
-        select(Budget).where(Budget.year == data.year, Budget.month == data.month)
-    ).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=409, detail="Budget already exists for this month")
-
-    budget = Budget(year=data.year, month=data.month)
-    db.add(budget)
-    db.flush()
-
-    for line_data in data.lines:
-        cat = db.get(Category, line_data.category_id)
-        if not cat:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Category {line_data.category_id} not found",
-            )
-        db.add(BudgetLine(
-            budget_id=budget.id,
-            category_id=line_data.category_id,
-            amount=line_data.amount,
-        ))
-
-    db.commit()
-    db.refresh(budget)
-    return _budget_to_out(budget)
+    return _budget_to_out(budget, db)
 
 
 @router.put("/{year}/{month}", response_model=BudgetOut)
-def update_budget(year: int, month: int, data: BudgetUpdate, db: Session = Depends(get_db)):
-    """Update a budget (replaces all lines)."""
+def update_budget(
+    year: int,
+    month: int,
+    data: BudgetUpdate,
+    update_template: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Update a budget (replaces all lines). Optionally updates template too."""
     budget = db.execute(
         select(Budget).where(Budget.year == year, Budget.month == month)
     ).scalar_one_or_none()
@@ -125,9 +136,21 @@ def update_budget(year: int, month: int, data: BudgetUpdate, db: Session = Depen
             amount=line_data.amount,
         ))
 
+    # Optionally update template
+    if update_template:
+        existing_templates = db.execute(select(BudgetTemplate)).scalars().all()
+        for t in existing_templates:
+            db.delete(t)
+        db.flush()
+        for line_data in data.lines:
+            db.add(BudgetTemplate(
+                category_id=line_data.category_id,
+                amount=line_data.amount,
+            ))
+
     db.commit()
     db.refresh(budget)
-    return _budget_to_out(budget)
+    return _budget_to_out(budget, db)
 
 
 @router.delete("/{year}/{month}")
@@ -142,37 +165,3 @@ def delete_budget(year: int, month: int, db: Session = Depends(get_db)):
     db.delete(budget)
     db.commit()
     return {"ok": True}
-
-
-@router.post("/{year}/{month}/copy-from/{src_year}/{src_month}", response_model=BudgetOut, status_code=201)
-def copy_budget(
-    year: int, month: int, src_year: int, src_month: int,
-    db: Session = Depends(get_db),
-):
-    """Copy a budget from another month."""
-    existing = db.execute(
-        select(Budget).where(Budget.year == year, Budget.month == month)
-    ).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=409, detail="Budget already exists for target month")
-
-    source = db.execute(
-        select(Budget).where(Budget.year == src_year, Budget.month == src_month)
-    ).scalar_one_or_none()
-    if not source:
-        raise HTTPException(status_code=404, detail="Source budget not found")
-
-    budget = Budget(year=year, month=month)
-    db.add(budget)
-    db.flush()
-
-    for line in source.lines:
-        db.add(BudgetLine(
-            budget_id=budget.id,
-            category_id=line.category_id,
-            amount=line.amount,
-        ))
-
-    db.commit()
-    db.refresh(budget)
-    return _budget_to_out(budget)
