@@ -393,6 +393,7 @@ export interface Category {
 	name: string;
 	parent_id: number | null;
 	is_bank_category: boolean;
+	is_fixed: boolean;
 	category_type: string;
 	children: Category[];
 }
@@ -465,7 +466,10 @@ export interface BudgetLine {
 	category_id: number;
 	category_name: string;
 	category_type: string;
+	is_fixed: boolean;
 	amount: number;
+	is_overridden: boolean;
+	template_amount: number;
 }
 
 export interface BudgetSummary {
@@ -490,6 +494,7 @@ export interface BudgetVsActualLine {
 	category_id: number;
 	category_name: string;
 	category_type: string;
+	is_fixed: boolean;
 	budgeted: number;
 	actual: number;
 	difference: number;
@@ -520,16 +525,9 @@ export async function getBudget(year: number, month: number): Promise<Budget> {
 	return request(`/api/budgets/${year}/${month}`);
 }
 
-export async function createBudget(data: { year: number; month: number; lines: { category_id: number; amount: number }[] }): Promise<Budget> {
-	return request('/api/budgets', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(data),
-	});
-}
-
-export async function updateBudget(year: number, month: number, data: { lines: { category_id: number; amount: number }[] }): Promise<Budget> {
-	return request(`/api/budgets/${year}/${month}`, {
+export async function updateBudget(year: number, month: number, data: { lines: { category_id: number; amount: number }[] }, updateTemplate: boolean = false): Promise<Budget> {
+	const qs = updateTemplate ? '?update_template=true' : '';
+	return request(`/api/budgets/${year}/${month}${qs}`, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(data),
@@ -540,10 +538,38 @@ export async function deleteBudget(year: number, month: number): Promise<void> {
 	return request(`/api/budgets/${year}/${month}`, { method: 'DELETE' });
 }
 
-export async function copyBudget(year: number, month: number, srcYear: number, srcMonth: number): Promise<Budget> {
-	return request(`/api/budgets/${year}/${month}/copy-from/${srcYear}/${srcMonth}`, { method: 'POST' });
-}
-
 export async function getBudgetVsActual(year: number, month: number): Promise<BudgetVsActualSummary> {
 	return request(`/api/dashboard/budget-vs-actual/${year}/${month}`);
+}
+
+// --- Budget Template ---
+
+export interface BudgetTemplateLine {
+	id: number;
+	category_id: number;
+	category_name: string;
+	category_type: string;
+	is_fixed: boolean;
+	amount: number;
+}
+
+export interface BudgetTemplate {
+	lines: BudgetTemplateLine[];
+	total_income: number;
+	total_fixed_expenses: number;
+	discretionary: number;
+	total_flexible_expenses: number;
+	unallocated: number;
+}
+
+export async function getBudgetTemplate(): Promise<BudgetTemplate> {
+	return request('/api/budget-template');
+}
+
+export async function replaceBudgetTemplate(lines: { category_id: number; amount: number }[]): Promise<BudgetTemplate> {
+	return request('/api/budget-template', {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(lines),
+	});
 }
