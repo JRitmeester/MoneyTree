@@ -454,6 +454,7 @@ def get_budget_vs_actual(year: int, month: int, db: Session = Depends(get_db)):
             category_id=cat_id,
             category_name=cat.name,
             category_type=cat.category_type,
+            is_fixed=cat.is_fixed,
             budgeted=budgeted,
             actual=actual,
             difference=difference,

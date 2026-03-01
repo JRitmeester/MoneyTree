@@ -337,6 +337,7 @@ class BudgetVsActualLine(BaseModel):
     category_id: int
     category_name: str
     category_type: str
+    is_fixed: bool
     budgeted: float
     actual: float
     difference: float
