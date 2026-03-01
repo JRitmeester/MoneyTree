@@ -110,17 +110,20 @@ def update_budget(
     update_template: bool = False,
     db: Session = Depends(get_db),
 ):
-    """Update a budget (replaces all lines). Optionally updates template too."""
+    """Update a budget (replaces all lines). Creates if not exists. Optionally updates template too."""
     budget = db.execute(
         select(Budget).where(Budget.year == year, Budget.month == month)
     ).scalar_one_or_none()
-    if not budget:
-        raise HTTPException(status_code=404, detail="Budget not found")
 
-    # Delete existing lines
-    for line in list(budget.lines):
-        db.delete(line)
-    db.flush()
+    if not budget:
+        budget = Budget(year=year, month=month)
+        db.add(budget)
+        db.flush()
+    else:
+        # Delete existing lines
+        for line in list(budget.lines):
+            db.delete(line)
+        db.flush()
 
     # Add new lines
     for line_data in data.lines:
