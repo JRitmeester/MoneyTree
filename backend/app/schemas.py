@@ -160,6 +160,7 @@ class CategoryOut(BaseModel):
     name: str
     parent_id: Optional[int]
     is_bank_category: bool
+    is_fixed: bool
     category_type: str
     children: list["CategoryOut"] = []
 
@@ -170,6 +171,7 @@ class CategoryCreate(BaseModel):
     name: str
     parent_id: Optional[int] = None
     category_type: str = "expense"
+    is_fixed: bool = False
 
 
 # --- Dashboard ---
@@ -255,7 +257,10 @@ class BudgetLineOut(BaseModel):
     category_id: int
     category_name: str
     category_type: str
+    is_fixed: bool
     amount: float
+    is_overridden: bool = False
+    template_amount: float = 0.0
 
     model_config = {"from_attributes": True}
 
@@ -295,6 +300,34 @@ class BudgetCreate(BaseModel):
 
 class BudgetUpdate(BaseModel):
     lines: list[BudgetLineCreate] = []
+
+
+# --- Budget Template ---
+
+
+class BudgetTemplateLineOut(BaseModel):
+    id: int
+    category_id: int
+    category_name: str
+    category_type: str
+    is_fixed: bool
+    amount: float
+
+    model_config = {"from_attributes": True}
+
+
+class BudgetTemplateOut(BaseModel):
+    lines: list[BudgetTemplateLineOut]
+    total_income: float
+    total_fixed_expenses: float
+    discretionary: float
+    total_flexible_expenses: float
+    unallocated: float
+
+
+class BudgetTemplateLineCreate(BaseModel):
+    category_id: int
+    amount: float
 
 
 # --- Budget vs Actual ---
