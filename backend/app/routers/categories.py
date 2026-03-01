@@ -37,6 +37,7 @@ def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
         parent_id=data.parent_id,
         is_bank_category=False,
         category_type=data.category_type,
+        is_fixed=data.is_fixed,
     )
     db.add(cat)
     db.commit()
@@ -55,6 +56,7 @@ def update_category(category_id: int, data: CategoryCreate, db: Session = Depend
     if data.parent_id is not None:
         cat.parent_id = data.parent_id
     cat.category_type = data.category_type
+    cat.is_fixed = data.is_fixed
     db.commit()
     db.refresh(cat)
     return cat
