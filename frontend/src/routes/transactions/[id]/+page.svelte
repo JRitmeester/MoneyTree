@@ -355,6 +355,11 @@
 					</button>
 				</div>
 			</div>
+		{:else if explicitItems.length === 0}
+			<p class="muted no-items">Not split. Use the category selector above or add rows to split.</p>
+			<div class="edit-actions">
+				<button class="add-row-btn" onclick={addRow}>+ Add row</button>
+			</div>
 		{:else}
 			<table>
 				<thead>
@@ -394,23 +399,19 @@
 						</tr>
 					{/if}
 				</tbody>
-				{#if tx.line_items.length > 0}
-					<tfoot>
-						<tr>
-							<td colspan="2"><strong>Total</strong></td>
-							<td class="right">
-								<strong>{formatEuro(tx.line_items.reduce((s, i) => s + i.amount * i.quantity, 0))}</strong>
-							</td>
-						</tr>
-					</tfoot>
-				{/if}
+				<tfoot>
+					<tr>
+						<td colspan="2"><strong>Total</strong></td>
+						<td class="right">
+							<strong>{formatEuro(tx.line_items.reduce((s, i) => s + i.amount * i.quantity, 0))}</strong>
+						</td>
+					</tr>
+				</tfoot>
 			</table>
 
 			<div class="edit-actions">
 				<button class="add-row-btn" onclick={addRow}>+ Add row</button>
-				{#if explicitItems.length > 0}
-					<button class="edit-btn" onclick={startEditing}>Edit</button>
-				{/if}
+				<button class="edit-btn" onclick={startEditing}>Edit</button>
 			</div>
 		{/if}
 	</div>
@@ -497,6 +498,10 @@
 	.muted {
 		color: #999;
 		font-style: italic;
+	}
+	.no-items {
+		margin: 0.25rem 0 0.75rem;
+		font-size: 0.85rem;
 	}
 	.muted :global(.add-receipt-link) {
 		color: #2d6a4f;
