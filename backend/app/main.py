@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import UPLOADS_DIR
-from .routers import budget, budget_template, categories, category_mappings, dashboard, line_items, receipts, transactions
+from .routers import budget, budget_template, categories, category_mappings, dashboard, debug, line_items, receipts, transactions
 
 FRONTEND_BUILD = Path(__file__).resolve().parent.parent.parent / "frontend" / "build"
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
@@ -41,6 +41,7 @@ app.include_router(dashboard.router)
 app.include_router(budget.router)
 app.include_router(budget_template.router)
 app.include_router(category_mappings.router)
+app.include_router(debug.router)
 
 
 @app.get("/api/health")

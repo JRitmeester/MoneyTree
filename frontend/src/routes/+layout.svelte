@@ -18,6 +18,7 @@
 			<a href="/receipts">Receipts</a>
 			<a href="/categories">Categories</a>
 			<a href="/import">Import</a>
+			<a href="/debug" class="debug-link">Debug</a>
 		</div>
 	</nav>
 	<main>
@@ -63,6 +64,13 @@
 	}
 	.links a:hover {
 		color: white;
+	}
+	.debug-link {
+		opacity: 0.5;
+		font-size: 0.8rem !important;
+	}
+	.debug-link:hover {
+		opacity: 1;
 	}
 	main {
 		max-width: 1200px;
