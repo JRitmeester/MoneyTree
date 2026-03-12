@@ -453,6 +453,31 @@ export async function getCategoryMappings(): Promise<CategoryMapping[]> {
 	return request('/api/category-mappings');
 }
 
+// --- Uncategorized ---
+
+export interface UncategorizedGroup {
+	bank_category: string;
+	count: number;
+	total: number;
+	has_mapping: boolean;
+}
+
+export async function getUncategorized(): Promise<UncategorizedGroup[]> {
+	return request('/api/uncategorized');
+}
+
+export async function bulkCategorize(data: {
+	bank_category: string;
+	category_id: number;
+	save_mapping: boolean;
+}): Promise<{ updated: number }> {
+	return request('/api/uncategorized/bulk-categorize', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data),
+	});
+}
+
 export async function getUnmappedCategories(): Promise<string[]> {
 	return request('/api/category-mappings/unmapped');
 }

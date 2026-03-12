@@ -230,7 +230,7 @@ def get_by_category(
         ))
 
     result.sort(key=lambda x: x.total, reverse=True)
-    return result
+    return [r for r in result if r.category_id is not None]
 
 
 @router.get("/by-category-children/{category_id}", response_model=list[CategorySpending])

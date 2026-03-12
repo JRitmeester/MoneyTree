@@ -17,6 +17,7 @@
 			<a href="/transactions">Transactions</a>
 			<a href="/receipts">Receipts</a>
 			<a href="/categories">Categories</a>
+			<a href="/uncategorized">Uncategorized</a>
 			<a href="/import">Import</a>
 			<a href="/debug" class="debug-link">Debug</a>
 		</div>
