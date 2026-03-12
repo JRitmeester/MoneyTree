@@ -251,6 +251,14 @@ export async function getLineItems(receiptId: number): Promise<LineItem[]> {
 	return request(`/api/receipts/${receiptId}/line-items`);
 }
 
+export async function createLineItem(receiptId: number, data: LineItemCreate): Promise<LineItem> {
+	return request(`/api/receipts/${receiptId}/line-items`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data),
+	});
+}
+
 export async function bulkReplaceLineItems(receiptId: number, items: LineItemCreate[]): Promise<LineItem[]> {
 	return request(`/api/receipts/${receiptId}/line-items`, {
 		method: 'PUT',

@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import {
 		getReceipt, updateReceipt, deleteReceipt, updateLineItem, deleteLineItem,
-		bulkReplaceLineItems, unlinkReceipt, formatEuro, formatDate, imageUrl,
+		createLineItem, bulkReplaceLineItems, unlinkReceipt, formatEuro, formatDate, imageUrl,
 		type ReceiptDetail, type LineItemCreate
 	} from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
@@ -68,6 +68,27 @@
 	// Inline line item editing
 	let editingItemId: number | null = $state(null);
 	let editItem = $state({ description: '', amount: '', category_id: null as number | null });
+
+	// Adding a new line item
+	let addingItem = $state(false);
+	let newItem = $state({ description: '', amount: '', category_id: null as number | null });
+
+	function startAddItem() {
+		addingItem = true;
+		newItem = { description: '', amount: '', category_id: null };
+	}
+
+	async function saveNewItem() {
+		if (!receipt || !newItem.description.trim()) return;
+		await createLineItem(receipt.id, {
+			description: newItem.description.trim(),
+			amount: evaluateExpression(newItem.amount) || 0,
+			quantity: 1,
+			category_id: newItem.category_id,
+		});
+		addingItem = false;
+		await load();
+	}
 
 	function startEditItem(item: any) {
 		editingItemId = item.id;
@@ -157,71 +178,83 @@
 			</div>
 
 			<div class="card">
-				<h2>Line Items</h2>
-				{#if receipt.line_items.length === 0}
-					<p class="muted">No line items.</p>
-				{:else}
-					<table>
-						<thead>
-							<tr>
-								<th>Description</th>
-								<th>Category</th>
-								<th class="right">Amount</th>
-								<th></th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each receipt.line_items as item}
-								{#if editingItemId === item.id && !item.is_remaining}
-									<tr>
-										<td><input type="text" bind:value={editItem.description} /></td>
-										<td><CategoryInput value={editItem.category_id} onchange={(v) => { editItem.category_id = v; }} placeholder="Category" /></td>
-										<td><input type="text" bind:value={editItem.amount} class="amt-input" onblur={() => { editItem.amount = resolveAmount(editItem.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); editItem.amount = resolveAmount(editItem.amount); }}} /></td>
-										<td>
-											<button class="save-btn" onclick={saveEditItem}>Save</button>
-											<button class="cancel-btn" onclick={() => { editingItemId = null; }}>Cancel</button>
-										</td>
-									</tr>
-								{:else}
-									<tr
-										class:remaining-row={item.is_remaining}
-										onclick={() => { if (!item.is_remaining) startEditItem(item); }}
-									>
-										<td>
-											{#if item.is_remaining}
-												<span class="remaining-label">Remaining</span>
-											{:else}
-												{item.description}
-											{/if}
-										</td>
-										<td>
-											{#if item.category_name}
-												<span class="badge">{item.category_name}</span>
-											{:else}
-												<span class="muted">-</span>
-											{/if}
-										</td>
-										<td class="right">{formatEuro(item.amount * item.quantity)}</td>
-										<td>
-											{#if !item.is_remaining}
-												<button class="remove-btn" onclick={(e: MouseEvent) => { e.stopPropagation(); handleDeleteLineItem(item.id); }}>x</button>
-											{/if}
-										</td>
-									</tr>
-								{/if}
-							{/each}
-						</tbody>
-						<tfoot>
-							<tr>
-								<td colspan="2"><strong>Total</strong></td>
-								<td class="right">
-									<strong>{formatEuro(receipt.line_items.reduce((s, i) => s + i.amount * i.quantity, 0))}</strong>
+				<div class="line-items-header">
+					<h2>Line Items</h2>
+					{#if !addingItem}
+						<button class="add-item-btn" onclick={startAddItem}>+ Add item</button>
+					{/if}
+				</div>
+				<table>
+					<thead>
+						<tr>
+							<th>Description</th>
+							<th>Category</th>
+							<th class="right">Amount</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each receipt.line_items as item}
+							{#if editingItemId === item.id && !item.is_remaining}
+								<tr>
+									<td><input type="text" bind:value={editItem.description} /></td>
+									<td><CategoryInput value={editItem.category_id} onchange={(v) => { editItem.category_id = v; }} placeholder="Category" /></td>
+									<td><input type="text" bind:value={editItem.amount} class="amt-input" onblur={() => { editItem.amount = resolveAmount(editItem.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); editItem.amount = resolveAmount(editItem.amount); }}} /></td>
+									<td>
+										<button class="save-btn" onclick={saveEditItem}>Save</button>
+										<button class="cancel-btn" onclick={() => { editingItemId = null; }}>Cancel</button>
+									</td>
+								</tr>
+							{:else}
+								<tr
+									class:remaining-row={item.is_remaining}
+									onclick={() => { if (!item.is_remaining) startEditItem(item); }}
+								>
+									<td>
+										{#if item.is_remaining}
+											<span class="remaining-label">Remaining</span>
+										{:else}
+											{item.description}
+										{/if}
+									</td>
+									<td>
+										{#if item.category_name}
+											<span class="badge">{item.category_name}</span>
+										{:else}
+											<span class="muted">-</span>
+										{/if}
+									</td>
+									<td class="right">{formatEuro(item.amount * item.quantity)}</td>
+									<td>
+										{#if !item.is_remaining}
+											<button class="remove-btn" onclick={(e: MouseEvent) => { e.stopPropagation(); handleDeleteLineItem(item.id); }}>x</button>
+										{/if}
+									</td>
+								</tr>
+							{/if}
+						{/each}
+						{#if addingItem}
+							<tr class="new-item-row">
+								<td><input type="text" bind:value={newItem.description} placeholder="Description" autofocus /></td>
+								<td><CategoryInput value={newItem.category_id} onchange={(v) => { newItem.category_id = v; }} placeholder="Category" /></td>
+								<td><input type="text" bind:value={newItem.amount} class="amt-input" placeholder="0.00" onblur={() => { newItem.amount = resolveAmount(newItem.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveNewItem(); }}} /></td>
+								<td>
+									<button class="save-btn" onclick={saveNewItem}>Add</button>
+									<button class="cancel-btn" onclick={() => { addingItem = false; }}>Cancel</button>
 								</td>
-								<td></td>
 							</tr>
-						</tfoot>
-					</table>
-				{/if}
+						{/if}
+					</tbody>
+					<tfoot>
+						<tr>
+							<td colspan="2"><strong>Total</strong></td>
+							<td class="right">
+								<strong>{formatEuro(receipt.line_items.reduce((s, i) => s + i.amount * i.quantity, 0))}</strong>
+							</td>
+							<td></td>
+						</tr>
+					</tfoot>
+				</table>
 			</div>
 		</div>
 
@@ -272,7 +305,24 @@
 		align-items: center;
 	}
 	h1 { margin: 0; font-size: 1.5rem; }
-	h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+	h2 { margin: 0; font-size: 1.1rem; }
+	.line-items-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1rem;
+	}
+	.add-item-btn {
+		padding: 0.25rem 0.6rem;
+		background: none;
+		border: 1px solid #2d6a4f;
+		color: #2d6a4f;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 0.8rem;
+	}
+	.add-item-btn:hover { background: #f0fdf4; }
+	.new-item-row td { background: #f9fafb; }
 
 	.fields { margin-top: 1rem; }
 	.field-row {
