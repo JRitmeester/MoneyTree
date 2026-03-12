@@ -27,7 +27,9 @@
 		loading = true;
 		try {
 			tx = await getTransaction(id);
-			selectedCategory = tx.category_id;
+			// Prefer tx.category_id; fall back to remaining line item's category
+			const remaining = tx.line_items.find(li => li.is_remaining);
+			selectedCategory = tx.category_id ?? remaining?.category_id ?? null;
 		} catch (e: any) {
 			error = e.message;
 		} finally {
@@ -38,7 +40,7 @@
 	$effect(() => { load(); });
 
 	async function handleCategoryChange(newCategory: number | null) {
-		if (!tx || newCategory === tx.category_id) return;
+		if (!tx || newCategory === selectedCategory) return;
 		selectedCategory = newCategory;
 		savingCategory = true;
 		try {
