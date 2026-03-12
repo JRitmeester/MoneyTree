@@ -88,19 +88,52 @@ def _get_direct_children(cat_id: int, children_by_parent: dict) -> list[int]:
 # Shared query helper
 # ---------------------------------------------------------------------------
 
-def _get_expense_line_items(db: Session, date_from: date | None, date_to: date | None):
-    """Fetch all expense line items with their transactions."""
-    query = (
+from dataclasses import dataclass
+from typing import Optional as Opt
+
+
+@dataclass
+class ExpenseItem:
+    tx: "Transaction"
+    amount: float          # positive spend amount
+    category_id: Opt[int]
+    li: Opt["LineItem"]    # None for direct (receipt-less) transactions
+
+
+def _iter_expense_items(db: Session, date_from: date | None, date_to: date | None):
+    """Yield ExpenseItem for every expense, covering two paths:
+    1. Transactions with receipts → one entry per line item.
+    2. Transactions without any receipt → one entry for the full bedrag.
+    """
+    def _date_filter(q):
+        if date_from:
+            q = q.where(Transaction.datum >= date_from)
+        if date_to:
+            q = q.where(Transaction.datum <= date_to)
+        return q
+
+    # Path 1: line items
+    li_query = _date_filter(
         select(Transaction, LineItem)
         .join(Receipt, Receipt.transaction_id == Transaction.id)
         .join(LineItem, LineItem.receipt_id == Receipt.id)
         .where(Transaction.bedrag < 0)
     )
-    if date_from:
-        query = query.where(Transaction.datum >= date_from)
-    if date_to:
-        query = query.where(Transaction.datum <= date_to)
-    return db.execute(query).all()
+    for tx, li in db.execute(li_query).all():
+        yield ExpenseItem(tx=tx, amount=li.amount * li.quantity, category_id=li.category_id, li=li)
+
+    # Path 2: transactions with no receipt at all
+    no_receipt_query = _date_filter(
+        select(Transaction)
+        .where(Transaction.bedrag < 0)
+        .where(
+            ~select(Receipt.id)
+            .where(Receipt.transaction_id == Transaction.id)
+            .exists()
+        )
+    )
+    for tx in db.execute(no_receipt_query).scalars().all():
+        yield ExpenseItem(tx=tx, amount=abs(tx.bedrag), category_id=tx.category_id, li=None)
 
 
 # ---------------------------------------------------------------------------
@@ -152,24 +185,23 @@ def get_by_category(
 ):
     """Spending breakdown grouped by root category (expenses only)."""
     cat_id_to_cat, children_by_parent = _build_hierarchy(db)
-    rows = _get_expense_line_items(db, date_from, date_to)
 
     groups: dict[int | str, dict] = {}
     counted_txs: dict[int | str, set] = {}
     cats_with_spending: set[int] = set()
 
-    for tx, li in rows:
-        if li.category_id is None:
+    for item in _iter_expense_items(db, date_from, date_to):
+        if item.category_id is None:
             key = "Uncategorized"
         else:
-            cats_with_spending.add(li.category_id)
-            key = _find_root(li.category_id, cat_id_to_cat)
+            cats_with_spending.add(item.category_id)
+            key = _find_root(item.category_id, cat_id_to_cat)
 
         if key not in groups:
             groups[key] = {"total": 0.0}
             counted_txs[key] = set()
-        groups[key]["total"] += li.amount * li.quantity
-        counted_txs[key].add(tx.id)
+        groups[key]["total"] += item.amount
+        counted_txs[key].add(item.tx.id)
 
     def has_spending_children(cat_id: int) -> bool:
         for child_id in _get_direct_children(cat_id, children_by_parent):
@@ -210,26 +242,25 @@ def get_by_category_children(
 ):
     """Spending grouped by direct children of a given category."""
     cat_id_to_cat, children_by_parent = _build_hierarchy(db)
-    rows = _get_expense_line_items(db, date_from, date_to)
 
     groups: dict[int, dict] = {}
     counted_txs: dict[int, set] = {}
     cats_with_spending: set[int] = set()
 
-    for tx, li in rows:
-        if li.category_id is None:
+    for item in _iter_expense_items(db, date_from, date_to):
+        if item.category_id is None:
             continue
-        cats_with_spending.add(li.category_id)
-        if not _is_descendant_of(li.category_id, category_id, cat_id_to_cat):
+        cats_with_spending.add(item.category_id)
+        if not _is_descendant_of(item.category_id, category_id, cat_id_to_cat):
             continue
-        child_id = _find_direct_child_ancestor(li.category_id, category_id, children_by_parent, cat_id_to_cat)
+        child_id = _find_direct_child_ancestor(item.category_id, category_id, children_by_parent, cat_id_to_cat)
         if child_id is None:
             continue
         if child_id not in groups:
             groups[child_id] = {"total": 0.0}
             counted_txs[child_id] = set()
-        groups[child_id]["total"] += li.amount * li.quantity
-        counted_txs[child_id].add(tx.id)
+        groups[child_id]["total"] += item.amount
+        counted_txs[child_id].add(item.tx.id)
 
     def has_spending_descendants(cat_id: int) -> bool:
         for cid in _get_direct_children(cat_id, children_by_parent):
@@ -279,30 +310,43 @@ def get_category_line_items(
         current = c.parent_id
     breadcrumb.reverse()
 
-    rows = _get_expense_line_items(db, date_from, date_to)
-
     items = []
     total = 0.0
-    for tx, li in rows:
-        if li.category_id is None:
+    for item in _iter_expense_items(db, date_from, date_to):
+        if item.category_id is None:
             continue
-        if not _is_descendant_of(li.category_id, category_id, cat_id_to_cat):
+        if not _is_descendant_of(item.category_id, category_id, cat_id_to_cat):
             continue
-        li_total = li.amount * li.quantity
-        total += li_total
-        items.append(SpendingLineItem(
-            line_item_id=li.id,
-            description=li.description,
-            amount=li.amount,
-            quantity=li.quantity,
-            category_id=li.category_id,
-            category_name=li.category.name if li.category else None,
-            is_remaining=li.is_remaining,
-            transaction_id=tx.id,
-            transaction_date=tx.datum,
-            transaction_merchant=tx.merchant_name or tx.naam,
-            transaction_amount=tx.bedrag,
-        ))
+        total += item.amount
+        if item.li is not None:
+            items.append(SpendingLineItem(
+                line_item_id=item.li.id,
+                description=item.li.description,
+                amount=item.li.amount,
+                quantity=item.li.quantity,
+                category_id=item.category_id,
+                category_name=item.li.category.name if item.li.category else None,
+                is_remaining=item.li.is_remaining,
+                transaction_id=item.tx.id,
+                transaction_date=item.tx.datum,
+                transaction_merchant=item.tx.merchant_name or item.tx.naam,
+                transaction_amount=item.tx.bedrag,
+            ))
+        else:
+            # Direct transaction (no receipt)
+            items.append(SpendingLineItem(
+                line_item_id=None,
+                description=item.tx.merchant_name or item.tx.naam or item.tx.omschrijving[:60],
+                amount=item.amount,
+                quantity=1,
+                category_id=item.category_id,
+                category_name=item.tx.category.name if item.tx.category else None,
+                is_remaining=False,
+                transaction_id=item.tx.id,
+                transaction_date=item.tx.datum,
+                transaction_merchant=item.tx.merchant_name or item.tx.naam,
+                transaction_amount=item.tx.bedrag,
+            ))
 
     items.sort(key=lambda x: x.transaction_date, reverse=True)
 
@@ -358,17 +402,6 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
     first_day = budget.start_date
     last_day = budget.end_date
 
-    query = (
-        select(Transaction, LineItem)
-        .join(Receipt, Receipt.transaction_id == Transaction.id)
-        .join(LineItem, LineItem.receipt_id == Receipt.id)
-        .where(
-            Transaction.datum >= first_day,
-            Transaction.datum <= last_day,
-        )
-    )
-    rows = db.execute(query).all()
-
     all_cats = db.execute(select(CategoryModel)).scalars().all()
     categories = {c.id: c for c in all_cats}
 
@@ -376,18 +409,42 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
     unmapped_expenses = 0.0
     unmapped_income = 0.0
 
-    for tx, li in rows:
-        li_amount = li.amount * li.quantity
-        is_income = tx.bedrag > 0
-
-        if li.category_id is None:
+    for item in _iter_expense_items(db, first_day, last_day):
+        is_income = item.tx.bedrag > 0
+        if item.category_id is None:
             if is_income:
-                unmapped_income += li_amount
+                unmapped_income += item.amount
             else:
-                unmapped_expenses += li_amount
+                unmapped_expenses += item.amount
             continue
+        actuals[item.category_id] = actuals.get(item.category_id, 0.0) + item.amount
 
-        actuals[li.category_id] = actuals.get(li.category_id, 0.0) + li_amount
+    # Also count income transactions (not covered by _iter_expense_items)
+    income_query = (
+        select(Transaction, LineItem)
+        .join(Receipt, Receipt.transaction_id == Transaction.id)
+        .join(LineItem, LineItem.receipt_id == Receipt.id)
+        .where(Transaction.bedrag > 0)
+        .where(Transaction.datum >= first_day, Transaction.datum <= last_day)
+    )
+    for tx, li in db.execute(income_query).all():
+        if li.category_id is None:
+            unmapped_income += li.amount * li.quantity
+        else:
+            actuals[li.category_id] = actuals.get(li.category_id, 0.0) + li.amount * li.quantity
+
+    # Direct income transactions (no receipt)
+    direct_income_query = (
+        select(Transaction)
+        .where(Transaction.bedrag > 0)
+        .where(Transaction.datum >= first_day, Transaction.datum <= last_day)
+        .where(~select(Receipt.id).where(Receipt.transaction_id == Transaction.id).exists())
+    )
+    for tx in db.execute(direct_income_query).scalars().all():
+        if tx.category_id is None:
+            unmapped_income += tx.bedrag
+        else:
+            actuals[tx.category_id] = actuals.get(tx.category_id, 0.0) + tx.bedrag
 
     budgeted_by_cat: dict[int, float] = {}
     for line in budget.lines:

@@ -222,7 +222,7 @@ class SubcategorySpending(BaseModel):
 
 
 class SpendingLineItem(BaseModel):
-    line_item_id: int
+    line_item_id: Optional[int] = None
     description: str
     amount: float
     quantity: int

@@ -67,28 +67,6 @@ async def import_csv(
             # Set user category from mapping
             tx.category_id = _category_id_for_categorie(tx_data["categorie"], db)
             db.add(tx)
-            db.flush()
-
-            # Auto-create receipt + remaining line item
-            receipt = Receipt(
-                transaction_id=tx.id,
-                date=tx.datum,
-                total_amount=abs(tx.bedrag),
-                merchant_name=tx.merchant_name or tx.naam,
-            )
-            db.add(receipt)
-            db.flush()
-
-            remaining_li = LineItem(
-                receipt_id=receipt.id,
-                description="Remaining",
-                amount=abs(tx.bedrag),
-                quantity=1,
-                category_id=tx.category_id,
-                sort_order=999,
-                is_remaining=True,
-            )
-            db.add(remaining_li)
             imported += 1
 
     db.commit()
@@ -256,6 +234,38 @@ def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
             detail.offsets_expense = out
 
     return detail
+
+
+@router.post("/{transaction_id}/split-receipt")
+def split_receipt(transaction_id: int, db: Session = Depends(get_db)):
+    """Create an empty virtual receipt for a transaction so it can be split into line items."""
+    tx = db.get(Transaction, transaction_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if tx.receipt:
+        return {"receipt_id": tx.receipt.id}
+
+    receipt = Receipt(
+        transaction_id=tx.id,
+        date=tx.datum,
+        total_amount=abs(tx.bedrag),
+        merchant_name=tx.merchant_name or tx.naam,
+    )
+    db.add(receipt)
+    db.flush()
+
+    remaining = LineItem(
+        receipt_id=receipt.id,
+        description="Remaining",
+        amount=abs(tx.bedrag),
+        quantity=1,
+        category_id=tx.category_id,
+        sort_order=999,
+        is_remaining=True,
+    )
+    db.add(remaining)
+    db.commit()
+    return {"receipt_id": receipt.id}
 
 
 @router.patch("/{transaction_id}", response_model=TransactionOut)

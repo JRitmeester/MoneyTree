@@ -118,6 +118,10 @@ export async function updateTransaction(id: number, data: { category_id?: number
 	});
 }
 
+export async function splitTransactionReceipt(transactionId: number): Promise<{ receipt_id: number }> {
+	return request(`/api/transactions/${transactionId}/split-receipt`, { method: 'POST' });
+}
+
 export async function linkOffset(expenseId: number, incomeId: number): Promise<void> {
 	return request(`/api/transactions/${expenseId}/offsets/${incomeId}`, { method: 'POST' });
 }

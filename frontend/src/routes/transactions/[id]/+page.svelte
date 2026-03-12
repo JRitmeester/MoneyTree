@@ -1,12 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import {
-		getTransaction, getTransactions, saveTransactionLineItems, updateTransaction, updateLineItem,
-		linkOffset, unlinkOffset,
+		getTransaction, getTransactions, updateTransaction,
+		linkOffset, unlinkOffset, splitTransactionReceipt,
 		formatEuro, formatDate,
-		type TransactionDetail, type Transaction, type LineItemCreate
+		type TransactionDetail, type Transaction
 	} from '$lib/api';
-	import { resolveAmount, evaluateExpression } from '$lib/calc';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 
 	let tx: TransactionDetail | null = $state(null);
@@ -16,20 +15,14 @@
 	// Category selection
 	let selectedCategory: number | null = $state(null);
 	let savingCategory = $state(false);
-
-	// Line items editing state
-	let editing = $state(false);
-	let editItems: { description: string; amount: string; category_id: number | null }[] = $state([]);
-	let saving = $state(false);
+	let splitting = $state(false);
 
 	async function load() {
 		const id = Number(page.params.id);
 		loading = true;
 		try {
 			tx = await getTransaction(id);
-			// Prefer tx.category_id; fall back to remaining line item's category
-			const remaining = tx.line_items.find(li => li.is_remaining);
-			selectedCategory = tx.category_id ?? remaining?.category_id ?? null;
+			selectedCategory = tx.category_id ?? null;
 		} catch (e: any) {
 			error = e.message;
 		} finally {
@@ -46,7 +39,6 @@
 		try {
 			await updateTransaction(tx.id, { category_id: newCategory });
 			tx.category_id = newCategory;
-			await load();
 		} catch (e: any) {
 			error = e.message;
 			selectedCategory = tx.category_id;
@@ -55,70 +47,17 @@
 		}
 	}
 
-	async function handleRemainingCategoryChange(itemId: number, newCategory: number | null) {
+	async function handleSplit() {
 		if (!tx) return;
-		savingCategory = true;
+		splitting = true;
 		try {
-			await updateLineItem(itemId, { category_id: newCategory });
-			await load();
+			const { receipt_id } = await splitTransactionReceipt(tx.id);
+			window.location.href = `/receipts/${receipt_id}`;
 		} catch (e: any) {
 			error = e.message;
-		} finally {
-			savingCategory = false;
+			splitting = false;
 		}
 	}
-
-	function startEditing() {
-		if (!tx) return;
-		editItems = tx.line_items
-			.filter(li => !li.is_remaining)
-			.map(li => ({
-				description: li.description,
-				amount: (li.amount * li.quantity).toString(),
-				category_id: li.category_id,
-			}));
-		editing = true;
-	}
-
-	function addRow() {
-		if (!editing) startEditing();
-		editItems = [...editItems, { description: '', amount: '', category_id: null }];
-	}
-
-	function removeRow(index: number) {
-		editItems = editItems.filter((_, i) => i !== index);
-	}
-
-	function cancelEditing() {
-		editing = false;
-		editItems = [];
-	}
-
-	async function saveItems() {
-		if (!tx) return;
-		saving = true;
-		try {
-			const items: LineItemCreate[] = editItems
-				.filter(it => it.description.trim())
-				.map((it, i) => ({
-					description: it.description.trim(),
-					amount: evaluateExpression(it.amount) || 0,
-					quantity: 1,
-					category_id: it.category_id,
-					sort_order: i,
-				}));
-			await saveTransactionLineItems(tx.id, items);
-			editing = false;
-			editItems = [];
-			await load();
-		} finally {
-			saving = false;
-		}
-	}
-
-	// Computed: separate remaining from explicit items
-	let explicitItems = $derived(tx?.line_items.filter(li => !li.is_remaining) ?? []);
-	let remainingItem = $derived(tx?.line_items.find(li => li.is_remaining) ?? null);
 
 	// Offsets
 	let offsetSearch = $state('');
@@ -246,9 +185,16 @@
 	<div class="card receipt-section">
 		<h2>Receipt</h2>
 		{#if tx.receipt}
-			<p>Receipt attached — <a href={`/receipts/${tx.receipt.id}`}>View receipt</a></p>
+			<div class="receipt-row">
+				<a href={`/receipts/${tx.receipt.id}`} class="receipt-link">View receipt &rarr;</a>
+			</div>
 		{:else}
-			<p class="muted">No receipt attached yet. <a href="/receipts/new?transaction_id={tx.id}" class="add-receipt-link">Add a receipt</a></p>
+			<div class="receipt-row">
+				<a href="/receipts/new?transaction_id={tx.id}" class="add-receipt-link">Upload receipt</a>
+				<button class="split-btn" onclick={handleSplit} disabled={splitting}>
+					{splitting ? 'Opening...' : 'Split into line items →'}
+				</button>
+			</div>
 		{/if}
 	</div>
 
@@ -313,108 +259,6 @@
 		</div>
 	{/if}
 
-	<div class="card">
-		<h2>Line Items</h2>
-
-		{#if editing}
-			<table>
-				<thead>
-					<tr>
-						<th>Description</th>
-						<th>Category</th>
-						<th class="right">Amount</th>
-						<th></th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each editItems as item, i}
-						<tr>
-							<td><input type="text" bind:value={item.description} placeholder="Description" /></td>
-							<td><CategoryInput value={item.category_id} onchange={(v) => { editItems[i].category_id = v; }} placeholder="Category" /></td>
-							<td><input type="text" bind:value={item.amount} class="amt-input" placeholder="0.00" onblur={() => { item.amount = resolveAmount(item.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); item.amount = resolveAmount(item.amount); }}} /></td>
-							<td><button class="remove-btn" onclick={() => removeRow(i)}>x</button></td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-
-			{#if remainingItem}
-				<div class="remaining-row-edit">
-					<span class="remaining-label">Remaining</span>
-					<span class="remaining-amount">{formatEuro(remainingItem.amount)}</span>
-					<span class="remaining-note">Auto-calculated after save</span>
-				</div>
-			{/if}
-
-			<div class="edit-actions">
-				<button class="add-row-btn" onclick={addRow}>+ Add row</button>
-				<div class="edit-actions-right">
-					<button class="cancel-btn" onclick={cancelEditing}>Cancel</button>
-					<button class="save-btn" onclick={saveItems} disabled={saving}>
-						{saving ? 'Saving...' : 'Save'}
-					</button>
-				</div>
-			</div>
-		{:else if explicitItems.length === 0}
-			<p class="muted no-items">Not split. Use the category selector above or add rows to split.</p>
-			<div class="edit-actions">
-				<button class="add-row-btn" onclick={addRow}>+ Add row</button>
-			</div>
-		{:else}
-			<table>
-				<thead>
-					<tr>
-						<th>Description</th>
-						<th>Category</th>
-						<th class="right">Amount</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each explicitItems as item}
-						<tr>
-							<td>{item.description}</td>
-							<td>
-								{#if item.category_name}
-									<span class="cat-badge">{item.category_name}</span>
-								{:else}
-									<span class="muted">-</span>
-								{/if}
-							</td>
-							<td class="right">{formatEuro(item.amount * item.quantity)}</td>
-						</tr>
-					{/each}
-					{#if remainingItem}
-						<tr class="remaining-row">
-							<td><span class="remaining-label">Remaining</span></td>
-							<td>
-								<div class="remaining-cat-input">
-									<CategoryInput
-										value={remainingItem.category_id}
-										onchange={(v) => handleRemainingCategoryChange(remainingItem!.id, v)}
-										placeholder="Category"
-									/>
-								</div>
-							</td>
-							<td class="right">{formatEuro(remainingItem.amount * remainingItem.quantity)}</td>
-						</tr>
-					{/if}
-				</tbody>
-				<tfoot>
-					<tr>
-						<td colspan="2"><strong>Total</strong></td>
-						<td class="right">
-							<strong>{formatEuro(tx.line_items.reduce((s, i) => s + i.amount * i.quantity, 0))}</strong>
-						</td>
-					</tr>
-				</tfoot>
-			</table>
-
-			<div class="edit-actions">
-				<button class="add-row-btn" onclick={addRow}>+ Add row</button>
-				<button class="edit-btn" onclick={startEditing}>Edit</button>
-			</div>
-		{/if}
-	</div>
 {/if}
 
 <style>
@@ -499,15 +343,28 @@
 		color: #999;
 		font-style: italic;
 	}
-	.no-items {
-		margin: 0.25rem 0 0.75rem;
+	.receipt-row {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+	.receipt-link, .add-receipt-link {
+		color: #2d6a4f;
+		font-weight: 500;
+		font-size: 0.9rem;
+	}
+	.split-btn {
+		padding: 0.3rem 0.75rem;
+		background: none;
+		border: 1px solid #2d6a4f;
+		color: #2d6a4f;
+		border-radius: 4px;
+		cursor: pointer;
 		font-size: 0.85rem;
 	}
-	.muted :global(.add-receipt-link) {
-		color: #2d6a4f;
-		font-style: normal;
-		font-weight: 500;
-	}
+	.split-btn:hover { background: #f0fdf4; }
+	.split-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 	/* Line items section */
 	.section-header {
