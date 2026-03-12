@@ -2,6 +2,7 @@
 	import { page as pageStore } from '$app/state';
 	import { getTransactions, formatEuro, formatDate, type Transaction } from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
+	import CategoryInput from '$lib/components/CategoryInput.svelte';
 
 	// Read initial values from URL query params (e.g. linked from Dashboard)
 	const urlParams = new URLSearchParams(pageStore.url.search);
@@ -15,7 +16,7 @@
 	const PAGE_SIZE_OPTIONS = [20, 50, 100, 200, 500];
 
 	let search = $state('');
-	let categorie = $state(urlParams.get('categorie') ?? '');
+	let categoryFilter: number | null = $state(null);
 	let dateFrom = $state(urlParams.get('date_from') ?? '');
 	let dateTo = $state(urlParams.get('date_to') ?? '');
 
@@ -28,7 +29,7 @@
 				page,
 				per_page: perPage,
 				search: search || undefined,
-				categorie: categorie || undefined,
+				category_id: categoryFilter ?? undefined,
 				date_from: dateFrom || undefined,
 				date_to: dateTo || undefined
 			});
@@ -96,7 +97,9 @@
 <div class="filters">
 	<div class="filter-row">
 		<input type="text" placeholder="Search..." value={search} oninput={handleSearch} />
-		<input type="text" placeholder="Category" bind:value={categorie} onchange={applyFilters} />
+		<div class="category-filter">
+			<CategoryInput value={categoryFilter} onchange={(v) => { categoryFilter = v; applyFilters(); }} placeholder="Filter by category..." />
+		</div>
 	</div>
 	<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} />
 </div>
@@ -126,7 +129,7 @@
 						<td class="merchant">
 							{tx.merchant_name || tx.naam || tx.omschrijving.substring(0, 40)}
 						</td>
-						<td><span class="badge">{tx.categorie}</span></td>
+						<td><span class="badge">{tx.category_name || tx.categorie}</span></td>
 						<td class="amount" class:positive={tx.bedrag > 0} class:negative={tx.bedrag < 0}>
 							{formatEuro(tx.bedrag)}
 						</td>

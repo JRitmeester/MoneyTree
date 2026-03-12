@@ -155,9 +155,7 @@
 	}
 
 	// Get non-bank categories for mapping dropdown
-	let userCategories = $derived(flatList(categories).filter(c => !categories.find(root =>
-		root.is_bank_category && root.id === c.id
-	)));
+	let userCategories = $derived(flatList(categories));
 </script>
 
 <h1>Categories</h1>
@@ -190,11 +188,6 @@
 							<span class="cat-name" ondblclick={() => startRename(cat)} title="Double-click to rename">{cat.name}</span>
 						{/if}
 						<button class="add-sub-btn" onclick={() => startAddSub(cat.id)} title="Add subcategory">+</button>
-						<span class="col-bank">
-							{#if cat.is_bank_category}
-								<span class="badge bank">Bank</span>
-							{/if}
-						</span>
 						<span class="col-type">
 							<button
 								class="badge type-badge"

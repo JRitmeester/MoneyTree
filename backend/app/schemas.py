@@ -1,7 +1,11 @@
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+# Alias to avoid Pydantic v2 field-name shadowing (field named "date" with default
+# None causes Pydantic to resolve the type annotation "date" as None).
+DateType = date
 
 
 # --- Transactions ---
@@ -17,6 +21,8 @@ class TransactionOut(BaseModel):
     valuta: str
     omschrijving: str
     categorie: str
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
     merchant_name: Optional[str]
     type: str
     code: str
@@ -24,6 +30,14 @@ class TransactionOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _populate_category_name(cls, obj, handler):
+        instance = handler(obj)
+        if hasattr(obj, "category") and obj.category is not None:
+            instance.category_name = obj.category.name
+        return instance
 
 
 class TransactionDetail(TransactionOut):
@@ -95,7 +109,7 @@ class ReceiptDetail(ReceiptOut):
 
 
 class ReceiptUpdate(BaseModel):
-    date: Optional[date] = None
+    date: Optional[DateType] = None
     total_amount: Optional[float] = None
     merchant_name: Optional[str] = None
 
@@ -129,18 +143,27 @@ class LineItemOut(BaseModel):
     description: str
     amount: float
     quantity: int
-    category: Optional[str]
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
     sort_order: int
     is_remaining: bool = False
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _populate_category_name(cls, obj, handler):
+        instance = handler(obj)
+        if hasattr(obj, "category") and obj.category is not None:
+            instance.category_name = obj.category.name
+        return instance
 
 
 class LineItemCreate(BaseModel):
     description: str
     amount: float
     quantity: int = 1
-    category: Optional[str] = None
+    category_id: Optional[int] = None
     sort_order: int = 0
 
 
@@ -148,7 +171,7 @@ class LineItemUpdate(BaseModel):
     description: Optional[str] = None
     amount: Optional[float] = None
     quantity: Optional[int] = None
-    category: Optional[str] = None
+    category_id: Optional[int] = None
     sort_order: Optional[int] = None
 
 
@@ -159,7 +182,6 @@ class CategoryOut(BaseModel):
     id: int
     name: str
     parent_id: Optional[int]
-    is_bank_category: bool
     is_fixed: bool
     category_type: str
     children: list["CategoryOut"] = []
@@ -204,7 +226,8 @@ class SpendingLineItem(BaseModel):
     description: str
     amount: float
     quantity: int
-    category: Optional[str]
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
     is_remaining: bool
     transaction_id: int
     transaction_date: date
@@ -272,8 +295,8 @@ class BudgetLineCreate(BaseModel):
 
 class BudgetSummary(BaseModel):
     id: int
-    year: int
-    month: int
+    start_date: date
+    end_date: date
     line_count: int
     created_at: datetime
     updated_at: datetime
@@ -283,8 +306,8 @@ class BudgetSummary(BaseModel):
 
 class BudgetOut(BaseModel):
     id: int
-    year: int
-    month: int
+    start_date: date
+    end_date: date
     lines: list[BudgetLineOut] = []
     created_at: datetime
     updated_at: datetime
@@ -293,13 +316,18 @@ class BudgetOut(BaseModel):
 
 
 class BudgetCreate(BaseModel):
-    year: int
-    month: int
+    start_date: date
+    end_date: date
     lines: list[BudgetLineCreate] = []
 
 
 class BudgetUpdate(BaseModel):
     lines: list[BudgetLineCreate] = []
+
+
+class BudgetPatch(BaseModel):
+    start_date: date | None = None
+    end_date: date | None = None
 
 
 # --- Budget Template ---
@@ -345,8 +373,9 @@ class BudgetVsActualLine(BaseModel):
 
 
 class BudgetVsActualSummary(BaseModel):
-    year: int
-    month: int
+    budget_id: int
+    start_date: date
+    end_date: date
     total_budgeted_income: float
     total_actual_income: float
     total_budgeted_expenses: float

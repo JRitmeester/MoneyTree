@@ -1,17 +1,23 @@
 <script lang="ts">
-	import { getLineItemCategories, getCategories, createCategory, type Category } from '$lib/api';
+	import { getCategories, createCategory, type Category } from '$lib/api';
+
+	interface FlatCategory {
+		id: number;
+		label: string; // full path: "Vaste lasten > Huur"
+		name: string;  // leaf name: "Huur"
+	}
 
 	interface Props {
-		value: string;
-		onchange: (value: string) => void;
+		value: number | null;
+		onchange: (id: number | null) => void;
 		placeholder?: string;
 	}
 
 	let { value, onchange, placeholder = 'Select category...' }: Props = $props();
 
-	let currentValue = $derived(value?.trim() || '');
+	let flatCategories: FlatCategory[] = $state([]);
 	let inputValue = $state('');
-	let suggestions: string[] = $state([]);
+	let suggestions: FlatCategory[] = $state([]);
 	let showDropdown = $state(false);
 	let highlightIndex = $state(-1);
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -19,42 +25,40 @@
 	let containerEl: HTMLDivElement | undefined = $state(undefined);
 	let editing = $state(false);
 
-	// Category tree from the Category table, flattened to "Parent > Child" paths
-	let categoryPaths: string[] = $state([]);
+	// Derive the display label from the current value ID
+	let currentLabel = $derived(
+		value != null ? (flatCategories.find(c => c.id === value)?.label ?? '') : ''
+	);
 
-	function flattenCategories(cats: Category[], parentPath = ''): string[] {
-		let result: string[] = [];
+	function buildFlat(cats: Category[], parentLabel = ''): FlatCategory[] {
+		let result: FlatCategory[] = [];
 		for (const c of cats) {
-			const path = parentPath ? `${parentPath} > ${c.name}` : c.name;
-			result.push(path);
+			const label = parentLabel ? `${parentLabel} > ${c.name}` : c.name;
+			result.push({ id: c.id, label, name: c.name });
 			if (c.children?.length) {
-				result = result.concat(flattenCategories(c.children, path));
+				result = result.concat(buildFlat(c.children, label));
 			}
 		}
 		return result;
 	}
 
-	// Load category tree once on mount
+	async function loadCategories() {
+		try {
+			const cats = await getCategories();
+			flatCategories = buildFlat(cats);
+		} catch { /* ignore */ }
+	}
+
 	let loaded = false;
 	$effect(() => {
 		if (!loaded) {
 			loaded = true;
-			getCategories().then(cats => {
-				categoryPaths = flattenCategories(cats);
-			}).catch(() => {});
+			loadCategories();
 		}
 	});
 
-	function selectCategory(cat: string) {
-		const trimmed = cat.trim();
-		if (!trimmed) return;
-
-		// If tag contains ">", ensure the categories exist in the Category table
-		if (trimmed.includes('>')) {
-			ensureCategoryPath(trimmed);
-		}
-
-		onchange(trimmed);
+	function selectById(id: number) {
+		onchange(id);
 		inputValue = '';
 		suggestions = [];
 		showDropdown = false;
@@ -63,7 +67,7 @@
 	}
 
 	function clearValue() {
-		onchange('');
+		onchange(null);
 		editing = true;
 		setTimeout(() => inputEl?.focus(), 0);
 	}
@@ -74,16 +78,22 @@
 		setTimeout(() => inputEl?.focus(), 0);
 	}
 
-	async function ensureCategoryPath(path: string) {
+	async function createCategoryPath(path: string): Promise<number | null> {
 		const parts = path.split('>').map(s => s.trim()).filter(Boolean);
-		if (parts.length === 0) return;
+		if (parts.length === 0) return null;
 
 		try {
 			const cats = await getCategories();
+			flatCategories = buildFlat(cats);
 			let parentId: number | undefined = undefined;
 
 			for (const part of parts) {
-				const existing = findCategory(cats, part, parentId ?? null);
+				const existing = flatCategories.find(
+					c => c.name.toLowerCase() === part.toLowerCase() &&
+					(parentId == null
+						? c.label === c.name  // root: label equals name
+						: flatCategories.find(p => p.id === parentId)?.label === c.label.split(' > ').slice(0, -1).join(' > '))
+				);
 				if (existing) {
 					parentId = existing.id;
 				} else {
@@ -92,107 +102,95 @@
 				}
 			}
 
-			const updatedCats = await getCategories();
-			categoryPaths = flattenCategories(updatedCats);
+			// Reload categories after potential creation
+			const updated = await getCategories();
+			flatCategories = buildFlat(updated);
+			return parentId ?? null;
 		} catch {
-			// Silently continue
+			return null;
 		}
 	}
 
-	function findCategory(cats: Category[], name: string, parentId: number | null): Category | null {
-		for (const c of cats) {
-			if (c.name.toLowerCase() === name.toLowerCase() && c.parent_id === parentId) {
-				return c;
-			}
-			if (c.children?.length) {
-				const found = findCategory(c.children, name, parentId);
-				if (found) return found;
-			}
+	async function selectByName(name: string) {
+		const trimmed = name.trim();
+		if (!trimmed) return;
+
+		// Check if it's an exact match in flat list
+		const exact = flatCategories.find(c => c.label.toLowerCase() === trimmed.toLowerCase() || c.name.toLowerCase() === trimmed.toLowerCase());
+		if (exact) {
+			selectById(exact.id);
+			return;
 		}
-		return null;
+
+		// Create the category (potentially a path)
+		const newId = await createCategoryPath(trimmed);
+		if (newId != null) {
+			selectById(newId);
+		}
 	}
 
-	async function fetchSuggestions(query: string) {
+	function fetchSuggestions(query: string) {
 		if (!query.trim()) {
 			suggestions = [];
 			showDropdown = false;
 			return;
 		}
-		try {
-			const q = query.trim().toLowerCase();
-
-			const lineItemTags = await getLineItemCategories(query);
-
-			const matchingPaths = categoryPaths.filter(p =>
-				p.toLowerCase().includes(q)
-			);
-
-			const all = new Set<string>();
-			for (const p of matchingPaths) all.add(p);
-			for (const t of lineItemTags) all.add(t);
-
-			suggestions = [...all].sort((a, b) => {
-				const aStarts = a.toLowerCase().startsWith(q) || a.split(' > ').pop()!.toLowerCase().startsWith(q);
-				const bStarts = b.toLowerCase().startsWith(q) || b.split(' > ').pop()!.toLowerCase().startsWith(q);
+		const q = query.trim().toLowerCase();
+		suggestions = flatCategories
+			.filter(c => c.label.toLowerCase().includes(q) || c.name.toLowerCase().includes(q))
+			.sort((a, b) => {
+				const aStarts = a.name.toLowerCase().startsWith(q) || a.label.toLowerCase().startsWith(q);
+				const bStarts = b.name.toLowerCase().startsWith(q) || b.label.toLowerCase().startsWith(q);
 				if (aStarts && !bStarts) return -1;
 				if (!aStarts && bStarts) return 1;
-				return a.localeCompare(b);
-			});
+				return a.label.localeCompare(b.label);
+			})
+			.slice(0, 20);
 
-			showDropdown = q.length > 0;
-			highlightIndex = -1;
-		} catch {
-			suggestions = [];
-			showDropdown = query.trim().length > 0;
-		}
+		showDropdown = q.length > 0;
+		highlightIndex = -1;
 	}
 
 	function handleInput() {
 		if (debounceTimer) clearTimeout(debounceTimer);
-		debounceTimer = setTimeout(() => fetchSuggestions(inputValue), 200);
+		debounceTimer = setTimeout(() => fetchSuggestions(inputValue), 150);
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		const hasAddNew = inputValue.trim() && !suggestions.some(s => s.toLowerCase() === inputValue.trim().toLowerCase());
+		const hasAddNew = inputValue.trim() && !suggestions.some(s => s.label.toLowerCase() === inputValue.trim().toLowerCase() || s.name.toLowerCase() === inputValue.trim().toLowerCase());
 		const totalItems = suggestions.length + (hasAddNew ? 1 : 0);
 
 		if (e.key === 'Enter') {
 			e.preventDefault();
 			if (highlightIndex >= 0 && highlightIndex < suggestions.length) {
-				selectCategory(suggestions[highlightIndex]);
+				selectById(suggestions[highlightIndex].id);
 			} else if (highlightIndex === suggestions.length && hasAddNew) {
-				selectCategory(inputValue);
+				selectByName(inputValue);
 			} else if (inputValue.trim()) {
-				selectCategory(inputValue);
+				selectByName(inputValue);
 			}
 		} else if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			if (showDropdown && highlightIndex < totalItems - 1) {
-				highlightIndex++;
-			}
+			if (showDropdown && highlightIndex < totalItems - 1) highlightIndex++;
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			if (showDropdown && highlightIndex > 0) {
-				highlightIndex--;
-			}
+			if (showDropdown && highlightIndex > 0) highlightIndex--;
 		} else if (e.key === 'Escape') {
 			showDropdown = false;
 			highlightIndex = -1;
-			if (!currentValue) {
-				editing = false;
-			}
-		} else if (e.key === 'Backspace' && !inputValue && currentValue) {
+			if (!value) editing = false;
+		} else if (e.key === 'Backspace' && !inputValue && value != null) {
 			clearValue();
 		}
 	}
 
-	function handleBlur(e: FocusEvent) {
+	function handleBlur() {
 		setTimeout(() => {
 			if (!containerEl?.contains(document.activeElement)) {
 				showDropdown = false;
 				if (inputValue.trim()) {
-					selectCategory(inputValue);
-				} else if (!currentValue) {
+					selectByName(inputValue);
+				} else if (!value) {
 					editing = false;
 				} else {
 					editing = false;
@@ -202,9 +200,7 @@
 	}
 
 	function handleFocus() {
-		if (inputValue.trim()) {
-			fetchSuggestions(inputValue);
-		}
+		if (inputValue.trim()) fetchSuggestions(inputValue);
 	}
 
 	function formatAddNew(input: string): string {
@@ -222,10 +218,17 @@
 </script>
 
 <div class="category-input" bind:this={containerEl}>
-	{#if currentValue && !editing}
+	{#if value != null && currentLabel && !editing}
 		<div class="tags-area" onclick={startEditing}>
 			<span class="tag">
-				{currentValue}
+				{#if currentLabel.includes(' > ')}
+					{@const parts = currentLabel.split(' > ')}
+					<span class="path-parent">{parts.slice(0, -1).join(' > ')}</span>
+					<span class="path-sep"> › </span>
+					<span class="path-leaf">{parts[parts.length - 1]}</span>
+				{:else}
+					{currentLabel}
+				{/if}
 				<button
 					type="button"
 					class="tag-remove"
@@ -235,7 +238,6 @@
 		</div>
 	{:else}
 		<div class="tags-area" onclick={() => inputEl?.focus()}>
-			<span class="info-icon" title="Type to search existing categories. Use &quot;>&quot; to create subcategories, e.g. &quot;Hardware Store > Paint&quot;">i</span>
 			<input
 				bind:this={inputEl}
 				bind:value={inputValue}
@@ -243,7 +245,7 @@
 				onkeydown={handleKeydown}
 				onblur={handleBlur}
 				onfocus={handleFocus}
-				placeholder={placeholder}
+				{placeholder}
 				type="text"
 				class="tag-input"
 			/>
@@ -251,7 +253,7 @@
 	{/if}
 
 	{#if showDropdown}
-		{@const exactMatch = suggestions.some(s => s.toLowerCase() === inputValue.trim().toLowerCase())}
+		{@const hasAddNew = inputValue.trim() && !suggestions.some(s => s.label.toLowerCase() === inputValue.trim().toLowerCase() || s.name.toLowerCase() === inputValue.trim().toLowerCase())}
 		<ul class="dropdown">
 			{#each suggestions as suggestion, i}
 				<li>
@@ -259,26 +261,26 @@
 						type="button"
 						class="dropdown-item"
 						class:highlighted={i === highlightIndex}
-						onmousedown={(e) => { e.preventDefault(); selectCategory(suggestion); }}
+						onmousedown={(e) => { e.preventDefault(); selectById(suggestion.id); }}
 					>
-						{#if suggestion.includes(' > ')}
-							{@const parts = suggestion.split(' > ')}
+						{#if suggestion.label.includes(' > ')}
+							{@const parts = suggestion.label.split(' > ')}
 							<span class="path-parent">{parts.slice(0, -1).join(' > ')}</span>
-							<span class="path-sep"> &rsaquo; </span>
+							<span class="path-sep"> › </span>
 							<span class="path-leaf">{parts[parts.length - 1]}</span>
 						{:else}
-							{suggestion}
+							{suggestion.label}
 						{/if}
 					</button>
 				</li>
 			{/each}
-			{#if inputValue.trim() && !exactMatch}
+			{#if hasAddNew}
 				<li>
 					<button
 						type="button"
 						class="dropdown-item add-new"
 						class:highlighted={highlightIndex === suggestions.length}
-						onmousedown={(e) => { e.preventDefault(); selectCategory(inputValue); }}
+						onmousedown={(e) => { e.preventDefault(); selectByName(inputValue); }}
 					>
 						{formatAddNew(inputValue)}
 					</button>
@@ -335,26 +337,7 @@
 		line-height: 1;
 		opacity: 0.6;
 	}
-	.tag-remove:hover {
-		opacity: 1;
-	}
-
-	.info-icon {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 16px;
-		height: 16px;
-		border-radius: 50%;
-		background: #e5e7eb;
-		color: #666;
-		font-size: 0.65rem;
-		font-style: italic;
-		font-weight: 700;
-		flex-shrink: 0;
-		cursor: help;
-		user-select: none;
-	}
+	.tag-remove:hover { opacity: 1; }
 
 	.tag-input {
 		flex: 1;
@@ -402,15 +385,9 @@
 		color: #2d6a4f;
 	}
 
-	.path-parent {
-		color: #999;
-	}
-	.path-sep {
-		color: #ccc;
-	}
-	.path-leaf {
-		font-weight: 500;
-	}
+	.path-parent { color: #999; }
+	.path-sep { color: #ccc; }
+	.path-leaf { font-weight: 500; }
 
 	.dropdown-item.add-new {
 		color: #666;

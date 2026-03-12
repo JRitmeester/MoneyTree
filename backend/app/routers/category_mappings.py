@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Category, CategoryMapping, Transaction
+from ..models import Category, CategoryMapping
 from ..schemas import CategoryMappingCreate, CategoryMappingOut
 
 router = APIRouter(prefix="/api/category-mappings", tags=["category_mappings"])
@@ -95,16 +95,15 @@ def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):
 
 @router.get("/unmapped", response_model=list[str])
 def get_unmapped(db: Session = Depends(get_db)):
-    """List bank categories that have no mapping."""
-    # Get bank categories from the Category table (is_bank_category=True)
-    bank_cats = db.execute(
-        select(Category.name).where(Category.is_bank_category == True)  # noqa: E712
+    """List distinct bank categorie strings from transactions that have no mapping."""
+    from ..models import Transaction
+    all_bank_cats = db.execute(
+        select(Transaction.categorie).distinct().where(Transaction.categorie != "")
     ).scalars().all()
 
-    # Get all mapped bank categories
     mapped_cats = db.execute(
         select(CategoryMapping.bank_category)
     ).scalars().all()
     mapped_set = set(mapped_cats)
 
-    return sorted(c for c in bank_cats if c and c not in mapped_set)
+    return sorted(c for c in all_bank_cats if c and c not in mapped_set)

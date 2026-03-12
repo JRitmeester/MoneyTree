@@ -95,8 +95,8 @@
 							<td class="date">{formatDate(item.transaction_date)}</td>
 							<td>{item.description}</td>
 							<td>
-								{#if item.category}
-									<span class="cat-badge">{item.category}</span>
+								{#if item.category_name}
+									<span class="cat-badge">{item.category_name}</span>
 								{:else}
 									<span class="muted">-</span>
 								{/if}
@@ -115,8 +115,8 @@
 								<td class="date">{formatDate(item.transaction_date)}</td>
 								<td><span class="remaining-label">Remaining</span></td>
 								<td>
-									{#if item.category}
-										<span class="cat-badge">{item.category}</span>
+									{#if item.category_name}
+										<span class="cat-badge">{item.category_name}</span>
 									{:else}
 										<span class="muted">-</span>
 									{/if}

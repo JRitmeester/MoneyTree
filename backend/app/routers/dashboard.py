@@ -1,12 +1,11 @@
-from calendar import monthrange
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select, extract, case
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Budget, Category as CategoryModel, CategoryMapping, LineItem, Receipt, Transaction
+from ..models import Budget, Category as CategoryModel, LineItem, Receipt, Transaction
 from ..schemas import (
     BreadcrumbItem,
     BudgetVsActualLine,
@@ -18,18 +17,95 @@ from ..schemas import (
     SpendingLineItem,
     SubcategorySpending,
 )
-from ..services.category_resolver import (
-    build_resolver,
-    find_root,
-    resolve_category,
-    has_children as cat_has_children,
-    is_descendant_of,
-    find_direct_child_ancestor,
-    get_direct_children,
-)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
+
+# ---------------------------------------------------------------------------
+# Hierarchy helpers (replaces category_resolver — ID-based only, no strings)
+# ---------------------------------------------------------------------------
+
+def _build_hierarchy(db: Session) -> tuple[dict, dict]:
+    """Return (cat_id_to_cat, children_by_parent) dicts."""
+    cats = db.execute(select(CategoryModel)).scalars().all()
+    cat_id_to_cat = {c.id: c for c in cats}
+    children_by_parent: dict[int | None, list[int]] = {}
+    for c in cats:
+        children_by_parent.setdefault(c.parent_id, []).append(c.id)
+    return cat_id_to_cat, children_by_parent
+
+
+def _find_root(cat_id: int, cat_id_to_cat: dict) -> int:
+    seen = set()
+    current = cat_id
+    while current in cat_id_to_cat:
+        cat = cat_id_to_cat[current]
+        if cat.parent_id is None or cat.parent_id in seen:
+            return current
+        seen.add(current)
+        current = cat.parent_id
+    return current
+
+
+def _is_descendant_of(cat_id: int, ancestor_id: int, cat_id_to_cat: dict) -> bool:
+    if cat_id == ancestor_id:
+        return True
+    seen = set()
+    current = cat_id
+    while current in cat_id_to_cat:
+        if current == ancestor_id:
+            return True
+        cat = cat_id_to_cat[current]
+        if cat.parent_id is None or cat.parent_id in seen:
+            return False
+        seen.add(current)
+        current = cat.parent_id
+    return False
+
+
+def _find_direct_child_ancestor(cat_id: int, parent_id: int, children_by_parent: dict, cat_id_to_cat: dict) -> int | None:
+    if cat_id == parent_id:
+        return None
+    direct_children = set(children_by_parent.get(parent_id, []))
+    seen = set()
+    current = cat_id
+    while current in cat_id_to_cat:
+        if current in direct_children:
+            return current
+        cat = cat_id_to_cat[current]
+        if cat.parent_id is None or cat.parent_id in seen:
+            return None
+        seen.add(current)
+        current = cat.parent_id
+    return None
+
+
+def _get_direct_children(cat_id: int, children_by_parent: dict) -> list[int]:
+    return children_by_parent.get(cat_id, [])
+
+
+# ---------------------------------------------------------------------------
+# Shared query helper
+# ---------------------------------------------------------------------------
+
+def _get_expense_line_items(db: Session, date_from: date | None, date_to: date | None):
+    """Fetch all expense line items with their transactions."""
+    query = (
+        select(Transaction, LineItem)
+        .join(Receipt, Receipt.transaction_id == Transaction.id)
+        .join(LineItem, LineItem.receipt_id == Receipt.id)
+        .where(Transaction.bedrag < 0)
+    )
+    if date_from:
+        query = query.where(Transaction.datum >= date_from)
+    if date_to:
+        query = query.where(Transaction.datum <= date_to)
+    return db.execute(query).all()
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 @router.get("/summary", response_model=DashboardSummary)
 def get_summary(
@@ -50,7 +126,6 @@ def get_summary(
     total_expenses = sum(tx.bedrag for tx in transactions if tx.bedrag < 0)
     net = total_income + total_expenses
 
-    # Count receipts attached in this period
     tx_ids = [tx.id for tx in transactions]
     receipts_attached = 0
     if tx_ids:
@@ -69,21 +144,6 @@ def get_summary(
     )
 
 
-def _get_expense_line_items(db: Session, date_from: date | None, date_to: date | None):
-    """Shared helper: fetch all expense line items with their transactions."""
-    query = (
-        select(Transaction, LineItem)
-        .join(Receipt, Receipt.transaction_id == Transaction.id)
-        .join(LineItem, LineItem.receipt_id == Receipt.id)
-        .where(Transaction.bedrag < 0)
-    )
-    if date_from:
-        query = query.where(Transaction.datum >= date_from)
-    if date_to:
-        query = query.where(Transaction.datum <= date_to)
-    return db.execute(query).all()
-
-
 @router.get("/by-category", response_model=list[CategorySpending])
 def get_by_category(
     date_from: date | None = None,
@@ -91,27 +151,19 @@ def get_by_category(
     db: Session = Depends(get_db),
 ):
     """Spending breakdown grouped by root category (expenses only)."""
-    resolver = build_resolver(db)
+    cat_id_to_cat, children_by_parent = _build_hierarchy(db)
     rows = _get_expense_line_items(db, date_from, date_to)
 
-    # Group by root category
-    # Key: root_cat_id (int) or raw string for unresolved
     groups: dict[int | str, dict] = {}
     counted_txs: dict[int | str, set] = {}
-    # Track which resolved category IDs have spending (for has_children check)
     cats_with_spending: set[int] = set()
 
     for tx, li in rows:
-        cat_str = li.category or "Uncategorized"
-        resolved_id, root_id = resolve_category(cat_str, resolver)
-
-        if root_id is not None:
-            key = root_id
+        if li.category_id is None:
+            key = "Uncategorized"
         else:
-            key = cat_str  # unresolved — use raw string
-
-        if resolved_id is not None:
-            cats_with_spending.add(resolved_id)
+            cats_with_spending.add(li.category_id)
+            key = _find_root(li.category_id, cat_id_to_cat)
 
         if key not in groups:
             groups[key] = {"total": 0.0}
@@ -120,11 +172,9 @@ def get_by_category(
         counted_txs[key].add(tx.id)
 
     def has_spending_children(cat_id: int) -> bool:
-        """Check if any direct child of cat_id has spending (or descendants with spending)."""
-        for child_id in get_direct_children(cat_id, resolver):
+        for child_id in _get_direct_children(cat_id, children_by_parent):
             if child_id in cats_with_spending:
                 return True
-            # Check if any descendant of child has spending
             if has_spending_children(child_id):
                 return True
         return False
@@ -132,7 +182,7 @@ def get_by_category(
     result = []
     for key, data in groups.items():
         if isinstance(key, int):
-            cat = resolver.cat_id_to_cat.get(key)
+            cat = cat_id_to_cat.get(key)
             name = cat.name if cat else f"Category #{key}"
             children = has_spending_children(key)
         else:
@@ -159,32 +209,22 @@ def get_by_category_children(
     db: Session = Depends(get_db),
 ):
     """Spending grouped by direct children of a given category."""
-    resolver = build_resolver(db)
+    cat_id_to_cat, children_by_parent = _build_hierarchy(db)
     rows = _get_expense_line_items(db, date_from, date_to)
 
-    # Group by direct child of category_id
     groups: dict[int, dict] = {}
     counted_txs: dict[int, set] = {}
     cats_with_spending: set[int] = set()
 
     for tx, li in rows:
-        cat_str = li.category or ""
-        resolved_id, _ = resolve_category(cat_str, resolver)
-        if resolved_id is None:
+        if li.category_id is None:
             continue
-
-        cats_with_spending.add(resolved_id)
-
-        # Check if this item is a descendant of category_id
-        if not is_descendant_of(resolved_id, category_id, resolver):
+        cats_with_spending.add(li.category_id)
+        if not _is_descendant_of(li.category_id, category_id, cat_id_to_cat):
             continue
-
-        # Find which direct child of category_id this falls under
-        child_id = find_direct_child_ancestor(resolved_id, category_id, resolver)
+        child_id = _find_direct_child_ancestor(li.category_id, category_id, children_by_parent, cat_id_to_cat)
         if child_id is None:
-            # Item is directly at this category level, not in any child
             continue
-
         if child_id not in groups:
             groups[child_id] = {"total": 0.0}
             counted_txs[child_id] = set()
@@ -192,7 +232,7 @@ def get_by_category_children(
         counted_txs[child_id].add(tx.id)
 
     def has_spending_descendants(cat_id: int) -> bool:
-        for cid in get_direct_children(cat_id, resolver):
+        for cid in _get_direct_children(cat_id, children_by_parent):
             if cid in cats_with_spending:
                 return True
             if has_spending_descendants(cid):
@@ -201,9 +241,8 @@ def get_by_category_children(
 
     result = []
     for child_id, data in groups.items():
-        cat = resolver.cat_id_to_cat.get(child_id)
+        cat = cat_id_to_cat.get(child_id)
         name = cat.name if cat else f"Category #{child_id}"
-
         result.append(CategorySpending(
             category=name,
             category_id=child_id,
@@ -216,54 +255,6 @@ def get_by_category_children(
     return result
 
 
-@router.get("/by-subcategory", response_model=list[SubcategorySpending])
-def get_by_subcategory(
-    categorie: str | None = None,
-    date_from: date | None = None,
-    date_to: date | None = None,
-    db: Session = Depends(get_db),
-):
-    """Legacy detail view: non-remaining line items for a given category."""
-    query = (
-        select(Transaction, LineItem)
-        .join(Receipt, Receipt.transaction_id == Transaction.id)
-        .join(LineItem, LineItem.receipt_id == Receipt.id)
-        .where(Transaction.bedrag < 0)
-        .where(LineItem.is_remaining == False)  # noqa: E712
-    )
-
-    if categorie:
-        matching_tx_ids = (
-            select(Transaction.id)
-            .join(Receipt, Receipt.transaction_id == Transaction.id)
-            .join(LineItem, LineItem.receipt_id == Receipt.id)
-            .where(LineItem.category == categorie)
-        )
-        query = query.where(Transaction.id.in_(matching_tx_ids))
-
-    if date_from:
-        query = query.where(Transaction.datum >= date_from)
-    if date_to:
-        query = query.where(Transaction.datum <= date_to)
-
-    rows = db.execute(query).all()
-
-    cats: dict[str, dict] = {}
-    for tx, li in rows:
-        cat = li.category or "Uncategorized"
-        if cat not in cats:
-            cats[cat] = {"total": 0.0, "count": 0}
-        cats[cat]["total"] += li.amount * li.quantity
-        cats[cat]["count"] += 1
-
-    result = [
-        SubcategorySpending(category=cat, total=data["total"], count=data["count"])
-        for cat, data in cats.items()
-    ]
-    result.sort(key=lambda x: x.total, reverse=True)
-    return result
-
-
 @router.get("/category/{category_id}/line-items", response_model=CategoryDetail)
 def get_category_line_items(
     category_id: int,
@@ -272,18 +263,16 @@ def get_category_line_items(
     db: Session = Depends(get_db),
 ):
     """Line items under a category (including descendants), with transaction context."""
-    from fastapi import HTTPException
-
-    resolver = build_resolver(db)
-    cat = resolver.cat_id_to_cat.get(category_id)
+    cat_id_to_cat, _ = _build_hierarchy(db)
+    cat = cat_id_to_cat.get(category_id)
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    # Build breadcrumb: walk from this category up to root
+    # Build breadcrumb
     breadcrumb = []
     current = category_id
-    while current in resolver.cat_id_to_cat:
-        c = resolver.cat_id_to_cat[current]
+    while current in cat_id_to_cat:
+        c = cat_id_to_cat[current]
         breadcrumb.append(BreadcrumbItem(id=c.id, name=c.name))
         if c.parent_id is None:
             break
@@ -295,13 +284,10 @@ def get_category_line_items(
     items = []
     total = 0.0
     for tx, li in rows:
-        cat_str = li.category or ""
-        resolved_id, _ = resolve_category(cat_str, resolver)
-        if resolved_id is None:
+        if li.category_id is None:
             continue
-        if not is_descendant_of(resolved_id, category_id, resolver):
+        if not _is_descendant_of(li.category_id, category_id, cat_id_to_cat):
             continue
-
         li_total = li.amount * li.quantity
         total += li_total
         items.append(SpendingLineItem(
@@ -309,7 +295,8 @@ def get_category_line_items(
             description=li.description,
             amount=li.amount,
             quantity=li.quantity,
-            category=li.category,
+            category_id=li.category_id,
+            category_name=li.category.name if li.category else None,
             is_remaining=li.is_remaining,
             transaction_id=tx.id,
             transaction_date=tx.datum,
@@ -317,7 +304,6 @@ def get_category_line_items(
             transaction_amount=tx.bedrag,
         ))
 
-    # Sort by transaction date descending
     items.sort(key=lambda x: x.transaction_date, reverse=True)
 
     return CategoryDetail(
@@ -349,7 +335,6 @@ def get_monthly_trend(
         else:
             monthly[key]["expenses"] += abs(tx.bedrag)
 
-    # Sort by month and take last N
     sorted_months = sorted(monthly.keys())[-months:]
 
     return [
@@ -363,13 +348,16 @@ def get_monthly_trend(
     ]
 
 
-@router.get("/budget-vs-actual/{year}/{month}", response_model=BudgetVsActualSummary)
-def get_budget_vs_actual(year: int, month: int, db: Session = Depends(get_db)):
-    """Compare budgeted amounts with actual transactions for a given month."""
-    first_day = date(year, month, 1)
-    last_day = date(year, month, monthrange(year, month)[1])
+@router.get("/budget-vs-actual/{budget_id}", response_model=BudgetVsActualSummary)
+def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
+    """Compare budgeted amounts with actual transactions for a budget period."""
+    budget = db.get(Budget, budget_id)
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
 
-    # Load line items joined with transactions for the month
+    first_day = budget.start_date
+    last_day = budget.end_date
+
     query = (
         select(Transaction, LineItem)
         .join(Receipt, Receipt.transaction_id == Transaction.id)
@@ -381,47 +369,30 @@ def get_budget_vs_actual(year: int, month: int, db: Session = Depends(get_db)):
     )
     rows = db.execute(query).all()
 
-    # Build category name -> id lookup
     all_cats = db.execute(select(CategoryModel)).scalars().all()
-    cat_name_to_id = {c.name: c.id for c in all_cats}
     categories = {c.id: c for c in all_cats}
-
-    # CategoryMapping as fallback for bank category names
-    mappings = db.execute(select(CategoryMapping)).scalars().all()
-    mapping_dict = {m.bank_category: m.category_id for m in mappings}
 
     actuals: dict[int, float] = {}
     unmapped_expenses = 0.0
     unmapped_income = 0.0
 
     for tx, li in rows:
-        cat_str = li.category or ""
-        # Resolve to category_id: direct name match first, then mapping fallback
-        cat_id = cat_name_to_id.get(cat_str) or mapping_dict.get(cat_str)
-
         li_amount = li.amount * li.quantity
         is_income = tx.bedrag > 0
 
-        if cat_id is None:
+        if li.category_id is None:
             if is_income:
                 unmapped_income += li_amount
             else:
                 unmapped_expenses += li_amount
             continue
 
-        actuals[cat_id] = actuals.get(cat_id, 0.0) + li_amount
-
-    # Load budget
-    budget = db.execute(
-        select(Budget).where(Budget.year == year, Budget.month == month)
-    ).scalar_one_or_none()
+        actuals[li.category_id] = actuals.get(li.category_id, 0.0) + li_amount
 
     budgeted_by_cat: dict[int, float] = {}
-    if budget:
-        for line in budget.lines:
-            budgeted_by_cat[line.category_id] = line.amount
+    for line in budget.lines:
+        budgeted_by_cat[line.category_id] = line.amount
 
-    # Collect all category IDs that appear in either budget or actuals
     all_cat_ids = set(budgeted_by_cat.keys()) | set(actuals.keys())
 
     income_lines = []
@@ -466,7 +437,6 @@ def get_budget_vs_actual(year: int, month: int, db: Session = Depends(get_db)):
         else:
             expense_lines.append(line)
 
-    # Sort by actual amount descending
     income_lines.sort(key=lambda x: x.actual, reverse=True)
     expense_lines.sort(key=lambda x: x.actual, reverse=True)
 
@@ -475,8 +445,9 @@ def get_budget_vs_actual(year: int, month: int, db: Session = Depends(get_db)):
     savings_rate = (actual_net / total_actual_income * 100) if total_actual_income > 0 else 0.0
 
     return BudgetVsActualSummary(
-        year=year,
-        month=month,
+        budget_id=budget.id,
+        start_date=budget.start_date,
+        end_date=budget.end_date,
         total_budgeted_income=total_budgeted_income,
         total_actual_income=total_actual_income,
         total_budgeted_expenses=total_budgeted_expenses,

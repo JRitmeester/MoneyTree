@@ -19,6 +19,8 @@ export interface Transaction {
 	valuta: string;
 	omschrijving: string;
 	categorie: string;
+	category_id: number | null;
+	category_name: string | null;
 	merchant_name: string | null;
 	type: string;
 	code: string;
@@ -93,7 +95,7 @@ export async function getTransactions(params: {
 	per_page?: number;
 	date_from?: string;
 	date_to?: string;
-	categorie?: string;
+	category_id?: number;
 	search?: string;
 	has_receipt?: boolean;
 } = {}): Promise<TransactionListResponse> {
@@ -108,7 +110,7 @@ export async function getTransaction(id: number): Promise<TransactionDetail> {
 	return request(`/api/transactions/${id}`);
 }
 
-export async function updateTransaction(id: number, data: { categorie?: string }): Promise<Transaction> {
+export async function updateTransaction(id: number, data: { category_id?: number | null }): Promise<Transaction> {
 	return request(`/api/transactions/${id}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
@@ -158,7 +160,8 @@ export interface LineItem {
 	description: string;
 	amount: number;
 	quantity: number;
-	category: string | null;
+	category_id: number | null;
+	category_name: string | null;
 	sort_order: number;
 	is_remaining: boolean;
 }
@@ -167,7 +170,7 @@ export interface LineItemCreate {
 	description: string;
 	amount: number;
 	quantity?: number;
-	category?: string | null;
+	category_id?: number | null;
 	sort_order?: number;
 }
 
@@ -185,10 +188,17 @@ export interface ReceiptCreateResponse {
 	ocr_result: OcrResult;
 }
 
-export async function uploadReceipt(file: File): Promise<ReceiptCreateResponse> {
+export async function uploadReceipt(file: File, preset?: string): Promise<ReceiptCreateResponse> {
 	const form = new FormData();
 	form.append('file', file);
+	if (preset) {
+		form.append('preset', preset);
+	}
 	return request('/api/receipts', { method: 'POST', body: form });
+}
+
+export async function getReceiptPresets(): Promise<string[]> {
+	return request('/api/receipts/presets');
 }
 
 export async function getReceipts(params: {
@@ -245,7 +255,7 @@ export async function bulkReplaceLineItems(receiptId: number, items: LineItemCre
 	});
 }
 
-export async function updateLineItem(id: number, data: Partial<LineItemCreate>): Promise<LineItem> {
+export async function updateLineItem(id: number, data: { category_id?: number | null; description?: string; amount?: number; quantity?: number; sort_order?: number }): Promise<LineItem> {
 	return request(`/api/line-items/${id}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
@@ -255,10 +265,6 @@ export async function updateLineItem(id: number, data: Partial<LineItemCreate>):
 
 export async function deleteLineItem(id: number): Promise<void> {
 	return request(`/api/line-items/${id}`, { method: 'DELETE' });
-}
-
-export async function getLineItemCategories(q: string): Promise<string[]> {
-	return request(`/api/line-items/categories?q=${encodeURIComponent(q)}`);
 }
 
 export async function triggerMatching(): Promise<MatchCandidate[]> {
@@ -327,7 +333,8 @@ export interface SpendingLineItem {
 	description: string;
 	amount: number;
 	quantity: number;
-	category: string | null;
+	category_id: number | null;
+	category_name: string | null;
 	is_remaining: boolean;
 	transaction_id: number;
 	transaction_date: string;
@@ -392,7 +399,6 @@ export interface Category {
 	id: number;
 	name: string;
 	parent_id: number | null;
-	is_bank_category: boolean;
 	is_fixed: boolean;
 	category_type: string;
 	children: Category[];
@@ -474,8 +480,8 @@ export interface BudgetLine {
 
 export interface BudgetSummary {
 	id: number;
-	year: number;
-	month: number;
+	start_date: string;
+	end_date: string;
 	line_count: number;
 	created_at: string;
 	updated_at: string;
@@ -483,8 +489,8 @@ export interface BudgetSummary {
 
 export interface Budget {
 	id: number;
-	year: number;
-	month: number;
+	start_date: string;
+	end_date: string;
 	lines: BudgetLine[];
 	created_at: string;
 	updated_at: string;
@@ -502,8 +508,9 @@ export interface BudgetVsActualLine {
 }
 
 export interface BudgetVsActualSummary {
-	year: number;
-	month: number;
+	budget_id: number;
+	start_date: string;
+	end_date: string;
 	total_budgeted_income: number;
 	total_actual_income: number;
 	total_budgeted_expenses: number;
@@ -521,25 +528,49 @@ export async function getBudgets(): Promise<BudgetSummary[]> {
 	return request('/api/budgets');
 }
 
-export async function getBudget(year: number, month: number): Promise<Budget> {
-	return request(`/api/budgets/${year}/${month}`);
+export async function getBudget(budgetId: number): Promise<Budget> {
+	return request(`/api/budgets/${budgetId}`);
 }
 
-export async function updateBudget(year: number, month: number, data: { lines: { category_id: number; amount: number }[] }, updateTemplate: boolean = false): Promise<Budget> {
+export async function createBudget(data: { start_date: string; end_date: string }): Promise<Budget> {
+	return request('/api/budgets', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data),
+	});
+}
+
+export async function updateBudget(budgetId: number, data: { lines: { category_id: number; amount: number }[] }, updateTemplate: boolean = false): Promise<Budget> {
 	const qs = updateTemplate ? '?update_template=true' : '';
-	return request(`/api/budgets/${year}/${month}${qs}`, {
+	return request(`/api/budgets/${budgetId}${qs}`, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(data),
 	});
 }
 
-export async function deleteBudget(year: number, month: number): Promise<void> {
-	return request(`/api/budgets/${year}/${month}`, { method: 'DELETE' });
+export async function patchBudget(budgetId: number, data: { start_date?: string; end_date?: string }): Promise<Budget> {
+	return request(`/api/budgets/${budgetId}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data),
+	});
 }
 
-export async function getBudgetVsActual(year: number, month: number): Promise<BudgetVsActualSummary> {
-	return request(`/api/dashboard/budget-vs-actual/${year}/${month}`);
+export async function deleteBudget(budgetId: number): Promise<void> {
+	return request(`/api/budgets/${budgetId}`, { method: 'DELETE' });
+}
+
+export async function getBudgetVsActual(budgetId: number): Promise<BudgetVsActualSummary> {
+	return request(`/api/dashboard/budget-vs-actual/${budgetId}`);
+}
+
+export function formatPeriodLabel(startDate: string, endDate: string): string {
+	const start = new Date(startDate);
+	const end = new Date(endDate);
+	const fmt = (d: Date) => d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+	const yearStr = end.toLocaleDateString('nl-NL', { year: 'numeric' });
+	return `${fmt(start)} - ${fmt(end)} ${yearStr}`;
 }
 
 // --- Budget Template ---

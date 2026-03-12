@@ -47,30 +47,30 @@ def recalculate_remaining(db: Session, receipt: Receipt, transaction_amount: flo
     remaining = next((li for li in items if li.is_remaining), None)
 
     if remaining_amount <= 0:
-        # Fully accounted for — remove remaining item and sync tx.categorie
+        # Fully accounted for — remove remaining item
         if remaining:
             db.delete(remaining)
-        # Update tx.categorie to the category of the highest-amount explicit item
+        # Sync transaction.category_id to the highest-amount explicit item
         if receipt.transaction:
-            explicit_items = [li for li in items if not li.is_remaining and li.category]
+            explicit_items = [li for li in items if not li.is_remaining and li.category_id is not None]
             if explicit_items:
                 best = max(explicit_items, key=lambda li: li.amount * li.quantity)
-                receipt.transaction.categorie = best.category
+                receipt.transaction.category_id = best.category_id
         return None
     else:
         if remaining:
             remaining.amount = remaining_amount
         else:
-            # Recreate remaining item
-            category = None
+            # Recreate remaining item, inheriting transaction's category
+            category_id = None
             if receipt.transaction:
-                category = receipt.transaction.categorie
+                category_id = receipt.transaction.category_id
             remaining = LineItem(
                 receipt_id=receipt.id,
                 description="Remaining",
                 amount=remaining_amount,
                 quantity=1,
-                category=category,
+                category_id=category_id,
                 sort_order=999,
                 is_remaining=True,
             )

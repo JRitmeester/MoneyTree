@@ -1,24 +1,37 @@
 <script lang="ts">
-	import { uploadReceipt, bulkReplaceLineItems, updateReceipt, type ReceiptCreateResponse, type LineItemCreate } from '$lib/api';
+	import { uploadReceipt, bulkReplaceLineItems, updateReceipt, linkReceipt, getReceiptPresets, type ReceiptCreateResponse, type LineItemCreate } from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import { resolveAmount, evaluateExpression } from '$lib/calc';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+
+	// Auto-link to transaction if passed via query param
+	let transactionId = $derived(page.url.searchParams.get('transaction_id'));
 
 	// Steps: 1=upload, 2=review OCR, 3=done
 	let step = $state(1);
 	let loading = $state(false);
 	let error: string | null = $state(null);
 
+	// Presets
+	let presets: string[] = $state([]);
+	let selectedPreset = $state('');
+
+	$effect(() => {
+		getReceiptPresets().then((p) => { presets = p; });
+	});
+
 	// Upload
 	let file: File | null = $state(null);
 	let previewUrl: string | null = $state(null);
+	let isPdf = $derived(file?.type === 'application/pdf');
 
 	// OCR result
 	let receiptId: number | null = $state(null);
 	let receiptDate = $state('');
 	let totalAmount = $state('');
 	let merchantName = $state('');
-	let lineItems: { description: string; amount: string; quantity: number; category: string }[] = $state([]);
+	let lineItems: { description: string; amount: string; quantity: number; category_id: number | null }[] = $state([]);
 
 	function handleFileChange(e: Event) {
 		const input = e.target as HTMLInputElement;
@@ -34,7 +47,7 @@
 		loading = true;
 		error = null;
 		try {
-			const result: ReceiptCreateResponse = await uploadReceipt(file);
+			const result: ReceiptCreateResponse = await uploadReceipt(file, selectedPreset || undefined);
 			receiptId = result.id;
 			receiptDate = result.ocr_result.date || '';
 			totalAmount = result.ocr_result.total_amount?.toString() || '';
@@ -43,7 +56,7 @@
 				description: li.description,
 				amount: li.amount.toString(),
 				quantity: li.quantity,
-				category: '',
+				category_id: null,
 			}));
 			step = 2;
 		} catch (e: any) {
@@ -54,7 +67,7 @@
 	}
 
 	function addLineItem() {
-		lineItems = [...lineItems, { description: '', amount: '0', quantity: 1, category: '' }];
+		lineItems = [...lineItems, { description: '', amount: '0', quantity: 1, category_id: null }];
 	}
 
 	function removeLineItem(index: number) {
@@ -80,11 +93,16 @@
 					description: li.description,
 					amount: evaluateExpression(li.amount) || 0,
 					quantity: li.quantity,
-					category: li.category || null,
+					category_id: li.category_id,
 				}));
 
 			if (items.length > 0) {
 				await bulkReplaceLineItems(receiptId, items);
+			}
+
+			// Auto-link to transaction if came from transaction page
+			if (transactionId) {
+				await linkReceipt(receiptId, Number(transactionId));
 			}
 
 			step = 3;
@@ -107,7 +125,13 @@
 
 	<div class="upload-area">
 		{#if previewUrl}
-			<img src={previewUrl} alt="Preview" class="preview" />
+			{#if isPdf}
+				<object data={previewUrl} type="application/pdf" class="preview-pdf" title="PDF Preview">
+					<p>PDF selected: {file?.name}</p>
+				</object>
+			{:else}
+				<img src={previewUrl} alt="Preview" class="preview" />
+			{/if}
 		{/if}
 		<div class="upload-controls">
 			<label class="file-btn">
@@ -115,14 +139,25 @@
 				Take Photo
 			</label>
 			<label class="file-btn secondary">
-				<input type="file" accept="image/*" onchange={handleFileChange} hidden />
+				<input type="file" accept="image/*,application/pdf" onchange={handleFileChange} hidden />
 				Choose File
 			</label>
 		</div>
 		{#if file}
 			<p class="filename">{file.name}</p>
+			{#if presets.length > 0}
+				<div class="preset-select">
+					<label for="preset">Parsing preset</label>
+					<select id="preset" bind:value={selectedPreset}>
+						<option value="">Generic</option>
+						{#each presets as p}
+							<option value={p}>{p.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
 			<button class="submit-btn" onclick={handleUpload} disabled={loading}>
-				{loading ? 'Processing OCR...' : 'Upload & Process'}
+				{loading ? 'Processing...' : 'Upload & Process'}
 			</button>
 		{/if}
 	</div>
@@ -152,7 +187,7 @@
 						<input type="text" placeholder="Description" bind:value={item.description} class="desc" />
 						<input type="text" placeholder="Amount" bind:value={item.amount} class="amt" onblur={() => { item.amount = resolveAmount(item.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); item.amount = resolveAmount(item.amount); }}} />
 						<input type="number" min="1" bind:value={item.quantity} class="qty" />
-						<div class="cat"><CategoryInput value={item.category} onchange={(v) => { item.category = v; }} placeholder="Category" /></div>
+						<div class="cat"><CategoryInput value={item.category_id} onchange={(v) => { item.category_id = v; }} placeholder="Category" /></div>
 						<button class="remove-btn" onclick={() => removeLineItem(i)}>x</button>
 					</div>
 				{/each}
@@ -180,15 +215,24 @@
 
 		{#if previewUrl}
 			<div class="preview-section">
-				<img src={previewUrl} alt="Receipt" />
+				{#if isPdf}
+					<object data={previewUrl} type="application/pdf" class="preview-pdf" title="PDF Preview">
+						<p>PDF receipt</p>
+					</object>
+				{:else}
+					<img src={previewUrl} alt="Receipt" />
+				{/if}
 			</div>
 		{/if}
 	</div>
 {:else}
 	<div class="done">
-		<h1>Receipt Saved</h1>
+		<h1>Receipt Saved{transactionId ? ' & Linked' : ''}</h1>
 		<div class="done-actions">
-			<button onclick={() => goto(`/receipts/${receiptId}`)}>View Receipt</button>
+			{#if transactionId}
+				<button onclick={() => goto(`/transactions/${transactionId}`)}>Back to Transaction</button>
+			{/if}
+			<button class={transactionId ? 'secondary' : ''} onclick={() => goto(`/receipts/${receiptId}`)}>View Receipt</button>
 			<button class="secondary" onclick={() => { step = 1; file = null; previewUrl = null; }}>Add Another</button>
 			<button class="secondary" onclick={() => goto('/receipts')}>Back to Receipts</button>
 		</div>
@@ -222,6 +266,13 @@
 		border-radius: 8px;
 		margin-bottom: 1rem;
 	}
+	.preview-pdf {
+		width: 100%;
+		height: 400px;
+		border-radius: 8px;
+		margin-bottom: 1rem;
+		border: 1px solid #ddd;
+	}
 	.upload-controls {
 		display: flex;
 		gap: 1rem;
@@ -245,6 +296,25 @@
 		color: #666;
 		font-size: 0.85rem;
 		margin: 0.5rem 0;
+	}
+	.preset-select {
+		margin: 0.75rem auto;
+		max-width: 250px;
+		text-align: left;
+	}
+	.preset-select label {
+		display: block;
+		font-size: 0.85rem;
+		color: #666;
+		margin-bottom: 0.25rem;
+	}
+	.preset-select select {
+		width: 100%;
+		padding: 0.5rem;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		font-size: 0.95rem;
+		background: white;
 	}
 	.submit-btn {
 		padding: 0.6rem 2rem;

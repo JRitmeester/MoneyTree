@@ -3,9 +3,8 @@
 	import {
 		getTransaction, getTransactions, saveTransactionLineItems, updateTransaction, updateLineItem,
 		linkOffset, unlinkOffset,
-		getCategories,
 		formatEuro, formatDate,
-		type TransactionDetail, type Transaction, type LineItem, type LineItemCreate, type Category
+		type TransactionDetail, type Transaction, type LineItemCreate
 	} from '$lib/api';
 	import { resolveAmount, evaluateExpression } from '$lib/calc';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
@@ -15,26 +14,20 @@
 	let error: string | null = $state(null);
 
 	// Category selection
-	let categories: Category[] = $state([]);
-	let selectedCategory = $state('');
+	let selectedCategory: number | null = $state(null);
 	let savingCategory = $state(false);
 
 	// Line items editing state
 	let editing = $state(false);
-	let editItems: { description: string; amount: string; category: string }[] = $state([]);
+	let editItems: { description: string; amount: string; category_id: number | null }[] = $state([]);
 	let saving = $state(false);
 
 	async function load() {
 		const id = Number(page.params.id);
 		loading = true;
 		try {
-			const [txData, cats] = await Promise.all([
-				getTransaction(id),
-				getCategories(),
-			]);
-			tx = txData;
-			categories = cats;
-			selectedCategory = tx.categorie;
+			tx = await getTransaction(id);
+			selectedCategory = tx.category_id;
 		} catch (e: any) {
 			error = e.message;
 		} finally {
@@ -44,29 +37,27 @@
 
 	$effect(() => { load(); });
 
-	async function handleCategoryChange(newCategory: string) {
-		if (!tx || newCategory === tx.categorie || !newCategory) return;
+	async function handleCategoryChange(newCategory: number | null) {
+		if (!tx || newCategory === tx.category_id) return;
 		selectedCategory = newCategory;
 		savingCategory = true;
 		try {
-			await updateTransaction(tx.id, { categorie: newCategory });
-			tx.categorie = newCategory;
-			// Reload to get updated remaining line item
+			await updateTransaction(tx.id, { category_id: newCategory });
+			tx.category_id = newCategory;
 			await load();
 		} catch (e: any) {
 			error = e.message;
-			selectedCategory = tx.categorie;
+			selectedCategory = tx.category_id;
 		} finally {
 			savingCategory = false;
 		}
 	}
 
-	async function handleRemainingCategoryChange(itemId: number, newCategory: string) {
-		if (!tx || !newCategory) return;
+	async function handleRemainingCategoryChange(itemId: number, newCategory: number | null) {
+		if (!tx) return;
 		savingCategory = true;
 		try {
-			await updateLineItem(itemId, { category: newCategory });
-			// Reload to get synced tx.categorie
+			await updateLineItem(itemId, { category_id: newCategory });
 			await load();
 		} catch (e: any) {
 			error = e.message;
@@ -82,14 +73,14 @@
 			.map(li => ({
 				description: li.description,
 				amount: (li.amount * li.quantity).toString(),
-				category: li.category || '',
+				category_id: li.category_id,
 			}));
 		editing = true;
 	}
 
 	function addRow() {
 		if (!editing) startEditing();
-		editItems = [...editItems, { description: '', amount: '', category: '' }];
+		editItems = [...editItems, { description: '', amount: '', category_id: null }];
 	}
 
 	function removeRow(index: number) {
@@ -111,7 +102,7 @@
 					description: it.description.trim(),
 					amount: evaluateExpression(it.amount) || 0,
 					quantity: 1,
-					category: it.category || null,
+					category_id: it.category_id,
 					sort_order: i,
 				}));
 			await saveTransactionLineItems(tx.id, items);
@@ -255,7 +246,7 @@
 		{#if tx.receipt}
 			<p>Receipt attached — <a href={`/receipts/${tx.receipt.id}`}>View receipt</a></p>
 		{:else}
-			<p class="muted">No receipt attached yet.</p>
+			<p class="muted">No receipt attached yet. <a href="/receipts/new?transaction_id={tx.id}" class="add-receipt-link">Add a receipt</a></p>
 		{/if}
 	</div>
 
@@ -337,7 +328,7 @@
 					{#each editItems as item, i}
 						<tr>
 							<td><input type="text" bind:value={item.description} placeholder="Description" /></td>
-							<td><CategoryInput value={item.category} onchange={(v) => { editItems[i].category = v; }} placeholder="Category" /></td>
+							<td><CategoryInput value={item.category_id} onchange={(v) => { editItems[i].category_id = v; }} placeholder="Category" /></td>
 							<td><input type="text" bind:value={item.amount} class="amt-input" placeholder="0.00" onblur={() => { item.amount = resolveAmount(item.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); item.amount = resolveAmount(item.amount); }}} /></td>
 							<td><button class="remove-btn" onclick={() => removeRow(i)}>x</button></td>
 						</tr>
@@ -376,8 +367,8 @@
 						<tr>
 							<td>{item.description}</td>
 							<td>
-								{#if item.category}
-									<span class="cat-badge">{item.category}</span>
+								{#if item.category_name}
+									<span class="cat-badge">{item.category_name}</span>
 								{:else}
 									<span class="muted">-</span>
 								{/if}
@@ -391,7 +382,7 @@
 							<td>
 								<div class="remaining-cat-input">
 									<CategoryInput
-										value={remainingItem.category || ''}
+										value={remainingItem.category_id}
 										onchange={(v) => handleRemainingCategoryChange(remainingItem!.id, v)}
 										placeholder="Category"
 									/>
@@ -504,6 +495,11 @@
 	.muted {
 		color: #999;
 		font-style: italic;
+	}
+	.muted :global(.add-receipt-link) {
+		color: #2d6a4f;
+		font-style: normal;
+		font-weight: 500;
 	}
 
 	/* Line items section */

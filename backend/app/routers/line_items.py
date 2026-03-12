@@ -1,29 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import LineItem, Receipt
+from ..models import Category, LineItem, Receipt
 from ..schemas import LineItemCreate, LineItemOut, LineItemUpdate
 from ..services.remaining import recalculate_remaining
 
 router = APIRouter(tags=["line_items"])
-
-
-@router.get("/api/line-items/categories", response_model=list[str])
-def get_categories(q: str = Query("", min_length=0), db: Session = Depends(get_db)):
-    """Return distinct category values, filtered by substring."""
-    rows = db.execute(
-        select(LineItem.category).where(
-            LineItem.category.isnot(None),
-            LineItem.category != "",
-        ).distinct()
-    ).scalars().all()
-
-    categories = {c.strip() for c in rows if c and c.strip()}
-    q_lower = q.lower()
-    matched = sorted(c for c in categories if q_lower in c.lower())
-    return matched
 
 
 @router.get("/api/receipts/{receipt_id}/line-items", response_model=list[LineItemOut])
@@ -47,6 +31,9 @@ def create_line_item(receipt_id: int, data: LineItemCreate, db: Session = Depend
     receipt = db.get(Receipt, receipt_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
+
+    if data.category_id is not None and not db.get(Category, data.category_id):
+        raise HTTPException(status_code=404, detail="Category not found")
 
     item = LineItem(receipt_id=receipt_id, is_remaining=False, **data.model_dump())
     db.add(item)
@@ -116,10 +103,13 @@ def update_line_item(item_id: int, data: LineItemUpdate, db: Session = Depends(g
 
     updates = data.model_dump(exclude_unset=True)
 
-    # If updating a remaining item's category, sync to transaction
-    if item.is_remaining and "category" in updates:
-        if item.receipt and item.receipt.transaction:
-            item.receipt.transaction.categorie = updates["category"] or ""
+    if "category_id" in updates:
+        cat_id = updates["category_id"]
+        if cat_id is not None and not db.get(Category, cat_id):
+            raise HTTPException(status_code=404, detail="Category not found")
+        # If updating a remaining item's category, sync to transaction
+        if item.is_remaining and item.receipt and item.receipt.transaction:
+            item.receipt.transaction.category_id = cat_id
 
     # Don't allow changing is_remaining flag
     updates.pop("is_remaining", None)

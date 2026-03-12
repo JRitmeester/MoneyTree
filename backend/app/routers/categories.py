@@ -35,7 +35,6 @@ def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
     cat = Category(
         name=data.name,
         parent_id=data.parent_id,
-        is_bank_category=False,
         category_type=data.category_type,
         is_fixed=data.is_fixed,
     )

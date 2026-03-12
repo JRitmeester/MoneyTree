@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,7 @@ from ..database import get_db
 from ..models import LineItem, Receipt, Transaction
 from ..services.remaining import recalculate_remaining
 from ..schemas import (
+    MatchCandidate,
     ReceiptCreateResponse,
     ReceiptDetail,
     ReceiptOut,
@@ -19,7 +20,8 @@ from ..schemas import (
     OcrLineItem,
     OcrResult,
 )
-from ..services.ocr import process_receipt
+from ..services.ocr import process_pdf, process_receipt
+from ..services.receipt_presets import PRESETS
 
 router = APIRouter(prefix="/api/receipts", tags=["receipts"])
 
@@ -40,14 +42,29 @@ def _save_upload(file: UploadFile) -> str:
     return str(file_path.relative_to(UPLOADS_DIR))
 
 
+@router.get("/presets")
+def list_presets():
+    """Return available receipt parsing preset names."""
+    return list(PRESETS.keys())
+
+
 @router.post("", response_model=ReceiptCreateResponse)
-async def create_receipt(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def create_receipt(
+    file: UploadFile = File(...),
+    preset: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
     """Upload a receipt image, run OCR, return extracted data."""
     relative_path = _save_upload(file)
     absolute_path = str(UPLOADS_DIR / relative_path)
 
-    # Run OCR
-    ocr_data = process_receipt(absolute_path)
+    # Extract data: use preset parser, generic PDF, or OCR for images
+    if preset and preset in PRESETS and relative_path.lower().endswith(".pdf"):
+        ocr_data = PRESETS[preset](absolute_path)
+    elif relative_path.lower().endswith(".pdf"):
+        ocr_data = process_pdf(absolute_path)
+    else:
+        ocr_data = process_receipt(absolute_path)
 
     # Parse date
     receipt_date = None
@@ -120,7 +137,7 @@ async def create_receipt(file: UploadFile = File(...), db: Session = Depends(get
                 description="Remaining",
                 amount=0,
                 quantity=1,
-                category=tx.categorie,
+                category_id=tx.category_id,
                 sort_order=999,
                 is_remaining=True,
             )
@@ -213,9 +230,10 @@ def delete_receipt(receipt_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Receipt not found")
 
     # Delete image file
-    image_file = UPLOADS_DIR / receipt.image_path
-    if image_file.exists():
-        image_file.unlink()
+    if receipt.image_path:
+        image_file = UPLOADS_DIR / receipt.image_path
+        if image_file.exists():
+            image_file.unlink()
 
     db.delete(receipt)
     db.commit()
@@ -262,7 +280,7 @@ def link_receipt(receipt_id: int, transaction_id: int, db: Session = Depends(get
             description="Remaining",
             amount=0,
             quantity=1,
-            category=tx.categorie,
+            category_id=tx.category_id,
             sort_order=999,
             is_remaining=True,
         )
@@ -294,7 +312,7 @@ def unlink_receipt(receipt_id: int, db: Session = Depends(get_db)):
     return receipt
 
 
-@router.post("/match", response_model=list["MatchCandidate"])
+@router.post("/match", response_model=list[MatchCandidate])
 def trigger_matching(db: Session = Depends(get_db)):
     """Re-run matching for all unlinked receipts against unlinked transactions."""
     from ..schemas import MatchCandidate

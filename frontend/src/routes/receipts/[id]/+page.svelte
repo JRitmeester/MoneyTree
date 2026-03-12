@@ -67,14 +67,14 @@
 
 	// Inline line item editing
 	let editingItemId: number | null = $state(null);
-	let editItem = $state({ description: '', amount: '', category: '' });
+	let editItem = $state({ description: '', amount: '', category_id: null as number | null });
 
 	function startEditItem(item: any) {
 		editingItemId = item.id;
 		editItem = {
 			description: item.description,
 			amount: item.amount.toString(),
-			category: item.category || '',
+			category_id: item.category_id,
 		};
 	}
 
@@ -83,7 +83,7 @@
 		await updateLineItem(editingItemId, {
 			description: editItem.description,
 			amount: evaluateExpression(editItem.amount) || 0,
-			category: editItem.category || null,
+			category_id: editItem.category_id,
 		});
 		editingItemId = null;
 		await load();
@@ -175,7 +175,7 @@
 								{#if editingItemId === item.id && !item.is_remaining}
 									<tr>
 										<td><input type="text" bind:value={editItem.description} /></td>
-										<td><CategoryInput value={editItem.category} onchange={(v) => { editItem.category = v; }} placeholder="Category" /></td>
+										<td><CategoryInput value={editItem.category_id} onchange={(v) => { editItem.category_id = v; }} placeholder="Category" /></td>
 										<td><input type="text" bind:value={editItem.amount} class="amt-input" onblur={() => { editItem.amount = resolveAmount(editItem.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); editItem.amount = resolveAmount(editItem.amount); }}} /></td>
 										<td>
 											<button class="save-btn" onclick={saveEditItem}>Save</button>
@@ -195,8 +195,8 @@
 											{/if}
 										</td>
 										<td>
-											{#if item.category}
-												<span class="badge">{item.category}</span>
+											{#if item.category_name}
+												<span class="badge">{item.category_name}</span>
 											{:else}
 												<span class="muted">-</span>
 											{/if}
@@ -227,7 +227,13 @@
 
 		{#if receipt.image_path}
 			<div class="image-section">
-				<img src={imageUrl(receipt.image_path)} alt="Receipt" />
+				{#if receipt.image_path.endsWith('.pdf')}
+					<object data={imageUrl(receipt.image_path)} type="application/pdf" class="pdf-embed" title="PDF Receipt">
+						<p>Cannot display PDF. <a href={imageUrl(receipt.image_path)} target="_blank">Download</a></p>
+					</object>
+				{:else}
+					<img src={imageUrl(receipt.image_path)} alt="Receipt" />
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -409,5 +415,11 @@
 	.image-section img {
 		width: 100%;
 		border-radius: 8px;
+	}
+	.pdf-embed {
+		width: 100%;
+		height: 500px;
+		border-radius: 8px;
+		border: 1px solid #ddd;
 	}
 </style>

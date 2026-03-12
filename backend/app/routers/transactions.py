@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Category, LineItem, Receipt, Transaction, TransactionOffset
+from ..models import Category, CategoryMapping, LineItem, Receipt, Transaction, TransactionOffset
 from ..services.remaining import recalculate_remaining
 from ..schemas import (
     ImportResult,
@@ -20,6 +20,14 @@ from ..schemas import (
 from ..services.csv_parser import parse_asn_csv
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
+
+
+def _category_id_for_categorie(categorie: str, db: Session) -> int | None:
+    """Look up a user category_id from the bank's categorie string via CategoryMapping."""
+    mapping = db.execute(
+        select(CategoryMapping).where(CategoryMapping.bank_category == categorie)
+    ).scalar_one_or_none()
+    return mapping.category_id if mapping else None
 
 
 @router.post("/import", response_model=ImportResult)
@@ -44,16 +52,11 @@ async def import_csv(
 
         if existing:
             if update_duplicates:
-                old_categorie = existing.categorie
                 for key, value in tx_data.items():
                     if key != "import_hash":
                         setattr(existing, key, value)
-                # If categorie changed, sync remaining line item
-                if old_categorie != existing.categorie and existing.receipt:
-                    for li in existing.receipt.line_items:
-                        if li.is_remaining:
-                            li.category = existing.categorie
-                            break
+                # Re-resolve category_id in case mapping changed
+                existing.category_id = _category_id_for_categorie(existing.categorie, db)
                 updated += 1
             else:
                 skipped += 1
@@ -61,6 +64,8 @@ async def import_csv(
 
         if not existing:
             tx = Transaction(**tx_data)
+            # Set user category from mapping
+            tx.category_id = _category_id_for_categorie(tx_data["categorie"], db)
             db.add(tx)
             db.flush()
 
@@ -79,21 +84,12 @@ async def import_csv(
                 description="Remaining",
                 amount=abs(tx.bedrag),
                 quantity=1,
-                category=tx_data["categorie"],
+                category_id=tx.category_id,
                 sort_order=999,
                 is_remaining=True,
             )
             db.add(remaining_li)
             imported += 1
-
-        # Seed bank categories
-        cat_name = tx_data["categorie"]
-        if cat_name:
-            existing_cat = db.execute(
-                select(Category).where(Category.name == cat_name)
-            ).scalar_one_or_none()
-            if not existing_cat:
-                db.add(Category(name=cat_name, is_bank_category=True))
 
     db.commit()
 
@@ -151,7 +147,7 @@ async def import_csv(
 def list_transactions(
     date_from: date | None = None,
     date_to: date | None = None,
-    categorie: str | None = None,
+    category_id: int | None = None,
     search: str | None = None,
     has_receipt: bool | None = None,
     page: int = Query(1, ge=1),
@@ -165,13 +161,13 @@ def list_transactions(
         query = query.where(Transaction.datum >= date_from)
     if date_to:
         query = query.where(Transaction.datum <= date_to)
-    if categorie:
-        # Match transactions where any line item has this category
+    if category_id is not None:
+        # Match transactions where any line item has this category_id
         matching_tx_ids = (
             select(Transaction.id)
             .join(Receipt, Receipt.transaction_id == Transaction.id)
             .join(LineItem, LineItem.receipt_id == Receipt.id)
-            .where(LineItem.category == categorie)
+            .where(LineItem.category_id == category_id)
         )
         query = query.where(Transaction.id.in_(matching_tx_ids))
     if search:
@@ -269,13 +265,17 @@ def update_transaction(transaction_id: int, data: dict, db: Session = Depends(ge
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    if "categorie" in data:
-        tx.categorie = data["categorie"]
+    if "category_id" in data:
+        cat_id = data["category_id"]
+        # Validate category exists
+        if cat_id is not None and not db.get(Category, cat_id):
+            raise HTTPException(status_code=404, detail="Category not found")
+        tx.category_id = cat_id
         # Sync to remaining line item
         if tx.receipt:
             for li in tx.receipt.line_items:
                 if li.is_remaining:
-                    li.category = data["categorie"]
+                    li.category_id = cat_id
                     break
 
     db.commit()
@@ -314,7 +314,7 @@ def save_transaction_line_items(
             description="Remaining",
             amount=abs(tx.bedrag),
             quantity=1,
-            category=tx.categorie,
+            category_id=tx.category_id,
             sort_order=999,
             is_remaining=True,
         )
@@ -336,7 +336,7 @@ def save_transaction_line_items(
             description=item_data.description,
             amount=item_data.amount,
             quantity=item_data.quantity,
-            category=item_data.category,
+            category_id=item_data.category_id,
             sort_order=item_data.sort_order if item_data.sort_order else i,
             is_remaining=False,
         )

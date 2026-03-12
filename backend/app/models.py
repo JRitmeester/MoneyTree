@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -35,8 +36,10 @@ class Transaction(Base):
     merchant_name: Mapped[str | None] = mapped_column(String(255))
     import_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
 
     receipt: Mapped["Receipt | None"] = relationship(back_populates="transaction")
+    category: Mapped["Category | None"] = relationship(foreign_keys=[category_id])
 
     # Offsets: TransactionOffset rows where this tx is the expense
     offset_links: Mapped[list["TransactionOffset"]] = relationship(
@@ -98,11 +101,12 @@ class LineItem(Base):
     description: Mapped[str] = mapped_column(String(255), nullable=False)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, default=1)
-    category: Mapped[str | None] = mapped_column(String(100))
+    category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_remaining: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     receipt: Mapped["Receipt"] = relationship(back_populates="line_items")
+    category: Mapped["Category | None"] = relationship(foreign_keys=[category_id])
 
 
 class Category(Base):
@@ -111,7 +115,6 @@ class Category(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     parent_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
-    is_bank_category: Mapped[bool] = mapped_column(Boolean, default=False)
     is_fixed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     category_type: Mapped[str] = mapped_column(String(10), default="expense", nullable=False)
 
@@ -137,8 +140,8 @@ class Budget(Base):
     __tablename__ = "budgets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    year: Mapped[int] = mapped_column(Integer, nullable=False)
-    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -148,7 +151,7 @@ class Budget(Base):
         back_populates="budget", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (UniqueConstraint("year", "month", name="uq_budget_year_month"),)
+    __table_args__ = (UniqueConstraint("start_date", name="uq_budget_start_date"),)
 
 
 class BudgetLine(Base):
