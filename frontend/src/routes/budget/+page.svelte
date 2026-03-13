@@ -1,21 +1,15 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import {
-		getBudget, getBudgetTemplate, updateBudget, updateCategory,
+		getBudgets, getBudget, getBudgetTemplate, createBudget, updateBudget, patchBudget,
 		getBudgetVsActual, getCategories, deleteBudget,
-		formatEuro, formatDate,
-		type Budget, type BudgetTemplate, type BudgetVsActualSummary, type BudgetVsActualLine, type Category
+		formatEuro, formatPeriodLabel, updateCategory,
+		type Budget, type BudgetSummary, type BudgetTemplate, type BudgetVsActualSummary, type BudgetVsActualLine, type Category
 	} from '$lib/api';
 
-	const MONTH_NAMES = [
-		'January', 'February', 'March', 'April', 'May', 'June',
-		'July', 'August', 'September', 'October', 'November', 'December'
-	];
-
 	// --- State ---
-	let now = new Date();
-	let currentYear = $state(now.getFullYear());
-	let currentMonth = $state(now.getMonth() + 1);
+	let allPeriods: BudgetSummary[] = $state([]);
+	let currentPeriodIndex: number = $state(-1);
 
 	let activeTab: 'plan' | 'actuals' = $state('plan');
 	let loading = $state(true);
@@ -27,6 +21,21 @@
 	let bvaData: BudgetVsActualSummary | null = $state(null);
 	let categories: Category[] = $state([]);
 
+	// Wizard state
+	let wizardOpen = $state(false);
+	let wizardStep: 1 | 2 = $state(1);
+	let wizardStartDate = $state('');
+	let wizardEndDate = $state('');
+	let wizardCreating = $state(false);
+	type WizardLine = { category_id: number; category_name: string; category_type: string; is_fixed: boolean; amount: number; actualAmount: number; useActual: boolean };
+	let wizardLines: WizardLine[] = $state([]);
+
+	// Date editing state
+	let editingDates = $state(false);
+	let editStartDate = $state('');
+	let editEndDate = $state('');
+	let savingDates = $state(false);
+
 	// Edit state
 	let editLines: { category_id: number; category_name: string; category_type: string; is_fixed: boolean; amount: number }[] = $state([]);
 	let updateTemplateChecked = $state(true);
@@ -34,9 +43,11 @@
 	let addPlacement: 'income' | 'fixed' | 'flexible' = $state('flexible');
 
 	// --- Derived ---
-	let monthLabel = $derived(`${MONTH_NAMES[currentMonth - 1]} ${currentYear}`);
+	let currentPeriod = $derived(currentPeriodIndex >= 0 && currentPeriodIndex < allPeriods.length ? allPeriods[currentPeriodIndex] : null);
+	let periodLabel = $derived(currentPeriod ? formatPeriodLabel(currentPeriod.start_date, currentPeriod.end_date) : 'No periods');
+	let hasPrev = $derived(currentPeriodIndex < allPeriods.length - 1);
+	let hasNext = $derived(currentPeriodIndex > 0);
 
-	// Determine if we have a template set up (has any lines)
 	let hasTemplate = $derived(templateData !== null && templateData.lines.length > 0);
 	let hasBudget = $derived(budgetData !== null && budgetData.lines.length > 0);
 
@@ -56,6 +67,16 @@
 	let bvaFixedExpenses = $derived(bvaData?.expense_lines.filter(l => l.is_fixed) ?? []);
 	let bvaFlexibleExpenses = $derived(bvaData?.expense_lines.filter(l => !l.is_fixed) ?? []);
 
+	// Wizard derived
+	let wizardIncomeLines = $derived(wizardLines.filter(l => l.category_type === 'income'));
+	let wizardFixedLines = $derived(wizardLines.filter(l => l.category_type === 'expense' && l.is_fixed));
+	let wizardFlexibleLines = $derived(wizardLines.filter(l => l.category_type === 'expense' && !l.is_fixed));
+	let wizardTotalIncome = $derived(wizardIncomeLines.reduce((s, l) => s + l.amount, 0));
+	let wizardTotalFixed = $derived(wizardFixedLines.reduce((s, l) => s + l.amount, 0));
+	let wizardTotalFlexible = $derived(wizardFlexibleLines.reduce((s, l) => s + l.amount, 0));
+	let wizardDiscretionary = $derived(wizardTotalIncome - wizardTotalFixed);
+	let wizardUnallocated = $derived(wizardDiscretionary - wizardTotalFlexible);
+
 	// Flat categories for picker
 	function flatCategories(cats: Category[], depth = 0): { id: number; name: string; category_type: string; is_fixed: boolean; depth: number }[] {
 		let result: { id: number; name: string; category_type: string; is_fixed: boolean; depth: number }[] = [];
@@ -73,25 +94,62 @@
 		return flatCategories(categories).filter(c => !usedIds.has(c.id));
 	});
 
+	// --- Helpers ---
+	function addDays(dateStr: string, days: number): string {
+		const d = new Date(dateStr);
+		d.setDate(d.getDate() + days);
+		return d.toISOString().split('T')[0];
+	}
+
+	function daysBetween(a: string, b: string): number {
+		return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000);
+	}
+
 	// --- Loading ---
-	async function load() {
+	async function loadPeriods() {
 		loading = true;
 		error = null;
 		try {
-			const [tpl, bva, cats] = await Promise.all([
+			const [periods, tpl, cats] = await Promise.all([
+				getBudgets(),
 				getBudgetTemplate(),
-				getBudgetVsActual(currentYear, currentMonth),
 				getCategories(),
 			]);
+			allPeriods = periods;
 			templateData = tpl;
-			bvaData = bva;
 			categories = cats;
 
-			try {
-				budgetData = await getBudget(currentYear, currentMonth);
-			} catch {
+			if (allPeriods.length > 0) {
+				if (currentPeriodIndex < 0 || currentPeriodIndex >= allPeriods.length) {
+					currentPeriodIndex = 0;
+				}
+				await loadCurrentPeriod();
+			} else {
+				currentPeriodIndex = -1;
 				budgetData = null;
+				bvaData = null;
+				loading = false;
 			}
+		} catch (e: any) {
+			error = e.message;
+			loading = false;
+		}
+	}
+
+	async function loadCurrentPeriod() {
+		if (!currentPeriod) {
+			loading = false;
+			return;
+		}
+		loading = true;
+		error = null;
+		try {
+			const [budget, bva] = await Promise.all([
+				getBudget(currentPeriod.id),
+				getBudgetVsActual(currentPeriod.id),
+			]);
+			budgetData = budget;
+			bvaData = bva;
 		} catch (e: any) {
 			error = e.message;
 		} finally {
@@ -99,29 +157,123 @@
 		}
 	}
 
-	$effect(() => {
-		currentYear; currentMonth;
-		load();
-	});
+	loadPeriods();
 
 	// --- Navigation ---
-	function prevMonth() {
+	function prevPeriod() {
+		if (!hasPrev) return;
 		editing = false;
-		if (currentMonth === 1) {
-			currentMonth = 12;
-			currentYear--;
+		currentPeriodIndex++;
+		loadCurrentPeriod();
+	}
+
+	function nextPeriod() {
+		if (!hasNext) return;
+		editing = false;
+		currentPeriodIndex--;
+		loadCurrentPeriod();
+	}
+
+	// --- Wizard ---
+	function openWizard() {
+		wizardStep = 1;
+		// Pre-fill dates from current period
+		if (currentPeriod) {
+			const duration = daysBetween(currentPeriod.start_date, currentPeriod.end_date);
+			wizardStartDate = addDays(currentPeriod.end_date, 1);
+			wizardEndDate = addDays(wizardStartDate, duration);
 		} else {
-			currentMonth--;
+			wizardStartDate = '';
+			wizardEndDate = '';
+		}
+		wizardLines = [];
+		wizardOpen = true;
+	}
+
+	function wizardGoToStep2() {
+		if (!wizardStartDate || !wizardEndDate) return;
+		// Build lines from current budget (or template)
+		const actualsByCategory: Record<number, number> = {};
+		if (bvaData) {
+			for (const line of [...bvaData.income_lines, ...bvaData.expense_lines]) {
+				actualsByCategory[line.category_id] = line.actual;
+			}
+		}
+
+		const sourceLines = (budgetData && budgetData.lines.length > 0)
+			? budgetData.lines
+			: (templateData?.lines ?? []);
+
+		wizardLines = sourceLines.map(line => ({
+			category_id: line.category_id,
+			category_name: line.category_name,
+			category_type: line.category_type,
+			is_fixed: line.is_fixed,
+			amount: line.amount,
+			actualAmount: actualsByCategory[line.category_id] ?? 0,
+			useActual: false,
+		}));
+		wizardStep = 2;
+	}
+
+	function toggleUseActual(idx: number) {
+		const line = wizardLines[idx];
+		line.useActual = !line.useActual;
+		line.amount = line.useActual ? line.actualAmount : (
+			// Revert to original budgeted amount
+			(budgetData?.lines.find(l => l.category_id === line.category_id)?.amount
+			?? templateData?.lines.find(l => l.category_id === line.category_id)?.amount
+			?? 0)
+		);
+		wizardLines = [...wizardLines];
+	}
+
+	async function wizardConfirm() {
+		wizardCreating = true;
+		error = null;
+		try {
+			const lines = wizardLines
+				.filter(l => l.amount > 0)
+				.map(l => ({ category_id: l.category_id, amount: l.amount }));
+			const created = await createBudget({ start_date: wizardStartDate, end_date: wizardEndDate, lines });
+			wizardOpen = false;
+			const periods = await getBudgets();
+			allPeriods = periods;
+			currentPeriodIndex = allPeriods.findIndex(p => p.id === created.id);
+			if (currentPeriodIndex < 0) currentPeriodIndex = 0;
+			await loadCurrentPeriod();
+		} catch (e: any) {
+			error = e.message;
+		} finally {
+			wizardCreating = false;
 		}
 	}
 
-	function nextMonth() {
-		editing = false;
-		if (currentMonth === 12) {
-			currentMonth = 1;
-			currentYear++;
-		} else {
-			currentMonth++;
+	// --- Date editing ---
+	function startEditingDates() {
+		if (!budgetData) return;
+		editStartDate = budgetData.start_date;
+		editEndDate = budgetData.end_date;
+		editingDates = true;
+	}
+
+	async function saveDates() {
+		if (!budgetData) return;
+		savingDates = true;
+		error = null;
+		try {
+			await patchBudget(budgetData.id, { start_date: editStartDate, end_date: editEndDate });
+			editingDates = false;
+			// Reload to reflect updated dates
+			const periods = await getBudgets();
+			allPeriods = periods;
+			currentPeriodIndex = allPeriods.findIndex(p => p.id === budgetData!.id);
+			if (currentPeriodIndex < 0) currentPeriodIndex = 0;
+			await loadCurrentPeriod();
+		} catch (e: any) {
+			error = e.message;
+		} finally {
+			savingDates = false;
 		}
 	}
 
@@ -139,7 +291,6 @@
 				});
 			}
 		} else if (templateData && templateData.lines.length > 0) {
-			// Pre-fill from template
 			for (const line of templateData.lines) {
 				editLines.push({
 					category_id: line.category_id,
@@ -164,7 +315,6 @@
 		const newType = addPlacement === 'income' ? 'income' : 'expense';
 		const newFixed = addPlacement === 'fixed';
 
-		// Update category on backend if type or fixed status changed
 		if (cat.category_type !== newType || cat.is_fixed !== newFixed) {
 			try {
 				await updateCategory(cat.id, { name: cat.name, category_type: newType, is_fixed: newFixed });
@@ -189,14 +339,15 @@
 	}
 
 	async function saveEditing() {
+		if (!budgetData) return;
 		const lines = editLines
 			.filter(l => l.amount > 0)
 			.map(l => ({ category_id: l.category_id, amount: l.amount }));
 
 		try {
-			await updateBudget(currentYear, currentMonth, { lines }, updateTemplateChecked);
+			await updateBudget(budgetData.id, { lines }, updateTemplateChecked);
 			editing = false;
-			await load();
+			await loadCurrentPeriod();
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -207,11 +358,12 @@
 	}
 
 	async function handleDeleteBudget() {
-		if (!confirm('Delete this budget?')) return;
+		if (!budgetData) return;
+		if (!confirm('Delete this budget period?')) return;
 		try {
-			await deleteBudget(currentYear, currentMonth);
+			await deleteBudget(budgetData.id);
 			budgetData = null;
-			await load();
+			await loadPeriods();
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -256,18 +408,38 @@
 	function getEditLineIndex(line: { category_id: number }): number {
 		return editLines.findIndex(l => l.category_id === line.category_id);
 	}
+
+	function getWizardLineIndex(line: { category_id: number }): number {
+		return wizardLines.findIndex(l => l.category_id === line.category_id);
+	}
 </script>
 
 <div class="budget-page">
-	<!-- Header with month nav -->
+	<!-- Header with period nav -->
 	<div class="header">
-		<div class="month-selector">
-			<button class="nav-btn" onclick={prevMonth}>&larr;</button>
-			<h1>{monthLabel}</h1>
-			<button class="nav-btn" onclick={nextMonth}>&rarr;</button>
+		<div class="period-selector">
+			<button class="nav-btn" onclick={prevPeriod} disabled={!hasPrev}>&larr;</button>
+			{#if editingDates}
+				<div class="inline-date-edit">
+					<input type="date" bind:value={editStartDate} />
+					<span class="separator">-</span>
+					<input type="date" bind:value={editEndDate} />
+					<button class="btn primary small" onclick={saveDates} disabled={savingDates || !editStartDate || !editEndDate}>
+						{savingDates ? '...' : 'Save'}
+					</button>
+					<button class="btn secondary small" onclick={() => { editingDates = false; }}>Cancel</button>
+				</div>
+			{:else}
+				<h1>{periodLabel}</h1>
+				{#if currentPeriod}
+					<button class="edit-dates-btn" onclick={startEditingDates} title="Edit dates">&#9998;</button>
+				{/if}
+			{/if}
+			<button class="nav-btn" onclick={nextPeriod} disabled={!hasNext}>&rarr;</button>
 		</div>
 		<div class="actions">
-			{#if activeTab === 'plan' && !editing && (hasBudget || hasTemplate)}
+			<button class="btn secondary" onclick={openWizard}>New Period</button>
+			{#if activeTab === 'plan' && !editing && currentPeriod && (hasBudget || hasTemplate)}
 				<button class="btn primary" onclick={startEditing}>Edit</button>
 				{#if hasBudget}
 					<button class="btn danger-outline" onclick={handleDeleteBudget}>Delete</button>
@@ -279,6 +451,107 @@
 			{/if}
 		</div>
 	</div>
+
+	<!-- Wizard Modal -->
+	{#if wizardOpen}
+		<div class="wizard-backdrop" onclick={() => { wizardOpen = false; }}>
+			<div class="wizard-modal" onclick={(e) => e.stopPropagation()}>
+				<div class="wizard-header">
+					<h2>Create New Period</h2>
+					<button class="wizard-close" onclick={() => { wizardOpen = false; }}>&times;</button>
+				</div>
+
+				{#if wizardStep === 1}
+					<!-- Step 1: Dates -->
+					<div class="wizard-body">
+						<p class="wizard-desc">Choose the date range for the new budget period.</p>
+						<div class="wizard-dates">
+							<label>
+								Start date
+								<input type="date" bind:value={wizardStartDate} />
+							</label>
+							<label>
+								End date
+								<input type="date" bind:value={wizardEndDate} />
+							</label>
+						</div>
+					</div>
+					<div class="wizard-footer">
+						<button class="btn secondary" onclick={() => { wizardOpen = false; }}>Cancel</button>
+						<button class="btn primary" onclick={wizardGoToStep2} disabled={!wizardStartDate || !wizardEndDate}>Next</button>
+					</div>
+
+				{:else}
+					<!-- Step 2: Lines -->
+					<div class="wizard-body">
+						<p class="wizard-desc">Configure budget amounts. For flexible expenses, you can use the actual spent amount from the current period.</p>
+
+						<div class="wizard-summary">
+							<span class="ws-item"><span class="ws-label">Income</span> <span class="ws-value income-text">{formatEuro(wizardTotalIncome)}</span></span>
+							<span class="ws-item"><span class="ws-label">Fixed</span> <span class="ws-value expense-text">{formatEuro(wizardTotalFixed)}</span></span>
+							<span class="ws-item"><span class="ws-label">Flexible</span> <span class="ws-value expense-text">{formatEuro(wizardTotalFlexible)}</span></span>
+							<span class="ws-item"><span class="ws-label">Unallocated</span> <span class="ws-value" class:unallocated-zero={wizardUnallocated === 0} class:unallocated-nonzero={wizardUnallocated !== 0}>{formatEuro(wizardUnallocated)}</span></span>
+						</div>
+
+						{#if wizardIncomeLines.length > 0}
+							<h3>Income</h3>
+							<div class="wizard-lines">
+								{#each wizardIncomeLines as line}
+									{@const idx = getWizardLineIndex(line)}
+									<div class="wizard-line-row">
+										<span class="cat-name">{line.category_name}</span>
+										<input type="number" step="0.01" min="0" bind:value={wizardLines[idx].amount} />
+									</div>
+								{/each}
+							</div>
+						{/if}
+
+						{#if wizardFixedLines.length > 0}
+							<h3>Fixed Expenses</h3>
+							<div class="wizard-lines">
+								{#each wizardFixedLines as line}
+									{@const idx = getWizardLineIndex(line)}
+									<div class="wizard-line-row">
+										<span class="cat-name">{line.category_name}</span>
+										<input type="number" step="0.01" min="0" bind:value={wizardLines[idx].amount} />
+									</div>
+								{/each}
+							</div>
+						{/if}
+
+						{#if wizardFlexibleLines.length > 0}
+							<h3>Flexible Expenses</h3>
+							<div class="wizard-lines">
+								{#each wizardFlexibleLines as line}
+									{@const idx = getWizardLineIndex(line)}
+									<div class="wizard-line-row">
+										<span class="cat-name">{line.category_name}</span>
+										<input type="number" step="0.01" min="0" bind:value={wizardLines[idx].amount} />
+										{#if line.actualAmount > 0}
+											<label class="actual-toggle">
+												<input type="checkbox" checked={line.useActual} onchange={() => toggleUseActual(idx)} />
+												<span class="actual-label">Actual ({formatEuro(line.actualAmount)})</span>
+											</label>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{/if}
+
+						{#if wizardLines.length === 0}
+							<p class="muted">No budget lines to copy. The new period will be created empty.</p>
+						{/if}
+					</div>
+					<div class="wizard-footer">
+						<button class="btn secondary" onclick={() => { wizardStep = 1; }}>Back</button>
+						<button class="btn primary" onclick={wizardConfirm} disabled={wizardCreating}>
+							{wizardCreating ? 'Creating...' : 'Create Period'}
+						</button>
+					</div>
+				{/if}
+			</div>
+		</div>
+	{/if}
 
 	<!-- Tab bar -->
 	<div class="tab-bar">
@@ -298,6 +571,15 @@
 		<div class="loading">Loading...</div>
 	{:else if error}
 		<div class="error">{error}</div>
+	{:else if !currentPeriod}
+		<!-- No periods exist yet -->
+		<div class="onboarding">
+			<div class="onboarding-card">
+				<h2>Create your first budget period</h2>
+				<p>Define a date range for your budget period (e.g. your salary cycle). You can always add more periods later.</p>
+				<button class="btn primary large" onclick={openWizard}>Create first period</button>
+			</div>
+		</div>
 	{:else if activeTab === 'plan'}
 		<!-- ================ PLAN TAB ================ -->
 
@@ -421,12 +703,12 @@
 				</label>
 			</div>
 
-		{:else if !hasTemplate && !hasBudget}
-			<!-- ONBOARDING: No template, no budget -->
+		{:else if !hasBudget && !hasTemplate}
+			<!-- ONBOARDING: No template, no budget for this period -->
 			<div class="onboarding">
 				<div class="onboarding-card">
-					<h2>Set up your budget template</h2>
-					<p>Create a monthly budget template that will be used as the starting point for each month. You can always override amounts for individual months.</p>
+					<h2>Set up your budget</h2>
+					<p>Add budget items for this period. If you check "Update template too", future periods will start with the same items.</p>
 					<button class="btn primary large" onclick={startEditing}>Add your first budget items</button>
 				</div>
 			</div>
@@ -708,16 +990,17 @@
 		gap: 1rem;
 		margin-bottom: 1rem;
 	}
-	.month-selector {
+	.period-selector {
 		display: flex;
 		align-items: center;
 		gap: 1rem;
 	}
-	.month-selector h1 {
+	.period-selector h1 {
 		margin: 0;
 		color: #1a1a1a;
-		min-width: 200px;
+		min-width: 260px;
 		text-align: center;
+		font-size: 1.4rem;
 	}
 	.nav-btn {
 		background: white;
@@ -728,7 +1011,8 @@
 		font-size: 1.1rem;
 		color: #2d6a4f;
 	}
-	.nav-btn:hover { background: #f0fdf4; border-color: #2d6a4f; }
+	.nav-btn:hover:not(:disabled) { background: #f0fdf4; border-color: #2d6a4f; }
+	.nav-btn:disabled { opacity: 0.3; cursor: default; }
 	.actions { display: flex; gap: 0.5rem; }
 
 	/* Buttons */
@@ -741,12 +1025,154 @@
 	}
 	.btn.primary { background: #2d6a4f; color: white; }
 	.btn.primary:hover { background: #1b4332; }
+	.btn.primary:disabled { opacity: 0.5; cursor: default; }
 	.btn.secondary { background: white; color: #2d6a4f; border: 2px solid #2d6a4f; }
 	.btn.secondary:hover { background: #f0fdf4; }
 	.btn.danger-outline { background: white; color: #dc2626; border: 2px solid #dc2626; }
 	.btn.danger-outline:hover { background: #fef2f2; }
 	.btn.small { padding: 0.4rem 0.75rem; font-size: 0.85rem; }
 	.btn.large { padding: 0.75rem 2rem; font-size: 1rem; }
+
+	/* Inline date editing */
+	.inline-date-edit {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.inline-date-edit input[type="date"] {
+		padding: 0.35rem 0.5rem;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		font-size: 0.85rem;
+	}
+	.inline-date-edit input[type="date"]:focus { outline: none; border-color: #2d6a4f; }
+	.inline-date-edit .separator { color: #999; font-size: 0.85rem; }
+	.edit-dates-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		font-size: 1rem;
+		color: #9ca3af;
+		padding: 0.25rem;
+		line-height: 1;
+	}
+	.edit-dates-btn:hover { color: #2d6a4f; }
+
+	/* Wizard modal */
+	.wizard-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0,0,0,0.4);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 100;
+	}
+	.wizard-modal {
+		background: white;
+		border-radius: 12px;
+		width: 90%;
+		max-width: 600px;
+		max-height: 85vh;
+		display: flex;
+		flex-direction: column;
+	}
+	.wizard-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 1.25rem 1.5rem;
+		border-bottom: 1px solid #e5e7eb;
+	}
+	.wizard-header h2 { margin: 0; font-size: 1.15rem; color: #1a1a1a; }
+	.wizard-close {
+		background: none;
+		border: none;
+		font-size: 1.5rem;
+		cursor: pointer;
+		color: #9ca3af;
+		line-height: 1;
+	}
+	.wizard-close:hover { color: #1a1a1a; }
+	.wizard-body {
+		padding: 1.5rem;
+		overflow-y: auto;
+		flex: 1;
+	}
+	.wizard-desc { margin: 0 0 1.25rem; color: #666; font-size: 0.9rem; line-height: 1.5; }
+	.wizard-dates {
+		display: flex;
+		gap: 1.5rem;
+		flex-wrap: wrap;
+	}
+	.wizard-dates label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		font-size: 0.85rem;
+		color: #666;
+		flex: 1;
+		min-width: 150px;
+	}
+	.wizard-dates input[type="date"] {
+		padding: 0.5rem;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		font-size: 0.9rem;
+	}
+	.wizard-dates input[type="date"]:focus { outline: none; border-color: #2d6a4f; }
+	.wizard-footer {
+		padding: 1rem 1.5rem;
+		border-top: 1px solid #e5e7eb;
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
+	}
+	.wizard-summary {
+		display: flex;
+		gap: 1rem;
+		margin-bottom: 1.25rem;
+		flex-wrap: wrap;
+	}
+	.ws-item {
+		flex: 1;
+		min-width: 100px;
+		background: #f9fafb;
+		padding: 0.6rem 0.75rem;
+		border-radius: 6px;
+		text-align: center;
+	}
+	.ws-label { display: block; font-size: 0.7rem; color: #666; }
+	.ws-value { display: block; font-size: 1rem; font-weight: 700; margin-top: 0.1rem; }
+	.wizard-body h3 { margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #1a1a1a; }
+	.wizard-body h3:first-of-type { margin-top: 0; }
+	.wizard-lines { font-size: 0.9rem; }
+	.wizard-line-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.4rem 0;
+		border-bottom: 1px solid #f0f0f0;
+	}
+	.wizard-line-row .cat-name { flex: 1; font-weight: 500; }
+	.wizard-line-row input[type="number"] {
+		width: 110px;
+		padding: 0.35rem 0.5rem;
+		border: 1px solid #ddd;
+		border-radius: 4px;
+		font-size: 0.9rem;
+		text-align: right;
+	}
+	.wizard-line-row input[type="number"]:focus { outline: none; border-color: #2d6a4f; }
+	.actual-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.actual-toggle input[type="checkbox"] { accent-color: #2d6a4f; }
+	.actual-label { font-size: 0.75rem; color: #666; }
 
 	/* Tab bar */
 	.tab-bar {

@@ -1,14 +1,15 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import {
-		getDashboardSummary, getByCategory, getCategoryChildren, getMonthlyTrend,
-		formatEuro, type DashboardSummary, type CategorySpending, type MonthlyTrend
+		getDashboardSummary, getByCategory, getCategoryChildren, getMonthlyTrend, getBudgets,
+		formatEuro, type DashboardSummary, type CategorySpending, type MonthlyTrend, type BudgetSummary
 	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 
 	let summary: DashboardSummary | null = $state(null);
 	let categories: CategorySpending[] = $state([]);
 	let monthlyTrend: MonthlyTrend[] = $state([]);
+	let budgetPeriods: BudgetSummary[] = $state([]);
 	let loading = $state(true);
 	let dateFrom = $state('');
 	let dateTo = $state('');
@@ -23,14 +24,16 @@
 		if (dateFrom) params.date_from = dateFrom;
 		if (dateTo) params.date_to = dateTo;
 
-		const [s, c, t] = await Promise.all([
+		const [s, c, t, bp] = await Promise.all([
 			getDashboardSummary(params),
 			getByCategory(params),
 			getMonthlyTrend(12),
+			getBudgets(),
 		]);
 		summary = s;
 		categories = c;
 		monthlyTrend = t;
+		budgetPeriods = bp;
 		loading = false;
 	}
 
@@ -84,7 +87,7 @@
 <div class="dashboard">
 	<div class="header">
 		<h1>Dashboard</h1>
-		<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} />
+		<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} periods={budgetPeriods} />
 	</div>
 
 	{#if loading}

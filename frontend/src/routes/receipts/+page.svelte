@@ -47,7 +47,9 @@
 		{#each receipts as receipt}
 			<div class="card" onclick={() => goto(`/receipts/${receipt.id}`)}>
 				<div class="thumb">
-					{#if receipt.image_path}
+					{#if receipt.image_path?.endsWith('.pdf')}
+						<div class="pdf-placeholder">PDF</div>
+					{:else if receipt.image_path}
 						<img
 							src={imageUrl(receipt.image_path)}
 							alt="Receipt"
@@ -154,6 +156,18 @@
 		font-size: 0.85rem;
 		font-style: italic;
 		background: #e5e7eb;
+	}
+	.pdf-placeholder {
+		width: 100%;
+		height: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #fef3c7;
+		color: #92400e;
+		font-size: 1.25rem;
+		font-weight: 700;
+		letter-spacing: 0.05em;
 	}
 	.no-image.hidden {
 		display: none;

@@ -38,14 +38,18 @@ self.addEventListener('fetch', (event) => {
 	// Don't cache API calls or uploads
 	if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) return;
 
+	// Navigation requests: network-first with SPA fallback
+	if (event.request.mode === 'navigate') {
+		event.respondWith(
+			fetch(event.request).catch(() =>
+				caches.match('/index.html').then((fallback) => fallback || new Response('Offline', { status: 503 }))
+			)
+		);
+		return;
+	}
+
+	// Static assets: cache-first
 	event.respondWith(
-		caches.match(event.request).then((cached) => {
-			if (cached) return cached;
-			// For navigation requests (HTML pages), serve the cached index.html as SPA fallback
-			if (event.request.mode === 'navigate') {
-				return caches.match('/index.html').then((fallback) => fallback || fetch(event.request));
-			}
-			return fetch(event.request);
-		})
+		caches.match(event.request).then((cached) => cached || fetch(event.request))
 	);
 });

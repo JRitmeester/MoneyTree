@@ -3,9 +3,10 @@
 		dateFrom: string;
 		dateTo: string;
 		onchange: (dateFrom: string, dateTo: string) => void;
+		periods?: { start_date: string; end_date: string }[];
 	}
 
-	let { dateFrom = $bindable(), dateTo = $bindable(), onchange }: Props = $props();
+	let { dateFrom = $bindable(), dateTo = $bindable(), onchange, periods = [] }: Props = $props();
 
 	const PRESETS = [
 		{ label: '1W', days: 7 },
@@ -16,6 +17,8 @@
 		{ label: '6M', months: 6 },
 		{ label: '1Y', months: 12 },
 	] as const;
+
+	const PERIOD_PRESETS = [1, 2, 3, 6, 12] as const;
 
 	let activePreset: string | null = $state('1M');
 
@@ -34,6 +37,16 @@
 		dateFrom = toISODate(from);
 		dateTo = toISODate(to);
 		activePreset = preset.label;
+		onchange(dateFrom, dateTo);
+	}
+
+	function applyPeriodPreset(count: number) {
+		if (!periods || periods.length === 0) return;
+		// periods are sorted desc by start_date (most recent first)
+		const lastIdx = Math.min(count, periods.length) - 1;
+		dateFrom = periods[lastIdx].start_date;
+		dateTo = periods[0].end_date;
+		activePreset = `${count}P`;
 		onchange(dateFrom, dateTo);
 	}
 
@@ -64,6 +77,18 @@
 			>{preset.label}</button>
 		{/each}
 	</div>
+	{#if periods && periods.length > 0}
+		<div class="presets">
+			{#each PERIOD_PRESETS as count}
+				<button
+					class="preset-btn"
+					class:active={activePreset === `${count}P`}
+					onclick={() => applyPeriodPreset(count)}
+					disabled={periods.length === 0}
+				>{count}P</button>
+			{/each}
+		</div>
+	{/if}
 	<div class="date-inputs">
 		<input type="date" bind:value={dateFrom} onchange={handleDateInput} />
 		<span class="separator">-</span>
@@ -97,7 +122,8 @@
 		transition: all 0.15s;
 	}
 	.preset-btn:last-child { border-right: none; }
-	.preset-btn:hover { background: #f5f5f5; color: #1a1a1a; }
+	.preset-btn:hover:not(:disabled) { background: #f5f5f5; color: #1a1a1a; }
+	.preset-btn:disabled { opacity: 0.4; cursor: default; }
 	.preset-btn.active {
 		background: #2d6a4f;
 		color: white;

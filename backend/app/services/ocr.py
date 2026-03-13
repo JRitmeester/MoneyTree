@@ -1,16 +1,6 @@
 import re
 from datetime import date
 
-_reader = None
-
-
-def get_reader():
-    """Lazy-load EasyOCR reader (takes ~2s first time, ~1-2GB RAM)."""
-    global _reader
-    if _reader is None:
-        import easyocr
-        _reader = easyocr.Reader(["nl", "en"], gpu=False)
-    return _reader
 
 
 def find_amount(text: str) -> float | None:
@@ -134,12 +124,35 @@ def extract_line_items(texts: list[str]) -> list[dict]:
 
 def process_receipt(image_path: str) -> dict:
     """Run OCR on a receipt image and extract structured data."""
-    reader = get_reader()
-    results = reader.readtext(image_path)
+    import pytesseract
+    from PIL import Image
 
-    # Filter low-confidence results
-    texts = [text for (_, text, conf) in results if conf > 0.3]
-    full_text = "\n".join(texts)
+    image = Image.open(image_path)
+    full_text = pytesseract.image_to_string(image, lang="nld+eng")
+    texts = [line.strip() for line in full_text.splitlines() if line.strip()]
+
+    return {
+        "date": extract_date(texts),
+        "total_amount": extract_total(texts),
+        "merchant_name": extract_merchant(texts),
+        "line_items": extract_line_items(texts),
+        "raw_text": full_text,
+    }
+
+
+def process_pdf(pdf_path: str) -> dict:
+    """Extract text from a PDF receipt and parse structured data."""
+    import pdfplumber
+
+    all_text = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for pdf_page in pdf.pages:
+            page_text = pdf_page.extract_text()
+            if page_text:
+                all_text.append(page_text)
+
+    full_text = "\n".join(all_text)
+    texts = [line.strip() for line in full_text.splitlines() if line.strip()]
 
     return {
         "date": extract_date(texts),
