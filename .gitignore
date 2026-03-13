@@ -30,6 +30,9 @@ frontend/build/
 # Claude
 .claude/
 
+# Scripts
+sync-to-nas.sh
+
 # Personal files (at project root only)
 /*.pdf
 /*.csv
