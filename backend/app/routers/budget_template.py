@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import require_auth
 from ..database import get_db
 from ..models import BudgetTemplate, Category
 from ..schemas import BudgetTemplateLineCreate, BudgetTemplateLineOut, BudgetTemplateOut
 
-router = APIRouter(prefix="/api/budget-template", tags=["budget-template"])
+router = APIRouter(prefix="/api/budget-template", tags=["budget-template"], dependencies=[Depends(require_auth)])
 
 
 def _build_template_response(db: Session) -> BudgetTemplateOut:

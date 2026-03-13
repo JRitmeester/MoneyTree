@@ -2,8 +2,7 @@ import json
 import logging
 import os
 import secrets
-import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import webauthn
@@ -22,39 +21,53 @@ from webauthn.helpers.structs import (
     RegistrationCredential,
 )
 
-from ..auth import create_token, verify_token
+from ..auth import cleanup_expired_revocations, create_token, require_auth, revoke_token, verify_token
 from ..config import AUTH_PASSWORD_HASH, AUTH_USERNAME, JWT_EXPIRE_DAYS, RP_ID, RP_ORIGIN
 from ..database import get_db
-from ..models import PasskeyCredential
+from ..models import PasskeyCredential, WebAuthnChallenge
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
 
-# Challenge storage — keyed by random token with 60s TTL
-_challenges: dict[str, tuple[bytes, float]] = {}
 _CHALLENGE_TTL = 60
 
 _SECURE_COOKIE = RP_ORIGIN.startswith("https://")
 
 
-def _store_challenge(challenge: bytes) -> str:
+# --- Challenge storage (database-backed) ---
+
+def _store_challenge(db: Session, challenge: bytes) -> str:
     token = os.urandom(16).hex()
-    now = time.time()
-    expired = [k for k, (_, ts) in _challenges.items() if now - ts > _CHALLENGE_TTL]
-    for k in expired:
-        del _challenges[k]
-    _challenges[token] = (challenge, now)
+
+    # Prune expired challenges
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=_CHALLENGE_TTL)
+    db.query(WebAuthnChallenge).filter(WebAuthnChallenge.created_at < cutoff).delete()
+
+    entry = WebAuthnChallenge(
+        token=token,
+        challenge=challenge,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(entry)
+    db.commit()
     return token
 
 
-def _pop_challenge(token: str) -> bytes | None:
-    entry = _challenges.pop(token, None)
+def _pop_challenge(db: Session, token: str) -> bytes | None:
+    entry = db.query(WebAuthnChallenge).filter(WebAuthnChallenge.token == token).first()
     if not entry:
         return None
-    challenge, ts = entry
-    return challenge if time.time() - ts <= _CHALLENGE_TTL else None
+
+    db.delete(entry)
+    db.commit()
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=_CHALLENGE_TTL)
+    if entry.created_at < cutoff:
+        return None
+
+    return entry.challenge
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
@@ -64,6 +77,7 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         httponly=True,
         samesite="strict",
         secure=_SECURE_COOKIE,
+        path="/",
         max_age=JWT_EXPIRE_DAYS * 24 * 3600,
     )
 
@@ -90,18 +104,30 @@ def login(request: Request, body: LoginRequest, response: Response):
 
 
 @router.post("/logout")
-def logout(response: Response):
+def logout(
+    response: Response,
+    auth_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db),
+):
+    if auth_token:
+        revoke_token(auth_token, db)
+        cleanup_expired_revocations(db)
     response.delete_cookie(
-        "auth_token", httponly=True, samesite="strict", secure=_SECURE_COOKIE,
+        "auth_token", httponly=True, samesite="strict", secure=_SECURE_COOKIE, path="/",
     )
     return {"ok": True}
 
 
 @router.get("/me")
-def me(auth_token: str | None = Cookie(default=None)):
+@limiter.limit("30/minute")
+def me(
+    request: Request,
+    auth_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db),
+):
     if not auth_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    username = verify_token(auth_token)
+    username = verify_token(auth_token, db=db)
     if not username:
         raise HTTPException(status_code=401, detail="Invalid token")
     return {"username": username}
@@ -110,13 +136,12 @@ def me(auth_token: str | None = Cookie(default=None)):
 # --- Passkey registration (requires existing session) ---
 
 @router.get("/passkey/register/begin")
+@limiter.limit("10/minute")
 def passkey_register_begin(
-    auth_token: str | None = Cookie(default=None),
+    request: Request,
+    _username: str = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
-    if not auth_token or not verify_token(auth_token):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     existing = db.query(PasskeyCredential).all()
     exclude_credentials = [
         PublicKeyCredentialDescriptor(id=cred.credential_id)
@@ -131,7 +156,7 @@ def passkey_register_begin(
         user_display_name="MoneyTree Admin",
         exclude_credentials=exclude_credentials,
     )
-    challenge_token = _store_challenge(options.challenge)
+    challenge_token = _store_challenge(db, options.challenge)
     options_json = json.loads(webauthn.options_to_json(options))
     options_json["challenge_token"] = challenge_token
     return JSONResponse(content=options_json)
@@ -144,15 +169,14 @@ class RegisterCompleteRequest(BaseModel):
 
 
 @router.post("/passkey/register/complete")
+@limiter.limit("10/minute")
 def passkey_register_complete(
+    request: Request,
     body: RegisterCompleteRequest,
-    auth_token: str | None = Cookie(default=None),
+    _username: str = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
-    if not auth_token or not verify_token(auth_token):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    challenge = _pop_challenge(body.challenge_token)
+    challenge = _pop_challenge(db, body.challenge_token)
     if challenge is None:
         raise HTTPException(status_code=400, detail="Challenge expired or invalid")
 
@@ -172,7 +196,7 @@ def passkey_register_complete(
             expected_rp_id=RP_ID,
             expected_origin=RP_ORIGIN,
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("Passkey registration failed")
         raise HTTPException(status_code=400, detail="Registration failed")
 
@@ -190,8 +214,19 @@ def passkey_register_complete(
 
 # --- Passkey authentication ---
 
+class PasskeyAuthCompleteRequest(BaseModel):
+    id: str
+    rawId: str
+    challenge_token: str
+    response: dict
+    type: str = "public-key"
+    authenticatorAttachment: str | None = None
+    clientExtensionResults: dict | None = None
+
+
 @router.get("/passkey/auth/begin")
-def passkey_auth_begin(db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def passkey_auth_begin(request: Request, db: Session = Depends(get_db)):
     credentials = db.query(PasskeyCredential).all()
     allow_credentials = [
         PublicKeyCredentialDescriptor(id=cred.credential_id)
@@ -201,44 +236,40 @@ def passkey_auth_begin(db: Session = Depends(get_db)):
         rp_id=RP_ID,
         allow_credentials=allow_credentials,
     )
-    challenge_token = _store_challenge(options.challenge)
+    challenge_token = _store_challenge(db, options.challenge)
     options_json = json.loads(webauthn.options_to_json(options))
     options_json["challenge_token"] = challenge_token
     return JSONResponse(content=options_json)
 
 
 @router.post("/passkey/auth/complete")
-async def passkey_auth_complete(
+@limiter.limit("10/minute")
+def passkey_auth_complete(
     request: Request,
+    body: PasskeyAuthCompleteRequest,
     response: Response,
     db: Session = Depends(get_db),
 ):
-    body = await request.json()
-
-    challenge_token = body.pop("challenge_token", None)
-    if not challenge_token:
-        raise HTTPException(status_code=400, detail="Missing challenge_token")
-
-    challenge = _pop_challenge(challenge_token)
+    challenge = _pop_challenge(db, body.challenge_token)
     if challenge is None:
         raise HTTPException(status_code=400, detail="Challenge expired or invalid")
 
     try:
         credential = AuthenticationCredential(
-            id=body["id"],
-            raw_id=base64url_to_bytes(body["rawId"]),
+            id=body.id,
+            raw_id=base64url_to_bytes(body.rawId),
             response=AuthenticatorAssertionResponse(
-                client_data_json=base64url_to_bytes(body["response"]["clientDataJSON"]),
-                authenticator_data=base64url_to_bytes(body["response"]["authenticatorData"]),
-                signature=base64url_to_bytes(body["response"]["signature"]),
+                client_data_json=base64url_to_bytes(body.response["clientDataJSON"]),
+                authenticator_data=base64url_to_bytes(body.response["authenticatorData"]),
+                signature=base64url_to_bytes(body.response["signature"]),
                 user_handle=(
-                    base64url_to_bytes(body["response"]["userHandle"])
-                    if body["response"].get("userHandle")
+                    base64url_to_bytes(body.response["userHandle"])
+                    if body.response.get("userHandle")
                     else None
                 ),
             ),
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("Invalid passkey credential")
         raise HTTPException(status_code=400, detail="Invalid credential")
 
@@ -246,7 +277,7 @@ async def passkey_auth_complete(
         PasskeyCredential.credential_id == credential.raw_id
     ).first()
     if not stored:
-        raise HTTPException(status_code=401, detail="Unknown credential")
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
     try:
         verification = webauthn.verify_authentication_response(
@@ -257,7 +288,7 @@ async def passkey_auth_complete(
             credential_public_key=stored.public_key,
             credential_current_sign_count=stored.sign_count,
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("Passkey authentication failed")
         raise HTTPException(status_code=401, detail="Authentication failed")
 

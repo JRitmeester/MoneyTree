@@ -13,6 +13,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .auth import verify_token
 from .config import RP_ORIGIN, UPLOADS_DIR
+from .database import SessionLocal
 from .routers import (
     auth,
     budget,
@@ -48,24 +49,34 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[RP_ORIGIN],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+
+
+_AUTH_WHITELIST = frozenset({"/api/health"})
+_AUTH_PREFIX_WHITELIST = ("/api/auth/",)
 
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
     # Allow auth and health endpoints without authentication
-    if path.startswith("/api/auth/") or path == "/api/health":
+    if path in _AUTH_WHITELIST or any(path.startswith(p) for p in _AUTH_PREFIX_WHITELIST):
         return await call_next(request)
     # Allow frontend SPA assets without authentication
     if not path.startswith("/api/") and not path.startswith("/uploads/"):
         return await call_next(request)
     # Protect all /api/* and /uploads/* routes
     token = request.cookies.get("auth_token")
-    if not token or not verify_token(token):
+    if not token:
         return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    db = SessionLocal()
+    try:
+        if not verify_token(token, db=db):
+            return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    finally:
+        db.close()
     return await call_next(request)
 
 
@@ -99,6 +110,6 @@ if FRONTEND_BUILD.exists():
     async def spa_fallback(request: Request, path: str):
         build_root = FRONTEND_BUILD.resolve()
         file_path = (FRONTEND_BUILD / path).resolve()
-        if file_path.is_file() and str(file_path).startswith(str(build_root)):
+        if file_path.is_file() and file_path.is_relative_to(build_root):
             return FileResponse(file_path)
         return FileResponse(build_root / "index.html")

@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import require_auth
 from ..database import get_db
 from ..models import Category, LineItem, Receipt
 from ..schemas import LineItemCreate, LineItemOut, LineItemUpdate
 from ..services.remaining import recalculate_remaining
 
-router = APIRouter(tags=["line_items"])
+router = APIRouter(tags=["line_items"], dependencies=[Depends(require_auth)])
 
 
 @router.get("/api/receipts/{receipt_id}/line-items", response_model=list[LineItemOut])

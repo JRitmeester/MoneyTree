@@ -3,10 +3,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import require_auth
 from ..database import get_db
 from ..models import LineItem, Receipt, Transaction
 
-router = APIRouter(prefix="/api/debug", tags=["debug"])
+router = APIRouter(prefix="/api/debug", tags=["debug"], dependencies=[Depends(require_auth)])
 
 
 class VirtualReceipt(BaseModel):

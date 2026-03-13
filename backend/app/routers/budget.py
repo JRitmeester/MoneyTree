@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
+from ..auth import require_auth
 from ..database import get_db
 from ..models import Budget, BudgetLine, BudgetTemplate, Category
 from ..schemas import (
@@ -15,7 +16,7 @@ from ..schemas import (
     BudgetUpdate,
 )
 
-router = APIRouter(prefix="/api/budgets", tags=["budgets"])
+router = APIRouter(prefix="/api/budgets", tags=["budgets"], dependencies=[Depends(require_auth)])
 
 
 def _create_from_template(db: Session, start_date: date, end_date: date) -> Budget:

@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import require_auth
 from ..database import get_db
 from ..models import Category, CategoryMapping
 from ..schemas import CategoryMappingCreate, CategoryMappingOut
 
-router = APIRouter(prefix="/api/category-mappings", tags=["category_mappings"])
+router = APIRouter(prefix="/api/category-mappings", tags=["category_mappings"], dependencies=[Depends(require_auth)])
 
 
 @router.get("", response_model=list[CategoryMappingOut])

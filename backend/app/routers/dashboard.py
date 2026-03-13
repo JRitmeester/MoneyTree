@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..auth import require_auth
 from ..database import get_db
 from ..models import Budget, Category as CategoryModel, LineItem, Receipt, Transaction
 from ..schemas import (
@@ -18,7 +19,7 @@ from ..schemas import (
     SubcategorySpending,
 )
 
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_auth)])
 
 
 # ---------------------------------------------------------------------------

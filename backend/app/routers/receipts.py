@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import require_auth
 from ..config import UPLOADS_DIR
 from ..database import get_db
 from ..models import LineItem, Receipt, Transaction
@@ -23,7 +24,7 @@ from ..schemas import (
 from ..services.ocr import process_pdf, process_receipt
 from ..services.receipt_presets import PRESETS
 
-router = APIRouter(prefix="/api/receipts", tags=["receipts"])
+router = APIRouter(prefix="/api/receipts", tags=["receipts"], dependencies=[Depends(require_auth)])
 
 
 def _save_upload(file: UploadFile) -> str:
