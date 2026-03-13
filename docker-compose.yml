@@ -1,8 +1,14 @@
 services:
   moneytree:
     build: .
-    ports:
-      - "8080:8000"
     volumes:
       - ./data:/app/data
       - ./backend/uploads:/app/backend/uploads
+    env_file:
+      - .env
+    networks:
+      - npm_network
+
+networks:
+  npm_network:
+    external: true

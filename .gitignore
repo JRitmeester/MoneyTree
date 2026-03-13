@@ -6,8 +6,8 @@ __pycache__/
 venv/
 
 # Data
-data/*.db
-backend/uploads/*
+*.db
+backend/uploads/**
 !backend/uploads/.gitkeep
 
 # Frontend
@@ -25,12 +25,12 @@ frontend/build/
 
 # Docker
 *.log
+.env
 
 # Claude
 .claude/
 
-# Personal files
-*.pdf
-*.csv
-*.xml
-!backend/**
+# Personal files (at project root only)
+/*.pdf
+/*.csv
+/*.xml

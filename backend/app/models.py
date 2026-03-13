@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -184,3 +184,14 @@ class BudgetTemplate(Base):
     amount: Mapped[float] = mapped_column(Float, nullable=False)
 
     category: Mapped["Category"] = relationship()
+
+
+class PasskeyCredential(Base):
+    __tablename__ = "passkey_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    credential_id: Mapped[bytes] = mapped_column(LargeBinary, unique=True, nullable=False)
+    public_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    sign_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), default="My Passkey", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

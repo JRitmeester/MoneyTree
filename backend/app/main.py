@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -5,11 +6,26 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
-from .config import UPLOADS_DIR
-from .routers import budget, budget_template, categories, category_mappings, dashboard, debug, line_items, receipts, transactions, uncategorized
+from .auth import verify_token
+from .config import RP_ORIGIN, UPLOADS_DIR
+from .routers import (
+    auth,
+    budget,
+    budget_template,
+    categories,
+    category_mappings,
+    dashboard,
+    debug,
+    line_items,
+    receipts,
+    transactions,
+    uncategorized,
+)
 
 FRONTEND_BUILD = Path(__file__).resolve().parent.parent.parent / "frontend" / "build"
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
@@ -24,15 +40,38 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MoneyTree", lifespan=lifespan)
 
+# Rate limiter
+app.state.limiter = auth.limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[RP_ORIGIN],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    # Allow auth and health endpoints without authentication
+    if path.startswith("/api/auth/") or path == "/api/health":
+        return await call_next(request)
+    # Allow frontend SPA assets without authentication
+    if not path.startswith("/api/") and not path.startswith("/uploads/"):
+        return await call_next(request)
+    # Protect all /api/* and /uploads/* routes
+    token = request.cookies.get("auth_token")
+    if not token or not verify_token(token):
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    return await call_next(request)
+
+
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
+app.include_router(auth.router)
 app.include_router(transactions.router)
 app.include_router(receipts.router)
 app.include_router(line_items.router)
@@ -41,8 +80,10 @@ app.include_router(dashboard.router)
 app.include_router(budget.router)
 app.include_router(budget_template.router)
 app.include_router(category_mappings.router)
-app.include_router(debug.router)
 app.include_router(uncategorized.router)
+
+if os.getenv("ENABLE_DEBUG_ROUTES", "").lower() == "true":
+    app.include_router(debug.router)
 
 
 @app.get("/api/health")
@@ -52,15 +93,12 @@ def health():
 
 # Serve SvelteKit static build — must be after API routes
 if FRONTEND_BUILD.exists():
-    # Serve static assets (JS, CSS, images) directly
     app.mount("/_app", StaticFiles(directory=str(FRONTEND_BUILD / "_app")), name="frontend_assets")
 
-    # SPA fallback: serve index.html for all non-API, non-file routes
     @app.get("/{path:path}")
     async def spa_fallback(request: Request, path: str):
-        # Try to serve the exact file first (e.g. manifest.json, icons)
-        file_path = FRONTEND_BUILD / path
-        if file_path.is_file():
+        build_root = FRONTEND_BUILD.resolve()
+        file_path = (FRONTEND_BUILD / path).resolve()
+        if file_path.is_file() and str(file_path).startswith(str(build_root)):
             return FileResponse(file_path)
-        # Otherwise serve the SPA fallback
-        return FileResponse(FRONTEND_BUILD / "index.html")
+        return FileResponse(build_root / "index.html")

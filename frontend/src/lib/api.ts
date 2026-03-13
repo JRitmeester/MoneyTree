@@ -2,11 +2,19 @@ const BASE = '';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
 	const res = await fetch(`${BASE}${path}`, options);
+	if (res.status === 401) {
+		window.location.href = '/login';
+		throw new Error('Not authenticated');
+	}
 	if (!res.ok) {
 		const text = await res.text();
 		throw new Error(`${res.status}: ${text}`);
 	}
 	return res.json();
+}
+
+export async function logout(): Promise<void> {
+	await fetch('/api/auth/logout', { method: 'POST' });
 }
 
 export interface Transaction {
