@@ -852,15 +852,19 @@
 			{#if bvaFixedExpenses.length > 0}
 				<div class="section">
 					<h2>Fixed Bills</h2>
-					<div class="fixed-list">
+					<div class="bva-table bva-table-fixed">
+						<div class="bva-header">
+							<span>Category</span>
+							<span class="right">Budgeted</span>
+							<span class="right">Actual</span>
+							<span class="right">Status</span>
+						</div>
 						{#each bvaFixedExpenses as line}
-							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="fixed-row fixed-row-link">
+							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
 								<span class="cat-name">{line.category_name}</span>
-								<span class="fixed-amounts">
-									<span class="budgeted-amt">{formatEuro(line.budgeted)}</span>
-									<span class="actual-amt">{formatEuro(line.actual)}</span>
-								</span>
-								<span class="fixed-check">
+								<span class="right">{formatEuro(line.budgeted)}</span>
+								<span class="right">{formatEuro(line.actual)}</span>
+								<span class="right">
 									{#if isWithinRange(line)}
 										<span class="check-ok" title="Within budget">&#10003;</span>
 									{:else}
@@ -870,13 +874,11 @@
 							</a>
 						{/each}
 						{#if bvaFixedExpenses.length > 1}
-							<div class="fixed-row fixed-subtotal">
+							<div class="bva-row bva-subtotal">
 								<span class="cat-name">Total</span>
-								<span class="fixed-amounts">
-									<span class="budgeted-amt">{formatEuro(bvaFixedTotals.budgeted)}</span>
-									<span class="actual-amt">{formatEuro(bvaFixedTotals.actual)}</span>
-								</span>
-								<span class="fixed-check"></span>
+								<span class="right">{formatEuro(bvaFixedTotals.budgeted)}</span>
+								<span class="right">{formatEuro(bvaFixedTotals.actual)}</span>
+								<span class="right"></span>
 							</div>
 						{/if}
 					</div>
@@ -887,25 +889,27 @@
 			{#if bvaSinkingLines.length > 0}
 				<div class="section">
 					<h2>Sinking Funds</h2>
-					<div class="fixed-list">
+					<div class="bva-table bva-table-fixed">
+						<div class="bva-header">
+							<span>Category</span>
+							<span class="right">Budgeted</span>
+							<span class="right">Actual</span>
+							<span class="right">Balance</span>
+						</div>
 						{#each bvaSinkingLines as line}
-							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="fixed-row fixed-row-link">
+							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
 								<span class="cat-name">{line.category_name}</span>
-								<span class="fixed-amounts">
-									<span class="budgeted-amt">{formatEuro(line.budgeted)}</span>
-									<span class="actual-amt">{formatEuro(line.actual)}</span>
-								</span>
-								<span class="balance-badge">{formatEuro(line.balance)}</span>
+								<span class="right">{formatEuro(line.budgeted)}</span>
+								<span class="right">{formatEuro(line.actual)}</span>
+								<span class="right balance-text">{formatEuro(line.balance)}</span>
 							</a>
 						{/each}
 						{#if bvaSinkingLines.length > 1}
-							<div class="fixed-row fixed-subtotal">
+							<div class="bva-row bva-subtotal">
 								<span class="cat-name">Total</span>
-								<span class="fixed-amounts">
-									<span class="budgeted-amt">{formatEuro(bvaSinkingTotals.budgeted)}</span>
-									<span class="actual-amt">{formatEuro(bvaSinkingTotals.actual)}</span>
-								</span>
-								<span class="balance-badge"></span>
+								<span class="right">{formatEuro(bvaSinkingTotals.budgeted)}</span>
+								<span class="right">{formatEuro(bvaSinkingTotals.actual)}</span>
+								<span class="right"></span>
 							</div>
 						{/if}
 					</div>
@@ -915,25 +919,27 @@
 			{#if bvaWishListLines.length > 0}
 				<div class="section">
 					<h2>Saving Goals</h2>
-					<div class="fixed-list">
+					<div class="bva-table bva-table-fixed">
+						<div class="bva-header">
+							<span>Category</span>
+							<span class="right">Budgeted</span>
+							<span class="right">Actual</span>
+							<span class="right">Balance</span>
+						</div>
 						{#each bvaWishListLines as line}
-							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="fixed-row fixed-row-link">
+							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
 								<span class="cat-name">{line.category_name}</span>
-								<span class="fixed-amounts">
-									<span class="budgeted-amt">{formatEuro(line.budgeted)}</span>
-									<span class="actual-amt">{formatEuro(line.actual)}</span>
-								</span>
-								<span class="balance-badge">{formatEuro(line.balance)}</span>
+								<span class="right">{formatEuro(line.budgeted)}</span>
+								<span class="right">{formatEuro(line.actual)}</span>
+								<span class="right balance-text">{formatEuro(line.balance)}</span>
 							</a>
 						{/each}
 						{#if bvaWishListLines.length > 1}
-							<div class="fixed-row fixed-subtotal">
+							<div class="bva-row bva-subtotal">
 								<span class="cat-name">Total</span>
-								<span class="fixed-amounts">
-									<span class="budgeted-amt">{formatEuro(bvaWishListTotals.budgeted)}</span>
-									<span class="actual-amt">{formatEuro(bvaWishListTotals.actual)}</span>
-								</span>
-								<span class="balance-badge"></span>
+								<span class="right">{formatEuro(bvaWishListTotals.budgeted)}</span>
+								<span class="right">{formatEuro(bvaWishListTotals.actual)}</span>
+								<span class="right"></span>
 							</div>
 						{/if}
 					</div>
@@ -1448,28 +1454,18 @@
 	.expense-bar-ok { background: #2d6a4f; }
 	.expense-bar-over { background: #dc2626; }
 
-	/* Fixed expenses list (Actuals tab) */
-	.fixed-list { font-size: 0.9rem; }
-	.fixed-row {
-		display: flex;
-		align-items: center;
-		padding: 0.6rem 0;
-		border-bottom: 1px solid #f0f0f0;
-		gap: 1rem;
+	/* 4-column variant (fixed bills, sinking funds, saving goals) */
+	.bva-table-fixed .bva-header,
+	.bva-table-fixed .bva-row,
+	.bva-table-fixed a.bva-row-link {
+		grid-template-columns: 3fr 1fr 1fr 1fr;
 	}
-	.fixed-row .cat-name { flex: 1; font-weight: 500; }
-	.fixed-amounts {
-		display: flex;
-		gap: 1.5rem;
-	}
-	.budgeted-amt { color: #666; font-size: 0.85rem; min-width: 5rem; text-align: right; }
-	.actual-amt { font-weight: 600; min-width: 5rem; text-align: right; }
-	.fixed-check { width: 2rem; text-align: center; }
 	.check-ok { color: #16a34a; font-size: 1.2rem; font-weight: bold; }
 	.check-warn { color: #dc2626; font-size: 1.2rem; font-weight: bold; }
+	.balance-text { color: #2d6a4f; font-size: 0.85rem; }
 
 	/* Section subtotals */
-	.bva-subtotal, .fixed-subtotal {
+	.bva-subtotal {
 		border-top: 2px solid #e5e7eb;
 		border-bottom: none;
 		font-weight: 700;
@@ -1477,14 +1473,14 @@
 	}
 
 	/* Clickable rows */
-	.bva-row-link, .fixed-row-link {
+	.bva-row-link {
 		text-decoration: none;
 		color: inherit;
 		cursor: pointer;
 		border-radius: 4px;
 		transition: background-color 0.1s;
 	}
-	.bva-row-link:hover, .fixed-row-link:hover {
+	.bva-row-link:hover {
 		background-color: #f0fdf4;
 	}
 	a.bva-row-link {
@@ -1494,14 +1490,6 @@
 		border-bottom: 1px solid #f0f0f0;
 		align-items: center;
 	}
-	a.fixed-row-link {
-		display: flex;
-		align-items: center;
-		padding: 0.6rem 0;
-		border-bottom: 1px solid #f0f0f0;
-		gap: 1rem;
-	}
-	a.fixed-row-link .cat-name { flex: 1; font-weight: 500; }
 
 	/* Pacing */
 	.pace-marker {
@@ -1560,7 +1548,12 @@
 			grid-template-columns: 1fr;
 		}
 		.bva-header, .bva-row, a.bva-row-link {
-			grid-template-columns: 1.5fr 1fr 1fr 1fr;
+			grid-template-columns: 2fr 1fr 1fr 1fr;
+		}
+		.bva-table-fixed .bva-header,
+		.bva-table-fixed .bva-row,
+		.bva-table-fixed a.bva-row-link {
+			grid-template-columns: 2fr 1fr 1fr 1fr;
 		}
 		.bar-col { display: none; }
 	}
