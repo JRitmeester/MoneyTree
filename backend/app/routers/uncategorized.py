@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -10,11 +12,26 @@ from ..models import Category, CategoryMapping, Receipt, Transaction
 router = APIRouter(prefix="/api/uncategorized", tags=["uncategorized"], dependencies=[Depends(require_auth)])
 
 
+class UncategorizedTransaction(BaseModel):
+    id: int
+    datum: date
+    bedrag: float
+    merchant_name: str | None
+    naam: str | None
+    omschrijving: str
+
+
 class UncategorizedGroup(BaseModel):
     bank_category: str
     count: int
     total: float  # absolute value (positive)
     has_mapping: bool
+    transactions: list[UncategorizedTransaction]
+
+
+class CategorizeSelectedRequest(BaseModel):
+    transaction_ids: list[int]
+    category_id: int
 
 
 class BulkCategorizeRequest(BaseModel):
@@ -24,10 +41,9 @@ class BulkCategorizeRequest(BaseModel):
 
 
 def _uncategorized_query():
-    """Expense transactions with no category_id and no receipt."""
+    """Transactions (expenses and income) with no category_id and no receipt."""
     return (
         select(Transaction)
-        .where(Transaction.bedrag < 0)
         .where(Transaction.category_id.is_(None))
         .where(
             ~select(Receipt.id)
@@ -39,33 +55,67 @@ def _uncategorized_query():
 
 @router.get("", response_model=list[UncategorizedGroup])
 def list_uncategorized(db: Session = Depends(get_db)):
-    """Return expense transactions with no category, grouped by bank category string."""
+    """Return transactions with no category, grouped by bank category string."""
     rows = db.execute(_uncategorized_query()).scalars().all()
 
-    groups: dict[str, dict] = {}
+    groups: dict[str, list] = {}
     for tx in rows:
         key = tx.categorie or "Unknown"
         if key not in groups:
-            groups[key] = {"count": 0, "total": 0.0}
-        groups[key]["count"] += 1
-        groups[key]["total"] += abs(tx.bedrag)
+            groups[key] = []
+        groups[key].append(tx)
 
     # Check which bank categories already have a mapping
     mapped = set(
         db.execute(select(CategoryMapping.bank_category)).scalars().all()
     )
 
-    result = [
-        UncategorizedGroup(
+    result = []
+    for key, txs in groups.items():
+        total = round(sum(abs(tx.bedrag) for tx in txs), 2)
+        sorted_txs = sorted(txs, key=lambda t: t.datum, reverse=True)
+        result.append(UncategorizedGroup(
             bank_category=key,
-            count=data["count"],
-            total=round(data["total"], 2),
+            count=len(txs),
+            total=total,
             has_mapping=key in mapped,
-        )
-        for key, data in groups.items()
-    ]
+            transactions=[
+                UncategorizedTransaction(
+                    id=tx.id,
+                    datum=tx.datum,
+                    bedrag=tx.bedrag,
+                    merchant_name=tx.merchant_name,
+                    naam=tx.naam,
+                    omschrijving=tx.omschrijving,
+                )
+                for tx in sorted_txs
+            ],
+        ))
     result.sort(key=lambda x: x.total, reverse=True)
     return result
+
+
+@router.post("/categorize-selected")
+def categorize_selected(data: CategorizeSelectedRequest, db: Session = Depends(get_db)):
+    """Assign a category to specific uncategorized transactions by ID."""
+    if not data.transaction_ids:
+        raise HTTPException(status_code=400, detail="No transaction IDs provided")
+
+    cat = db.get(Category, data.category_id)
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    uncategorized_ids = set(
+        db.execute(_uncategorized_query().where(Transaction.id.in_(data.transaction_ids)))
+        .scalars()
+        .all()
+    )
+
+    for tx in uncategorized_ids:
+        tx.category_id = data.category_id
+
+    db.commit()
+    return {"updated": len(uncategorized_ids)}
 
 
 @router.post("/bulk-categorize")
