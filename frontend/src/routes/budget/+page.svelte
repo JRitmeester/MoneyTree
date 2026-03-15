@@ -1333,16 +1333,27 @@
 		flex: 1;
 	}
 
-	/* Savings column: two stacked cards */
+	/* Savings column: single white card with internal sections */
 	.savings-column {
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		background: white;
+		border-radius: 8px;
+		padding: 1.25rem;
+	}
+	.savings-column .section {
+		background: none;
+		border-radius: 0;
+		padding: 0;
+		margin-bottom: 1.25rem;
+	}
+	.savings-column .section:last-of-type {
+		margin-bottom: 0;
 	}
 	.savings-subtotal {
-		background: white;
-		padding: 0.75rem 1.25rem;
-		border-radius: 8px;
+		border-top: 2px solid #e5e7eb;
+		padding-top: 0.75rem;
+		margin-top: 1.25rem;
 	}
 
 	/* Balance badge */
