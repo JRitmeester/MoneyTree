@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import {
-		getCategoryDetail, formatEuro, formatDate,
-		type CategoryDetail, type SpendingLineItem
+		getCategoryDetail, getBudgets, formatEuro, formatDate,
+		type CategoryDetail, type SpendingLineItem, type BudgetSummary
 	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
@@ -12,6 +12,7 @@
 	const urlTo = page.url.searchParams.get('date_to');
 	const initialRange = (urlFrom && urlTo) ? { dateFrom: urlFrom, dateTo: urlTo } : get(dateRange);
 	let data: CategoryDetail | null = $state(null);
+	let budgetPeriods: BudgetSummary[] = $state([]);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let dateFrom = $state(initialRange.dateFrom);
@@ -32,7 +33,10 @@
 		}
 	}
 
-	$effect(() => { load(); });
+	$effect(() => {
+		load();
+		getBudgets().then(bp => { budgetPeriods = bp; });
+	});
 
 	function handleDateChange() {
 		load();
@@ -62,7 +66,7 @@
 				{/if}
 			{/each}
 		</div>
-		<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} />
+		<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} periods={budgetPeriods} />
 	</div>
 
 	<div class="summary-cards">
