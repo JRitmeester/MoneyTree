@@ -1,22 +1,23 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import {
-		getBudgets, getBudget, getBudgetTemplate, createBudget, updateBudget, patchBudget,
+		getBudgets, getBudget, createBudget, updateBudget, patchBudget,
 		getBudgetVsActual, getCategories, deleteBudget,
 		formatEuro, formatPeriodLabel, updateCategory,
-		type Budget, type BudgetSummary, type BudgetTemplate, type BudgetVsActualSummary, type BudgetVsActualLine, type Category
+		type Budget, type BudgetSummary, type BudgetVsActualSummary, type BudgetVsActualLine, type Category
 	} from '$lib/api';
+	import CategoryInput from '$lib/components/CategoryInput.svelte';
 
 	// --- State ---
 	let allPeriods: BudgetSummary[] = $state([]);
 	let currentPeriodIndex: number = $state(-1);
 
-	let activeTab: 'plan' | 'actuals' = $state('plan');
+	let activeTab: 'plan' | 'actuals' = $state(
+		(typeof sessionStorage !== 'undefined' && sessionStorage.getItem('budget-tab') === 'actuals') ? 'actuals' : 'plan'
+	);
+	$effect(() => { sessionStorage.setItem('budget-tab', activeTab); });
 	let loading = $state(true);
 	let error: string | null = $state(null);
-	let editing = $state(false);
 
-	let templateData: BudgetTemplate | null = $state(null);
 	let budgetData: Budget | null = $state(null);
 	let bvaData: BudgetVsActualSummary | null = $state(null);
 	let categories: Category[] = $state([]);
@@ -37,10 +38,12 @@
 	let savingDates = $state(false);
 
 	// Edit state
-	let editLines: { category_id: number; category_name: string; category_type: string; is_fixed: boolean; amount: number }[] = $state([]);
-	let updateTemplateChecked = $state(true);
-	let addCategoryId: number | null = $state(null);
-	let addPlacement: 'income' | 'fixed' | 'flexible' = $state('flexible');
+	let editLines: { category_id: number; category_name: string; category_type: string; is_fixed: boolean; amount: number; balance: number }[] = $state([]);
+	let addIncomeId: number | null = $state(null);
+	let addFixedId: number | null = $state(null);
+	let addSinkingId: number | null = $state(null);
+	let addWishListId: number | null = $state(null);
+	let addFlexibleId: number | null = $state(null);
 
 	// --- Derived ---
 	let currentPeriod = $derived(currentPeriodIndex >= 0 && currentPeriodIndex < allPeriods.length ? allPeriods[currentPeriodIndex] : null);
@@ -48,33 +51,61 @@
 	let hasPrev = $derived(currentPeriodIndex < allPeriods.length - 1);
 	let hasNext = $derived(currentPeriodIndex > 0);
 
-	let hasTemplate = $derived(templateData !== null && templateData.lines.length > 0);
 	let hasBudget = $derived(budgetData !== null && budgetData.lines.length > 0);
-
-	// Plan tab: split budget lines by type
-	let incomeLines = $derived(budgetData?.lines.filter(l => l.category_type === 'income') ?? []);
-	let fixedExpenseLines = $derived(budgetData?.lines.filter(l => l.category_type === 'expense' && l.is_fixed) ?? []);
-	let flexibleExpenseLines = $derived(budgetData?.lines.filter(l => l.category_type === 'expense' && !l.is_fixed) ?? []);
-
-	let totalIncome = $derived(incomeLines.reduce((s, l) => s + l.amount, 0));
-	let totalFixedExpenses = $derived(fixedExpenseLines.reduce((s, l) => s + l.amount, 0));
-	let discretionary = $derived(totalIncome - totalFixedExpenses);
-	let totalFlexible = $derived(flexibleExpenseLines.reduce((s, l) => s + l.amount, 0));
-	let unallocated = $derived(discretionary - totalFlexible);
 
 	// Actuals tab: split BVA lines
 	let bvaIncomeLines = $derived(bvaData?.income_lines ?? []);
-	let bvaFixedExpenses = $derived(bvaData?.expense_lines.filter(l => l.is_fixed) ?? []);
-	let bvaFlexibleExpenses = $derived(bvaData?.expense_lines.filter(l => !l.is_fixed) ?? []);
+	let bvaFixedExpenses = $derived(bvaData?.expense_lines.filter(l => l.is_fixed && l.category_type !== 'savings') ?? []);
+	let bvaSavingsExpenses = $derived(bvaData?.expense_lines.filter(l => l.category_type === 'savings') ?? []);
+	let bvaSinkingLines = $derived(bvaSavingsExpenses.filter(l => l.is_fixed));
+	let bvaWishListLines = $derived(bvaSavingsExpenses.filter(l => !l.is_fixed));
+	let bvaFlexibleExpenses = $derived(bvaData?.expense_lines.filter(l => !l.is_fixed && l.category_type !== 'savings') ?? []);
+
+	// Actuals tab: section subtotals
+	let bvaIncomeTotals = $derived({ budgeted: bvaIncomeLines.reduce((s, l) => s + l.budgeted, 0), actual: bvaIncomeLines.reduce((s, l) => s + l.actual, 0) });
+	let bvaFixedTotals = $derived({ budgeted: bvaFixedExpenses.reduce((s, l) => s + l.budgeted, 0), actual: bvaFixedExpenses.reduce((s, l) => s + l.actual, 0) });
+	let bvaSinkingTotals = $derived({ budgeted: bvaSinkingLines.reduce((s, l) => s + l.budgeted, 0), actual: bvaSinkingLines.reduce((s, l) => s + l.actual, 0) });
+	let bvaWishListTotals = $derived({ budgeted: bvaWishListLines.reduce((s, l) => s + l.budgeted, 0), actual: bvaWishListLines.reduce((s, l) => s + l.actual, 0) });
+	let bvaFlexibleTotals = $derived({ budgeted: bvaFlexibleExpenses.reduce((s, l) => s + l.budgeted, 0), actual: bvaFlexibleExpenses.reduce((s, l) => s + l.actual, 0) });
+
+	// Pacing — only meaningful for flexible spending in the current period
+	let periodProgress = $derived.by(() => {
+		if (!bvaData) return 0;
+		const start = new Date(bvaData.start_date).getTime();
+		const end = new Date(bvaData.end_date).getTime();
+		const now = Date.now();
+		if (now <= start) return 0;
+		if (now >= end) return 1;
+		return (now - start) / (end - start);
+	});
+
+	let isCurrentPeriod = $derived.by(() => {
+		if (!bvaData) return false;
+		const now = Date.now();
+		return now >= new Date(bvaData.start_date).getTime()
+			&& now <= new Date(bvaData.end_date).getTime();
+	});
+
+	function pacingStatus(line: BudgetVsActualLine): 'on_track' | 'ahead' | 'over' | null {
+		if (!isCurrentPeriod || line.budgeted === 0) return null;
+		const ratio = line.actual / line.budgeted;
+		if (ratio > 1) return 'over';
+		if (ratio > periodProgress + 0.10) return 'ahead';
+		return 'on_track';
+	}
 
 	// Wizard derived
 	let wizardIncomeLines = $derived(wizardLines.filter(l => l.category_type === 'income'));
 	let wizardFixedLines = $derived(wizardLines.filter(l => l.category_type === 'expense' && l.is_fixed));
+	let wizardSavingsLines = $derived(wizardLines.filter(l => l.category_type === 'savings'));
+	let wizardSinkingLines = $derived(wizardSavingsLines.filter(l => l.is_fixed));
+	let wizardWishListLines = $derived(wizardSavingsLines.filter(l => !l.is_fixed));
 	let wizardFlexibleLines = $derived(wizardLines.filter(l => l.category_type === 'expense' && !l.is_fixed));
 	let wizardTotalIncome = $derived(wizardIncomeLines.reduce((s, l) => s + l.amount, 0));
 	let wizardTotalFixed = $derived(wizardFixedLines.reduce((s, l) => s + l.amount, 0));
+	let wizardTotalSavings = $derived(wizardSavingsLines.reduce((s, l) => s + l.amount, 0));
 	let wizardTotalFlexible = $derived(wizardFlexibleLines.reduce((s, l) => s + l.amount, 0));
-	let wizardDiscretionary = $derived(wizardTotalIncome - wizardTotalFixed);
+	let wizardDiscretionary = $derived(wizardTotalIncome - wizardTotalFixed - wizardTotalSavings);
 	let wizardUnallocated = $derived(wizardDiscretionary - wizardTotalFlexible);
 
 	// Flat categories for picker
@@ -88,11 +119,6 @@
 		}
 		return result;
 	}
-
-	let availableCategories = $derived.by(() => {
-		const usedIds = new Set(editLines.map(l => l.category_id));
-		return flatCategories(categories).filter(c => !usedIds.has(c.id));
-	});
 
 	// --- Helpers ---
 	function addDays(dateStr: string, days: number): string {
@@ -110,13 +136,11 @@
 		loading = true;
 		error = null;
 		try {
-			const [periods, tpl, cats] = await Promise.all([
+			const [periods, cats] = await Promise.all([
 				getBudgets(),
-				getBudgetTemplate(),
 				getCategories(),
 			]);
 			allPeriods = periods;
-			templateData = tpl;
 			categories = cats;
 
 			if (allPeriods.length > 0) {
@@ -154,6 +178,7 @@
 			error = e.message;
 		} finally {
 			loading = false;
+			syncEditLines();
 		}
 	}
 
@@ -162,14 +187,12 @@
 	// --- Navigation ---
 	function prevPeriod() {
 		if (!hasPrev) return;
-		editing = false;
 		currentPeriodIndex++;
 		loadCurrentPeriod();
 	}
 
 	function nextPeriod() {
 		if (!hasNext) return;
-		editing = false;
 		currentPeriodIndex--;
 		loadCurrentPeriod();
 	}
@@ -192,7 +215,7 @@
 
 	function wizardGoToStep2() {
 		if (!wizardStartDate || !wizardEndDate) return;
-		// Build lines from current budget (or template)
+		// Build lines from current budget
 		const actualsByCategory: Record<number, number> = {};
 		if (bvaData) {
 			for (const line of [...bvaData.income_lines, ...bvaData.expense_lines]) {
@@ -200,9 +223,7 @@
 			}
 		}
 
-		const sourceLines = (budgetData && budgetData.lines.length > 0)
-			? budgetData.lines
-			: (templateData?.lines ?? []);
+		const sourceLines = budgetData?.lines ?? [];
 
 		wizardLines = sourceLines.map(line => ({
 			category_id: line.category_id,
@@ -220,10 +241,7 @@
 		const line = wizardLines[idx];
 		line.useActual = !line.useActual;
 		line.amount = line.useActual ? line.actualAmount : (
-			// Revert to original budgeted amount
-			(budgetData?.lines.find(l => l.category_id === line.category_id)?.amount
-			?? templateData?.lines.find(l => l.category_id === line.category_id)?.amount
-			?? 0)
+			budgetData?.lines.find(l => l.category_id === line.category_id)?.amount ?? 0
 		);
 		wizardLines = [...wizardLines];
 	}
@@ -277,43 +295,45 @@
 		}
 	}
 
-	// --- Edit mode ---
-	function startEditing() {
-		editLines = [];
-		if (budgetData && budgetData.lines.length > 0) {
-			for (const line of budgetData.lines) {
-				editLines.push({
-					category_id: line.category_id,
-					category_name: line.category_name,
-					category_type: line.category_type,
-					is_fixed: line.is_fixed,
-					amount: line.amount,
-				});
-			}
-		} else if (templateData && templateData.lines.length > 0) {
-			for (const line of templateData.lines) {
-				editLines.push({
-					category_id: line.category_id,
-					category_name: line.category_name,
-					category_type: line.category_type,
-					is_fixed: line.is_fixed,
-					amount: line.amount,
-				});
-			}
-		}
-		updateTemplateChecked = true;
-		addCategoryId = null;
-		editing = true;
+	// --- Sync edit lines from loaded data ---
+	function syncEditLines() {
+		editLines = (budgetData?.lines ?? []).map(line => ({
+			category_id: line.category_id,
+			category_name: line.category_name,
+			category_type: line.category_type,
+			is_fixed: line.is_fixed,
+			amount: line.amount,
+			balance: line.balance ?? 0,
+		}));
+		addIncomeId = null;
+		addFixedId = null;
+		addSinkingId = null;
+		addWishListId = null;
+		addFlexibleId = null;
 	}
 
-	async function addBudgetLine() {
-		if (addCategoryId == null) return;
+	async function persistLines() {
+		if (!budgetData) return;
+		const lines = editLines
+			.filter(l => l.amount > 0)
+			.map(l => ({ category_id: l.category_id, amount: l.amount }));
+		try {
+			await updateBudget(budgetData.id, { lines }, false);
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
+	async function addLineFromInput(categoryId: number, placement: 'income' | 'fixed' | 'sinking' | 'wishlist' | 'flexible') {
+		if (editLines.some(l => l.category_id === categoryId)) return;
+
+		categories = await getCategories();
 		const flat = flatCategories(categories);
-		const cat = flat.find(c => c.id === addCategoryId);
+		const cat = flat.find(c => c.id === categoryId);
 		if (!cat) return;
 
-		const newType = addPlacement === 'income' ? 'income' : 'expense';
-		const newFixed = addPlacement === 'fixed';
+		const newType = placement === 'income' ? 'income' : (placement === 'sinking' || placement === 'wishlist') ? 'savings' : 'expense';
+		const newFixed = placement === 'fixed' || placement === 'sinking';
 
 		if (cat.category_type !== newType || cat.is_fixed !== newFixed) {
 			try {
@@ -330,31 +350,31 @@
 			category_type: newType,
 			is_fixed: newFixed,
 			amount: 0,
+			balance: 0,
 		}];
-		addCategoryId = null;
+
+		if (placement === 'income') addIncomeId = null;
+		else if (placement === 'fixed') addFixedId = null;
+		else if (placement === 'sinking') addSinkingId = null;
+		else if (placement === 'wishlist') addWishListId = null;
+		else addFlexibleId = null;
+
+		await persistLines();
 	}
 
-	function removeBudgetLine(index: number) {
+	async function removeBudgetLine(index: number) {
 		editLines = editLines.filter((_, i) => i !== index);
+		await persistLines();
 	}
 
-	async function saveEditing() {
-		if (!budgetData) return;
-		const lines = editLines
-			.filter(l => l.amount > 0)
-			.map(l => ({ category_id: l.category_id, amount: l.amount }));
-
-		try {
-			await updateBudget(budgetData.id, { lines }, updateTemplateChecked);
-			editing = false;
-			await loadCurrentPeriod();
-		} catch (e: any) {
-			error = e.message;
+	function handleAmountKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			(e.target as HTMLInputElement).blur();
 		}
 	}
 
-	function cancelEditing() {
-		editing = false;
+	async function handleAmountBlur() {
+		await persistLines();
 	}
 
 	async function handleDeleteBudget() {
@@ -397,11 +417,16 @@
 	// Edit lines grouped
 	let editIncomeLines = $derived(editLines.filter(l => l.category_type === 'income'));
 	let editFixedLines = $derived(editLines.filter(l => l.category_type === 'expense' && l.is_fixed));
+	let editSavingsLines = $derived(editLines.filter(l => l.category_type === 'savings'));
+	let editSinkingLines = $derived(editSavingsLines.filter(l => l.is_fixed));
+	let editWishListLines = $derived(editSavingsLines.filter(l => !l.is_fixed));
 	let editFlexibleLines = $derived(editLines.filter(l => l.category_type === 'expense' && !l.is_fixed));
 
 	let editTotalIncome = $derived(editIncomeLines.reduce((s, l) => s + l.amount, 0));
 	let editTotalFixed = $derived(editFixedLines.reduce((s, l) => s + l.amount, 0));
-	let editDiscretionary = $derived(editTotalIncome - editTotalFixed);
+	let editTotalSavings = $derived(editSavingsLines.reduce((s, l) => s + l.amount, 0));
+	let editAfterBills = $derived(editTotalIncome - editTotalFixed);
+	let editDiscretionary = $derived(editAfterBills - editTotalSavings);
 	let editTotalFlexible = $derived(editFlexibleLines.reduce((s, l) => s + l.amount, 0));
 	let editUnallocated = $derived(editDiscretionary - editTotalFlexible);
 
@@ -415,7 +440,7 @@
 </script>
 
 <div class="budget-page">
-	<!-- Header with period nav -->
+	<!-- Header -->
 	<div class="header">
 		<div class="period-selector">
 			<button class="nav-btn" onclick={prevPeriod} disabled={!hasPrev}>&larr;</button>
@@ -439,15 +464,8 @@
 		</div>
 		<div class="actions">
 			<button class="btn secondary" onclick={openWizard}>New Period</button>
-			{#if activeTab === 'plan' && !editing && currentPeriod && (hasBudget || hasTemplate)}
-				<button class="btn primary" onclick={startEditing}>Edit</button>
-				{#if hasBudget}
-					<button class="btn danger-outline" onclick={handleDeleteBudget}>Delete</button>
-				{/if}
-			{/if}
-			{#if editing}
-				<button class="btn primary" onclick={saveEditing}>Save</button>
-				<button class="btn secondary" onclick={cancelEditing}>Cancel</button>
+			{#if currentPeriod && hasBudget}
+				<button class="btn danger-text" onclick={handleDeleteBudget}>Delete</button>
 			{/if}
 		</div>
 	</div>
@@ -488,7 +506,8 @@
 
 						<div class="wizard-summary">
 							<span class="ws-item"><span class="ws-label">Income</span> <span class="ws-value income-text">{formatEuro(wizardTotalIncome)}</span></span>
-							<span class="ws-item"><span class="ws-label">Fixed</span> <span class="ws-value expense-text">{formatEuro(wizardTotalFixed)}</span></span>
+							<span class="ws-item"><span class="ws-label">Bills</span> <span class="ws-value expense-text">{formatEuro(wizardTotalFixed)}</span></span>
+							<span class="ws-item"><span class="ws-label">Savings</span> <span class="ws-value expense-text">{formatEuro(wizardTotalSavings)}</span></span>
 							<span class="ws-item"><span class="ws-label">Flexible</span> <span class="ws-value expense-text">{formatEuro(wizardTotalFlexible)}</span></span>
 							<span class="ws-item"><span class="ws-label">Unallocated</span> <span class="ws-value" class:unallocated-zero={wizardUnallocated === 0} class:unallocated-nonzero={wizardUnallocated !== 0}>{formatEuro(wizardUnallocated)}</span></span>
 						</div>
@@ -507,7 +526,7 @@
 						{/if}
 
 						{#if wizardFixedLines.length > 0}
-							<h3>Fixed Expenses</h3>
+							<h3>Fixed Bills</h3>
 							<div class="wizard-lines">
 								{#each wizardFixedLines as line}
 									{@const idx = getWizardLineIndex(line)}
@@ -519,8 +538,34 @@
 							</div>
 						{/if}
 
+						{#if wizardSinkingLines.length > 0}
+							<h3>Sinking Funds</h3>
+							<div class="wizard-lines">
+								{#each wizardSinkingLines as line}
+									{@const idx = getWizardLineIndex(line)}
+									<div class="wizard-line-row">
+										<span class="cat-name">{line.category_name}</span>
+										<input type="number" step="0.01" min="0" bind:value={wizardLines[idx].amount} />
+									</div>
+								{/each}
+							</div>
+						{/if}
+
+						{#if wizardWishListLines.length > 0}
+							<h3>Saving Goals</h3>
+							<div class="wizard-lines">
+								{#each wizardWishListLines as line}
+									{@const idx = getWizardLineIndex(line)}
+									<div class="wizard-line-row">
+										<span class="cat-name">{line.category_name}</span>
+										<input type="number" step="0.01" min="0" bind:value={wizardLines[idx].amount} />
+									</div>
+								{/each}
+							</div>
+						{/if}
+
 						{#if wizardFlexibleLines.length > 0}
-							<h3>Flexible Expenses</h3>
+							<h3>Flexible Spending</h3>
 							<div class="wizard-lines">
 								{#each wizardFlexibleLines as line}
 									{@const idx = getWizardLineIndex(line)}
@@ -558,12 +603,12 @@
 		<button
 			class="tab"
 			class:active={activeTab === 'plan'}
-			onclick={() => { activeTab = 'plan'; editing = false; }}
+			onclick={() => { activeTab = 'plan'; }}
 		>Plan</button>
 		<button
 			class="tab"
 			class:active={activeTab === 'actuals'}
-			onclick={() => { activeTab = 'actuals'; editing = false; }}
+			onclick={() => { activeTab = 'actuals'; }}
 		>Actuals</button>
 	</div>
 
@@ -582,249 +627,151 @@
 		</div>
 	{:else if activeTab === 'plan'}
 		<!-- ================ PLAN TAB ================ -->
-
-		{#if editing}
-			<!-- EDIT MODE -->
-			<div class="summary-banner">
-				<div class="banner-item">
-					<span class="banner-value income-text">{formatEuro(editTotalIncome)}</span>
-					<span class="banner-label">Income</span>
+		<div class="budget-grid">
+			<div class="section">
+				<h2>Income</h2>
+				<div class="edit-table">
+					{#each editIncomeLines as line}
+						{@const idx = getEditLineIndex(line)}
+						<div class="edit-row">
+							<span class="cat-name">{line.category_name}</span>
+							<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
+							<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
+						</div>
+					{/each}
+					<div class="edit-row add-row">
+						<div class="add-input-wrap">
+							<CategoryInput
+								value={addIncomeId}
+								onchange={(id) => { if (id) addLineFromInput(id, 'income'); }}
+								placeholder="Add category..."
+							/>
+						</div>
+					</div>
 				</div>
-				<div class="banner-item">
-					<span class="banner-value expense-text">{formatEuro(editTotalFixed)}</span>
-					<span class="banner-label">Fixed Expenses</span>
-				</div>
-				<div class="banner-item">
-					<span class="banner-value">{formatEuro(editDiscretionary)}</span>
-					<span class="banner-label">Discretionary</span>
-				</div>
-				<div class="banner-item">
-					<span class="banner-value expense-text">{formatEuro(editTotalFlexible)}</span>
-					<span class="banner-label">Allocated</span>
-				</div>
-				<div class="banner-item">
-					<span class="banner-value" class:unallocated-zero={editUnallocated === 0} class:unallocated-nonzero={editUnallocated !== 0}>{formatEuro(editUnallocated)}</span>
-					<span class="banner-label">Unallocated</span>
+				<div class="subtotal-row">
+					<span>Total</span>
+					<span class="subtotal-value income-text">{formatEuro(editTotalIncome)}</span>
 				</div>
 			</div>
 
-			<div class="two-col">
-				<!-- Left column: Income + Fixed -->
-				<div class="col">
-					<div class="section">
-						<h2>Income</h2>
-						<div class="edit-table">
-							{#each editIncomeLines as line}
-								{@const idx = getEditLineIndex(line)}
-								<div class="edit-row">
-									<span class="cat-name">{line.category_name}</span>
-									<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} />
-									<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
-								</div>
-							{/each}
-							{#if editIncomeLines.length === 0}
-								<p class="muted">No income categories yet.</p>
-							{/if}
+			<div class="section">
+				<h2>Fixed Bills</h2>
+				<div class="edit-table">
+					{#each editFixedLines as line}
+						{@const idx = getEditLineIndex(line)}
+						<div class="edit-row">
+							<span class="cat-name">{line.category_name}</span>
+							<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
+							<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
 						</div>
-					</div>
-
-					<div class="section">
-						<h2>Fixed Expenses</h2>
-						<div class="edit-table">
-							{#each editFixedLines as line}
-								{@const idx = getEditLineIndex(line)}
-								<div class="edit-row">
-									<span class="cat-name">{line.category_name}</span>
-									<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} />
-									<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
-								</div>
-							{/each}
-							{#if editFixedLines.length === 0}
-								<p class="muted">No fixed expense categories yet.</p>
-							{/if}
-						</div>
-
-						<div class="subtotal-row">
-							<span>Discretionary</span>
-							<span class="subtotal-value">{formatEuro(editDiscretionary)}</span>
+					{/each}
+					<div class="edit-row add-row">
+						<div class="add-input-wrap">
+							<CategoryInput
+								value={addFixedId}
+								onchange={(id) => { if (id) addLineFromInput(id, 'fixed'); }}
+								placeholder="Add category..."
+							/>
 						</div>
 					</div>
 				</div>
-
-				<!-- Right column: Flexible -->
-				<div class="col">
-					<div class="section">
-						<h2>Flexible Expenses</h2>
-						<div class="edit-table">
-							{#each editFlexibleLines as line}
-								{@const idx = getEditLineIndex(line)}
-								<div class="edit-row">
-									<span class="cat-name">{line.category_name}</span>
-									<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} />
-									<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
-								</div>
-							{/each}
-							{#if editFlexibleLines.length === 0}
-								<p class="muted">No flexible expense categories yet.</p>
-							{/if}
-						</div>
-
-						<div class="subtotal-row">
-							<span>Allocated</span>
-							<span class="subtotal-value">{formatEuro(editTotalFlexible)}</span>
-						</div>
-						<div class="subtotal-row highlight" class:unallocated-zero={editUnallocated === 0} class:unallocated-nonzero={editUnallocated !== 0}>
-							<span>Unallocated</span>
-							<span class="subtotal-value">{formatEuro(editUnallocated)}</span>
-						</div>
-					</div>
+				<div class="subtotal-row">
+					<span>After bills</span>
+					<span class="subtotal-value">{formatEuro(editAfterBills)}</span>
 				</div>
 			</div>
 
-			<!-- Add category + template checkbox -->
-			<div class="edit-controls">
-				<div class="add-line-row">
-					<select bind:value={addCategoryId}>
-						<option value={null}>-- Select category --</option>
-						{#each availableCategories as cat}
-							<option value={cat.id}>{'--'.repeat(cat.depth)}{cat.depth ? ' ' : ''}{cat.name}</option>
+			<div class="savings-column">
+				<div class="section">
+					<h2>Sinking Funds</h2>
+					<div class="edit-table">
+						{#each editSinkingLines as line}
+							{@const idx = getEditLineIndex(line)}
+							<div class="edit-row">
+								<span class="cat-name">{line.category_name}</span>
+								<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
+								{#if line.balance > 0}
+									<span class="balance-badge">{formatEuro(line.balance)}</span>
+								{/if}
+								<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
+							</div>
 						{/each}
-					</select>
-					<select bind:value={addPlacement} class="placement-select">
-						<option value="income">Income</option>
-						<option value="fixed">Fixed Expense</option>
-						<option value="flexible">Flexible Expense</option>
-					</select>
-					<button class="btn primary small" onclick={addBudgetLine} disabled={addCategoryId == null}>+ Add</button>
-				</div>
-				<label class="template-checkbox">
-					<input type="checkbox" bind:checked={updateTemplateChecked} />
-					Update template too?
-				</label>
-			</div>
-
-		{:else if !hasBudget && !hasTemplate}
-			<!-- ONBOARDING: No template, no budget for this period -->
-			<div class="onboarding">
-				<div class="onboarding-card">
-					<h2>Set up your budget</h2>
-					<p>Add budget items for this period. If you check "Update template too", future periods will start with the same items.</p>
-					<button class="btn primary large" onclick={startEditing}>Add your first budget items</button>
-				</div>
-			</div>
-
-		{:else}
-			<!-- VIEW MODE -->
-			<div class="summary-banner">
-				<div class="banner-item">
-					<span class="banner-value income-text">{formatEuro(totalIncome)}</span>
-					<span class="banner-label">Total Income</span>
-				</div>
-				<div class="banner-item">
-					<span class="banner-value expense-text">{formatEuro(totalFixedExpenses)}</span>
-					<span class="banner-label">Fixed Expenses</span>
-				</div>
-				<div class="banner-item">
-					<span class="banner-value">{formatEuro(discretionary)}</span>
-					<span class="banner-label">Discretionary</span>
-				</div>
-				<div class="banner-item">
-					<span class="banner-value expense-text">{formatEuro(totalFlexible)}</span>
-					<span class="banner-label">Allocated</span>
-				</div>
-				<div class="banner-item">
-					<span class="banner-value" class:unallocated-zero={unallocated === 0} class:unallocated-nonzero={unallocated !== 0}>{formatEuro(unallocated)}</span>
-					<span class="banner-label">Unallocated</span>
-				</div>
-			</div>
-
-			<div class="two-col">
-				<!-- Left column -->
-				<div class="col">
-					<div class="section">
-						<h2>Income</h2>
-						{#if incomeLines.length > 0}
-							<div class="plan-table">
-								{#each incomeLines as line}
-									<div class="plan-row">
-										<span class="cat-name">{line.category_name}</span>
-										<span class="amount income-text">{formatEuro(line.amount)}</span>
-										{#if line.is_overridden}
-											<span class="override-badge" title="Overridden from template ({formatEuro(line.template_amount)})">override</span>
-										{/if}
-									</div>
-								{/each}
+						<div class="edit-row add-row">
+							<div class="add-input-wrap">
+								<CategoryInput
+									value={addSinkingId}
+									onchange={(id) => { if (id) addLineFromInput(id, 'sinking'); }}
+									placeholder="Add sinking fund..."
+								/>
 							</div>
-							<div class="subtotal-row">
-								<span>Total Income</span>
-								<span class="subtotal-value income-text">{formatEuro(totalIncome)}</span>
-							</div>
-						{:else}
-							<p class="muted">No income categories budgeted.</p>
-						{/if}
-					</div>
-
-					<div class="section">
-						<h2>Fixed Expenses</h2>
-						{#if fixedExpenseLines.length > 0}
-							<div class="plan-table">
-								{#each fixedExpenseLines as line}
-									<div class="plan-row">
-										<span class="cat-name">{line.category_name}</span>
-										<span class="amount expense-text">{formatEuro(line.amount)}</span>
-										{#if line.is_overridden}
-											<span class="override-badge" title="Overridden from template ({formatEuro(line.template_amount)})">override</span>
-										{/if}
-									</div>
-								{/each}
-							</div>
-							<div class="subtotal-row">
-								<span>Total Fixed</span>
-								<span class="subtotal-value expense-text">{formatEuro(totalFixedExpenses)}</span>
-							</div>
-						{:else}
-							<p class="muted">No fixed expense categories budgeted.</p>
-						{/if}
-
-						<div class="subtotal-row highlight">
-							<span>Discretionary</span>
-							<span class="subtotal-value">{formatEuro(discretionary)}</span>
 						</div>
 					</div>
 				</div>
 
-				<!-- Right column -->
-				<div class="col">
-					<div class="section">
-						<h2>Flexible Expenses</h2>
-						{#if flexibleExpenseLines.length > 0}
-							<div class="plan-table">
-								{#each flexibleExpenseLines as line}
-									<div class="plan-row">
-										<span class="cat-name">{line.category_name}</span>
-										<span class="amount expense-text">{formatEuro(line.amount)}</span>
-										{#if line.is_overridden}
-											<span class="override-badge" title="Overridden from template ({formatEuro(line.template_amount)})">override</span>
-										{/if}
-									</div>
-								{/each}
+				<div class="section">
+					<h2>Saving Goals</h2>
+					<div class="edit-table">
+						{#each editWishListLines as line}
+							{@const idx = getEditLineIndex(line)}
+							<div class="edit-row">
+								<span class="cat-name">{line.category_name}</span>
+								<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
+								{#if line.balance > 0}
+									<span class="balance-badge">{formatEuro(line.balance)}</span>
+								{/if}
+								<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
 							</div>
-							<div class="subtotal-row">
-								<span>Allocated</span>
-								<span class="subtotal-value expense-text">{formatEuro(totalFlexible)}</span>
+						{/each}
+						<div class="edit-row add-row">
+							<div class="add-input-wrap">
+								<CategoryInput
+									value={addWishListId}
+									onchange={(id) => { if (id) addLineFromInput(id, 'wishlist'); }}
+									placeholder="Add saving goal..."
+								/>
 							</div>
-						{:else}
-							<p class="muted">No flexible expense categories budgeted.</p>
-						{/if}
-
-						<div class="subtotal-row highlight" class:unallocated-zero={unallocated === 0} class:unallocated-nonzero={unallocated !== 0}>
-							<span>Unallocated</span>
-							<span class="subtotal-value">{formatEuro(unallocated)}</span>
 						</div>
 					</div>
 				</div>
+
+				<div class="subtotal-row savings-subtotal">
+					<span>Discretionary</span>
+					<span class="subtotal-value">{formatEuro(editDiscretionary)}</span>
+				</div>
 			</div>
-		{/if}
+
+			<div class="section">
+				<h2>Flexible Spending</h2>
+				<div class="edit-table">
+					{#each editFlexibleLines as line}
+						{@const idx = getEditLineIndex(line)}
+						<div class="edit-row">
+							<span class="cat-name">{line.category_name}</span>
+							<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
+							<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
+						</div>
+					{/each}
+					<div class="edit-row add-row">
+						<div class="add-input-wrap">
+							<CategoryInput
+								value={addFlexibleId}
+								onchange={(id) => { if (id) addLineFromInput(id, 'flexible'); }}
+								placeholder="Add category..."
+							/>
+						</div>
+					</div>
+				</div>
+				<div class="subtotal-row">
+					<span>Allocated</span>
+					<span class="subtotal-value">{formatEuro(editTotalFlexible)}</span>
+				</div>
+				<div class="subtotal-row highlight" class:unallocated-zero={editUnallocated === 0} class:unallocated-nonzero={editUnallocated !== 0}>
+					<span>Unallocated</span>
+					<span class="subtotal-value">{formatEuro(editUnallocated)}</span>
+				</div>
+			</div>
+		</div>
 
 	{:else}
 		<!-- ================ ACTUALS TAB ================ -->
@@ -871,7 +818,7 @@
 							<span class="bar-col">Progress</span>
 						</div>
 						{#each bvaIncomeLines as line}
-							<div class="bva-row">
+							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
 								<span class="cat-name">{line.category_name}</span>
 								<span class="right">{formatEuro(line.budgeted)}</span>
 								<span class="right">{formatEuro(line.actual)}</span>
@@ -886,19 +833,28 @@
 										></div>
 									</div>
 								</span>
-							</div>
+							</a>
 						{/each}
+						{#if bvaIncomeLines.length > 1}
+							<div class="bva-row bva-subtotal">
+								<span class="cat-name">Total</span>
+								<span class="right">{formatEuro(bvaIncomeTotals.budgeted)}</span>
+								<span class="right">{formatEuro(bvaIncomeTotals.actual)}</span>
+								<span class="right"></span>
+								<span class="bar-col"></span>
+							</div>
+						{/if}
 					</div>
 				</div>
 			{/if}
 
-			<!-- Fixed Expenses -->
+			<!-- Fixed Bills -->
 			{#if bvaFixedExpenses.length > 0}
 				<div class="section">
-					<h2>Fixed Expenses</h2>
+					<h2>Fixed Bills</h2>
 					<div class="fixed-list">
 						{#each bvaFixedExpenses as line}
-							<div class="fixed-row">
+							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="fixed-row fixed-row-link">
 								<span class="cat-name">{line.category_name}</span>
 								<span class="fixed-amounts">
 									<span class="budgeted-amt">{formatEuro(line.budgeted)}</span>
@@ -911,16 +867,83 @@
 										<span class="check-warn" title="Over budget">&#10007;</span>
 									{/if}
 								</span>
-							</div>
+							</a>
 						{/each}
+						{#if bvaFixedExpenses.length > 1}
+							<div class="fixed-row fixed-subtotal">
+								<span class="cat-name">Total</span>
+								<span class="fixed-amounts">
+									<span class="budgeted-amt">{formatEuro(bvaFixedTotals.budgeted)}</span>
+									<span class="actual-amt">{formatEuro(bvaFixedTotals.actual)}</span>
+								</span>
+								<span class="fixed-check"></span>
+							</div>
+						{/if}
 					</div>
 				</div>
 			{/if}
 
-			<!-- Flexible Expenses -->
+			<!-- Savings -->
+			{#if bvaSinkingLines.length > 0}
+				<div class="section">
+					<h2>Sinking Funds</h2>
+					<div class="fixed-list">
+						{#each bvaSinkingLines as line}
+							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="fixed-row fixed-row-link">
+								<span class="cat-name">{line.category_name}</span>
+								<span class="fixed-amounts">
+									<span class="budgeted-amt">{formatEuro(line.budgeted)}</span>
+									<span class="actual-amt">{formatEuro(line.actual)}</span>
+								</span>
+								<span class="balance-badge">{formatEuro(line.balance)}</span>
+							</a>
+						{/each}
+						{#if bvaSinkingLines.length > 1}
+							<div class="fixed-row fixed-subtotal">
+								<span class="cat-name">Total</span>
+								<span class="fixed-amounts">
+									<span class="budgeted-amt">{formatEuro(bvaSinkingTotals.budgeted)}</span>
+									<span class="actual-amt">{formatEuro(bvaSinkingTotals.actual)}</span>
+								</span>
+								<span class="balance-badge"></span>
+							</div>
+						{/if}
+					</div>
+				</div>
+			{/if}
+
+			{#if bvaWishListLines.length > 0}
+				<div class="section">
+					<h2>Saving Goals</h2>
+					<div class="fixed-list">
+						{#each bvaWishListLines as line}
+							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="fixed-row fixed-row-link">
+								<span class="cat-name">{line.category_name}</span>
+								<span class="fixed-amounts">
+									<span class="budgeted-amt">{formatEuro(line.budgeted)}</span>
+									<span class="actual-amt">{formatEuro(line.actual)}</span>
+								</span>
+								<span class="balance-badge">{formatEuro(line.balance)}</span>
+							</a>
+						{/each}
+						{#if bvaWishListLines.length > 1}
+							<div class="fixed-row fixed-subtotal">
+								<span class="cat-name">Total</span>
+								<span class="fixed-amounts">
+									<span class="budgeted-amt">{formatEuro(bvaWishListTotals.budgeted)}</span>
+									<span class="actual-amt">{formatEuro(bvaWishListTotals.actual)}</span>
+								</span>
+								<span class="balance-badge"></span>
+							</div>
+						{/if}
+					</div>
+				</div>
+			{/if}
+
+			<!-- Flexible Spending -->
 			{#if bvaFlexibleExpenses.length > 0}
 				<div class="section">
-					<h2>Flexible Expenses</h2>
+					<h2>Flexible Spending</h2>
 					<div class="bva-table">
 						<div class="bva-header">
 							<span>Category</span>
@@ -930,7 +953,7 @@
 							<span class="bar-col">Progress</span>
 						</div>
 						{#each bvaFlexibleExpenses as line}
-							<div class="bva-row" class:over-budget={isOverBudget(line)}>
+							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link" class:over-budget={isOverBudget(line)}>
 								<span class="cat-name">{line.category_name}</span>
 								<span class="right">{formatEuro(line.budgeted)}</span>
 								<span class="right">{formatEuro(line.actual)}</span>
@@ -945,41 +968,64 @@
 											class:expense-bar-over={isOverBudget(line)}
 											style="width: {progressWidth(line)}"
 										></div>
+										{#if isCurrentPeriod && line.budgeted > 0}
+											<div class="pace-marker" style="left: {periodProgress * 100}%"></div>
+										{/if}
 									</div>
+									{#if pacingStatus(line) === 'ahead'}
+										<span class="pace-label pace-ahead">Ahead of pace</span>
+									{/if}
 								</span>
-							</div>
+							</a>
 						{/each}
+						{#if bvaFlexibleExpenses.length > 1}
+							<div class="bva-row bva-subtotal">
+								<span class="cat-name">Total</span>
+								<span class="right">{formatEuro(bvaFlexibleTotals.budgeted)}</span>
+								<span class="right">{formatEuro(bvaFlexibleTotals.actual)}</span>
+								<span class="right"></span>
+								<span class="bar-col"></span>
+							</div>
+						{/if}
 					</div>
 				</div>
 			{/if}
 
-			<!-- Unmapped warning -->
+			<!-- Uncategorized -->
 			{#if bvaData.unmapped_expenses > 0 || bvaData.unmapped_income > 0}
-				<div class="unmapped-warning">
-					<strong>Unmapped transactions</strong>
-					<p>
-						{#if bvaData.unmapped_expenses > 0}
-							{formatEuro(bvaData.unmapped_expenses)} in expenses
-						{/if}
-						{#if bvaData.unmapped_expenses > 0 && bvaData.unmapped_income > 0}
-							and
-						{/if}
-						{#if bvaData.unmapped_income > 0}
-							{formatEuro(bvaData.unmapped_income)} in income
-						{/if}
-						from bank categories without a mapping.
-					</p>
-					<button class="btn secondary" onclick={() => goto('/categories')}>Configure Mappings</button>
+				<div class="section unmapped-section">
+					<h2>Uncategorized</h2>
+					<p class="unmapped-desc">Transactions without a category are not included in the sections above.</p>
+					{#if bvaData.unmapped_income > 0}
+						<div class="unmapped-row">
+							<span>Income</span>
+							<span>{formatEuro(bvaData.unmapped_income)}</span>
+						</div>
+					{/if}
+					{#if bvaData.unmapped_expenses > 0}
+						<div class="unmapped-row">
+							<span>Expenses</span>
+							<span>{formatEuro(bvaData.unmapped_expenses)}</span>
+						</div>
+					{/if}
+					<a href="/uncategorized" class="unmapped-link">Categorize transactions &rarr;</a>
 				</div>
 			{/if}
-		{:else}
+
+			{:else}
 			<p class="muted" style="text-align: center; padding: 2rem">No actuals data available.</p>
 		{/if}
 	{/if}
 </div>
 
 <style>
-	.budget-page { max-width: 100%; }
+	.budget-page {
+		max-width: 100%;
+		margin: 0 auto;
+	}
+	:global(main:has(.budget-page)) {
+		max-width: 1600px;
+	}
 
 	/* Header */
 	.header {
@@ -1030,6 +1076,8 @@
 	.btn.secondary:hover { background: #f0fdf4; }
 	.btn.danger-outline { background: white; color: #dc2626; border: 2px solid #dc2626; }
 	.btn.danger-outline:hover { background: #fef2f2; }
+	.btn.danger-text { background: none; color: #999; border: none; font-size: 0.8rem; }
+	.btn.danger-text:hover { color: #dc2626; }
 	.btn.small { padding: 0.4rem 0.75rem; font-size: 0.85rem; }
 	.btn.large { padding: 0.75rem 2rem; font-size: 1rem; }
 
@@ -1203,24 +1251,6 @@
 	.loading { text-align: center; padding: 3rem; color: #666; }
 	.error { background: #fef2f2; color: #dc2626; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
 
-	/* Summary banner (Plan tab) */
-	.summary-banner {
-		display: flex;
-		gap: 1rem;
-		margin-bottom: 1.5rem;
-		flex-wrap: wrap;
-	}
-	.banner-item {
-		flex: 1;
-		min-width: 120px;
-		background: white;
-		padding: 1rem 1.25rem;
-		border-radius: 8px;
-		text-align: center;
-	}
-	.banner-value { font-size: 1.2rem; font-weight: 700; display: block; }
-	.banner-label { font-size: 0.75rem; color: #666; margin-top: 0.2rem; display: block; }
-
 	/* Colors */
 	.income-text { color: #16a34a; }
 	.expense-text { color: #dc2626; }
@@ -1230,45 +1260,21 @@
 	.unallocated-nonzero { color: #f59e0b !important; }
 	.muted { color: #999; font-style: italic; }
 
-	/* Two-column layout */
-	.two-col {
+	/* Budget grid layout */
+	.budget-grid {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 1.5rem;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 1rem;
+		align-items: start;
 	}
 
 	/* Section cards */
 	.section {
 		background: white;
-		padding: 1.5rem;
+		padding: 1.25rem;
 		border-radius: 8px;
-		margin-bottom: 1.5rem;
 	}
-	.col .section:last-child { margin-bottom: 0; }
 	h2 { margin: 0 0 1rem; font-size: 1.1rem; color: #1a1a1a; }
-
-	/* Plan view table */
-	.plan-table { font-size: 0.9rem; }
-	.plan-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 0.5rem 0;
-		border-bottom: 1px solid #f0f0f0;
-		gap: 0.5rem;
-	}
-	.plan-row .cat-name { flex: 1; font-weight: 500; }
-	.plan-row .amount { font-weight: 600; white-space: nowrap; }
-	.override-badge {
-		font-size: 0.65rem;
-		background: #f59e0b;
-		color: white;
-		padding: 0.1rem 0.4rem;
-		border-radius: 3px;
-		text-transform: uppercase;
-		font-weight: 600;
-		letter-spacing: 0.03em;
-	}
 
 	/* Subtotal rows */
 	.subtotal-row {
@@ -1291,23 +1297,22 @@
 	/* Edit mode table */
 	.edit-table { font-size: 0.9rem; }
 	.edit-row {
-		display: grid;
-		grid-template-columns: 1fr 120px 2rem;
+		display: flex;
 		padding: 0.4rem 0;
 		border-bottom: 1px solid #f0f0f0;
 		align-items: center;
 		gap: 0.5rem;
 	}
-	.edit-row .cat-name { font-weight: 500; }
-	.edit-row input {
-		width: 100%;
+	.edit-row .cat-name { font-weight: 500; flex: 1; min-width: 0; }
+	.edit-row input[type="number"] {
+		width: 80px;
 		padding: 0.35rem 0.5rem;
 		border: 1px solid #ddd;
 		border-radius: 4px;
 		font-size: 0.9rem;
 		text-align: right;
 	}
-	.edit-row input:focus { outline: none; border-color: #2d6a4f; }
+	.edit-row input[type="number"]:focus { outline: none; border-color: #2d6a4f; }
 	.remove-line-btn {
 		background: none;
 		border: none;
@@ -1316,49 +1321,41 @@
 		font-size: 1.1rem;
 		padding: 0;
 		line-height: 1;
+		flex-shrink: 0;
 	}
 	.remove-line-btn:hover { color: #dc2626; }
 
-	/* Edit controls (add + template checkbox) */
-	.edit-controls {
-		background: white;
-		padding: 1.25rem 1.5rem;
-		border-radius: 8px;
-		margin-top: 1.5rem;
+	/* Inline add row */
+	.add-row {
+		margin-top: 0.25rem;
+	}
+	.add-input-wrap {
+		flex: 1;
+	}
+
+	/* Savings column: two stacked cards */
+	.savings-column {
 		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		flex-wrap: wrap;
+		flex-direction: column;
 		gap: 1rem;
 	}
-	.add-line-row {
-		display: flex;
-		gap: 0.5rem;
-		align-items: center;
-		flex: 1;
-		min-width: 250px;
+	.savings-subtotal {
+		background: white;
+		padding: 0.75rem 1.25rem;
+		border-radius: 8px;
 	}
-	.add-line-row select {
-		flex: 1;
-		padding: 0.4rem 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
-		font-size: 0.85rem;
-	}
-	.placement-select {
-		flex: 0 0 auto !important;
-		width: 160px;
-	}
-	.template-checkbox {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.9rem;
-		color: #444;
-		cursor: pointer;
+
+	/* Balance badge */
+	.balance-badge {
+		font-size: 0.75rem;
+		color: #2d6a4f;
+		background: #ecfdf5;
+		padding: 0.15rem 0.4rem;
+		border-radius: 4px;
 		white-space: nowrap;
+		font-variant-numeric: tabular-nums;
+		flex-shrink: 0;
 	}
-	.template-checkbox input { accent-color: #2d6a4f; }
 
 	/* Onboarding state */
 	.onboarding {
@@ -1427,6 +1424,7 @@
 		height: 8px;
 		background: #e5e7eb;
 		border-radius: 4px;
+		position: relative;
 	}
 	.bar-fill {
 		height: 100%;
@@ -1457,35 +1455,100 @@
 	.check-ok { color: #16a34a; font-size: 1.2rem; font-weight: bold; }
 	.check-warn { color: #dc2626; font-size: 1.2rem; font-weight: bold; }
 
-	/* Unmapped warning */
-	.unmapped-warning {
-		background: #fffbeb;
-		border: 1px solid #f59e0b;
-		border-radius: 8px;
-		padding: 1.25rem;
-		margin-top: 1rem;
+	/* Section subtotals */
+	.bva-subtotal, .fixed-subtotal {
+		border-top: 2px solid #e5e7eb;
+		border-bottom: none;
+		font-weight: 700;
+		padding-top: 0.75rem;
 	}
-	.unmapped-warning strong { color: #92400e; }
-	.unmapped-warning p { margin: 0.5rem 0; color: #78350f; font-size: 0.9rem; }
+
+	/* Clickable rows */
+	.bva-row-link, .fixed-row-link {
+		text-decoration: none;
+		color: inherit;
+		cursor: pointer;
+		border-radius: 4px;
+		transition: background-color 0.1s;
+	}
+	.bva-row-link:hover, .fixed-row-link:hover {
+		background-color: #f0fdf4;
+	}
+	a.bva-row-link {
+		display: grid;
+		grid-template-columns: 2fr 1fr 1fr 1.2fr 1.5fr;
+		padding: 0.6rem 0;
+		border-bottom: 1px solid #f0f0f0;
+		align-items: center;
+	}
+	a.fixed-row-link {
+		display: flex;
+		align-items: center;
+		padding: 0.6rem 0;
+		border-bottom: 1px solid #f0f0f0;
+		gap: 1rem;
+	}
+	a.fixed-row-link .cat-name { flex: 1; font-weight: 500; }
+
+	/* Pacing */
+	.pace-marker {
+		position: absolute;
+		top: -2px;
+		bottom: -2px;
+		width: 2px;
+		background: #1a1a1a;
+		border-radius: 1px;
+		opacity: 0.5;
+		pointer-events: none;
+	}
+	.pace-label {
+		font-size: 0.7rem;
+		display: block;
+		margin-top: 0.15rem;
+	}
+	.pace-ahead {
+		color: #f59e0b;
+		font-weight: 600;
+	}
+
+	/* Uncategorized section */
+	.unmapped-section {
+		border-left: 3px solid #f59e0b;
+	}
+	.unmapped-desc {
+		color: #666;
+		font-size: 0.85rem;
+		margin: 0 0 0.75rem;
+	}
+	.unmapped-row {
+		display: flex;
+		justify-content: space-between;
+		padding: 0.5rem 0;
+		font-size: 0.9rem;
+		border-bottom: 1px solid #f0f0f0;
+	}
+	.unmapped-link {
+		display: inline-block;
+		margin-top: 0.75rem;
+		color: #2d6a4f;
+		font-size: 0.85rem;
+		text-decoration: none;
+	}
+	.unmapped-link:hover { text-decoration: underline; }
 
 	/* Responsive */
-	@media (max-width: 768px) {
-		.two-col {
+	@media (max-width: 1200px) {
+		.budget-grid {
+			grid-template-columns: repeat(2, 1fr);
+		}
+	}
+	@media (max-width: 700px) {
+		.budget-grid {
 			grid-template-columns: 1fr;
 		}
-		.bva-header, .bva-row {
+		.bva-header, .bva-row, a.bva-row-link {
 			grid-template-columns: 1.5fr 1fr 1fr 1fr;
 		}
 		.bar-col { display: none; }
-		.summary-banner {
-			flex-direction: column;
-		}
-		.banner-item {
-			min-width: unset;
-		}
-		.edit-controls {
-			flex-direction: column;
-			align-items: flex-start;
-		}
 	}
 </style>

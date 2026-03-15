@@ -1,13 +1,17 @@
 <script lang="ts">
 	import { page as pageStore } from '$app/state';
-	import { getTransactions, formatEuro, formatDate, type Transaction } from '$lib/api';
+	import { getTransactions, getBudgets, formatEuro, formatDate, type Transaction, type BudgetSummary } from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
+	import { dateRange } from '$lib/stores/dateRange';
+	import { get } from 'svelte/store';
 
-	// Read initial values from URL query params (e.g. linked from Dashboard)
+	// URL params override store (for direct links), otherwise use stored range
 	const urlParams = new URLSearchParams(pageStore.url.search);
+	const initialRange = get(dateRange);
 
 	let transactions: Transaction[] = $state([]);
+	let budgetPeriods: BudgetSummary[] = $state([]);
 	let total = $state(0);
 	let page = $state(1);
 	let perPage = $state(50);
@@ -17,8 +21,8 @@
 
 	let search = $state('');
 	let categoryFilter: number | null = $state(null);
-	let dateFrom = $state(urlParams.get('date_from') ?? '');
-	let dateTo = $state(urlParams.get('date_to') ?? '');
+	let dateFrom = $state(urlParams.get('date_from') ?? initialRange.dateFrom);
+	let dateTo = $state(urlParams.get('date_to') ?? initialRange.dateTo);
 
 	let searchTimeout: ReturnType<typeof setTimeout>;
 
@@ -82,6 +86,7 @@
 
 	$effect(() => {
 		load();
+		getBudgets().then(bp => { budgetPeriods = bp; });
 	});
 
 	let totalPages = $derived(Math.ceil(total / perPage));
@@ -101,7 +106,7 @@
 			<CategoryInput value={categoryFilter} onchange={(v) => { categoryFilter = v; applyFilters(); }} placeholder="Filter by category..." />
 		</div>
 	</div>
-	<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} />
+	<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} periods={budgetPeriods} />
 </div>
 
 <div class="info">

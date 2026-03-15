@@ -5,12 +5,17 @@
 		type CategoryDetail, type SpendingLineItem
 	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
+	import { dateRange } from '$lib/stores/dateRange';
+	import { get } from 'svelte/store';
 
+	const urlFrom = page.url.searchParams.get('date_from');
+	const urlTo = page.url.searchParams.get('date_to');
+	const initialRange = (urlFrom && urlTo) ? { dateFrom: urlFrom, dateTo: urlTo } : get(dateRange);
 	let data: CategoryDetail | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
-	let dateFrom = $state('');
-	let dateTo = $state('');
+	let dateFrom = $state(initialRange.dateFrom);
+	let dateTo = $state(initialRange.dateTo);
 
 	async function load() {
 		const id = Number(page.params.id);
