@@ -101,7 +101,7 @@
 
 <div class="filters">
 	<div class="filter-row">
-		<input type="text" placeholder="Search..." value={search} oninput={handleSearch} />
+		<input type="text" placeholder="Search transactions..." value={search} oninput={handleSearch} />
 		<div class="category-filter">
 			<CategoryInput value={categoryFilter} onchange={(v) => { categoryFilter = v; applyFilters(); }} placeholder="Filter by category..." />
 		</div>
@@ -177,6 +177,10 @@
 		font-size: 0.9rem;
 	}
 	.filter-row input[type="text"] {
+		flex: 2;
+		min-width: 150px;
+	}
+	.category-filter {
 		flex: 1;
 		min-width: 150px;
 	}

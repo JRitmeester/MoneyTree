@@ -23,6 +23,22 @@ from ..services.csv_parser import parse_asn_csv
 router = APIRouter(prefix="/api/transactions", tags=["transactions"], dependencies=[Depends(require_auth)])
 
 
+def _collect_descendant_ids(db: Session, category_id: int) -> set[int]:
+    """Return category_id plus all descendant category IDs."""
+    all_cats = db.execute(select(Category.id, Category.parent_id)).all()
+    children_map: dict[int | None, list[int]] = {}
+    for cid, pid in all_cats:
+        children_map.setdefault(pid, []).append(cid)
+
+    result: set[int] = set()
+    stack = [category_id]
+    while stack:
+        current = stack.pop()
+        result.add(current)
+        stack.extend(children_map.get(current, []))
+    return result
+
+
 def _category_id_for_categorie(categorie: str, db: Session) -> int | None:
     """Look up a user category_id from the bank's categorie string via CategoryMapping."""
     mapping = db.execute(
@@ -141,14 +157,20 @@ def list_transactions(
     if date_to:
         query = query.where(Transaction.datum <= date_to)
     if category_id is not None:
-        # Match transactions where any line item has this category_id
+        # Collect the selected category and all its descendants
+        cat_ids = _collect_descendant_ids(db, category_id)
+
+        # Match transactions by direct category_id OR line item category
         matching_tx_ids = (
             select(Transaction.id)
             .join(Receipt, Receipt.transaction_id == Transaction.id)
             .join(LineItem, LineItem.receipt_id == Receipt.id)
-            .where(LineItem.category_id == category_id)
+            .where(LineItem.category_id.in_(cat_ids))
         )
-        query = query.where(Transaction.id.in_(matching_tx_ids))
+        query = query.where(
+            Transaction.category_id.in_(cat_ids)
+            | Transaction.id.in_(matching_tx_ids)
+        )
     if search:
         pattern = f"%{search}%"
         query = query.where(
