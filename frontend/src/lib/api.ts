@@ -463,11 +463,21 @@ export async function getCategoryMappings(): Promise<CategoryMapping[]> {
 
 // --- Uncategorized ---
 
+export interface UncategorizedTransaction {
+	id: number;
+	datum: string;
+	bedrag: number;
+	merchant_name: string | null;
+	naam: string | null;
+	omschrijving: string;
+}
+
 export interface UncategorizedGroup {
 	bank_category: string;
 	count: number;
 	total: number;
 	has_mapping: boolean;
+	transactions: UncategorizedTransaction[];
 }
 
 export async function getUncategorized(): Promise<UncategorizedGroup[]> {
@@ -480,6 +490,17 @@ export async function bulkCategorize(data: {
 	save_mapping: boolean;
 }): Promise<{ updated: number }> {
 	return request('/api/uncategorized/bulk-categorize', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data),
+	});
+}
+
+export async function categorizeSelected(data: {
+	transaction_ids: number[];
+	category_id: number;
+}): Promise<{ updated: number }> {
+	return request('/api/uncategorized/categorize-selected', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(data),
@@ -521,6 +542,7 @@ export interface BudgetLine {
 	amount: number;
 	is_overridden: boolean;
 	template_amount: number;
+	balance: number;
 }
 
 export interface BudgetSummary {
@@ -550,6 +572,7 @@ export interface BudgetVsActualLine {
 	actual: number;
 	difference: number;
 	percentage: number;
+	balance: number;
 }
 
 export interface BudgetVsActualSummary {

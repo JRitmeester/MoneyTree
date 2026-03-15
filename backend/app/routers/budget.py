@@ -1,12 +1,12 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
-from ..models import Budget, BudgetLine, BudgetTemplate, Category
+from ..models import Budget, BudgetLine, BudgetTemplate, Category, LineItem, Receipt, Transaction
 from ..schemas import (
     BudgetCreate,
     BudgetLineOut,
@@ -38,10 +38,65 @@ def _create_from_template(db: Session, start_date: date, end_date: date) -> Budg
     return budget
 
 
+def _savings_balances(db: Session) -> dict[int, float]:
+    """Calculate running balance for all savings categories.
+
+    Balance = sum(budgeted across all periods) - sum(actual spending all time).
+    """
+    savings_cat_ids = set(
+        db.execute(
+            select(Category.id).where(Category.category_type == "savings")
+        ).scalars().all()
+    )
+    if not savings_cat_ids:
+        return {}
+
+    # Total budgeted per savings category across all budget periods
+    budgeted_rows = db.execute(
+        select(BudgetLine.category_id, func.sum(BudgetLine.amount))
+        .where(BudgetLine.category_id.in_(savings_cat_ids))
+        .group_by(BudgetLine.category_id)
+    ).all()
+    budgeted = {cat_id: total or 0.0 for cat_id, total in budgeted_rows}
+
+    # Total spent: direct transactions (no receipt)
+    direct_rows = db.execute(
+        select(Transaction.category_id, func.sum(func.abs(Transaction.bedrag)))
+        .where(
+            Transaction.category_id.in_(savings_cat_ids),
+            Transaction.bedrag < 0,
+            ~select(Receipt.id).where(Receipt.transaction_id == Transaction.id).exists(),
+        )
+        .group_by(Transaction.category_id)
+    ).all()
+
+    # Total spent: line items from receipts
+    li_rows = db.execute(
+        select(LineItem.category_id, func.sum(LineItem.amount * LineItem.quantity))
+        .join(Receipt)
+        .join(Transaction)
+        .where(
+            LineItem.category_id.in_(savings_cat_ids),
+            Transaction.bedrag < 0,
+        )
+        .group_by(LineItem.category_id)
+    ).all()
+
+    spent: dict[int, float] = {}
+    for cat_id, total in list(direct_rows) + list(li_rows):
+        spent[cat_id] = spent.get(cat_id, 0.0) + (total or 0.0)
+
+    return {
+        cat_id: round(budgeted.get(cat_id, 0.0) - spent.get(cat_id, 0.0), 2)
+        for cat_id in savings_cat_ids
+    }
+
+
 def _budget_to_out(budget: Budget, db: Session) -> BudgetOut:
     """Convert a budget to output format with template-awareness."""
     templates = db.execute(select(BudgetTemplate)).scalars().all()
     template_by_cat = {t.category_id: t.amount for t in templates}
+    balances = _savings_balances(db)
 
     lines = []
     for line in budget.lines:
@@ -58,6 +113,7 @@ def _budget_to_out(budget: Budget, db: Session) -> BudgetOut:
             amount=line.amount,
             is_overridden=is_overridden,
             template_amount=template_amount,
+            balance=balances.get(line.category_id, 0.0),
         ))
 
     return BudgetOut(

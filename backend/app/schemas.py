@@ -284,6 +284,7 @@ class BudgetLineOut(BaseModel):
     amount: float
     is_overridden: bool = False
     template_amount: float = 0.0
+    balance: float = 0.0
 
     model_config = {"from_attributes": True}
 
@@ -370,6 +371,7 @@ class BudgetVsActualLine(BaseModel):
     actual: float
     difference: float
     percentage: float
+    balance: float = 0.0
 
 
 class BudgetVsActualSummary(BaseModel):

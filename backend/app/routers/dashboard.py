@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
-from ..models import Budget, Category as CategoryModel, LineItem, Receipt, Transaction
+from ..models import Budget, BudgetLine, Category as CategoryModel, LineItem, Receipt, Transaction
 from ..schemas import (
     BreadcrumbItem,
     BudgetVsActualLine,
@@ -460,6 +460,9 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
     total_budgeted_expenses = 0.0
     total_actual_expenses = 0.0
 
+    from .budget import _savings_balances
+    balances = _savings_balances(db)
+
     for cat_id in sorted(all_cat_ids):
         cat = categories.get(cat_id)
         if not cat:
@@ -488,6 +491,7 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
             actual=actual,
             difference=difference,
             percentage=percentage,
+            balance=balances.get(cat_id, 0.0),
         )
 
         if cat.category_type == "income":

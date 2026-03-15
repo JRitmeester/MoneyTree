@@ -18,6 +18,7 @@ def _build_template_response(db: Session) -> BudgetTemplateOut:
     lines = []
     total_income = 0.0
     total_fixed_expenses = 0.0
+    total_savings = 0.0
     total_flexible_expenses = 0.0
 
     for t in templates:
@@ -34,12 +35,14 @@ def _build_template_response(db: Session) -> BudgetTemplateOut:
 
         if cat.category_type == "income":
             total_income += t.amount
+        elif cat.category_type == "savings":
+            total_savings += t.amount
         elif cat.is_fixed:
             total_fixed_expenses += t.amount
         else:
             total_flexible_expenses += t.amount
 
-    discretionary = total_income - total_fixed_expenses
+    discretionary = total_income - total_fixed_expenses - total_savings
     unallocated = discretionary - total_flexible_expenses
 
     return BudgetTemplateOut(
