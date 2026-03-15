@@ -69,10 +69,10 @@ class TransactionOffset(Base):
     )
 
     expense_transaction: Mapped["Transaction"] = relationship(
-        foreign_keys=[expense_transaction_id], overlaps="offsets"
+        foreign_keys=[expense_transaction_id], overlaps="offset_links"
     )
     income_transaction: Mapped["Transaction"] = relationship(
-        foreign_keys=[income_transaction_id], overlaps="offset_of"
+        foreign_keys=[income_transaction_id], overlaps="offset_of_link"
     )
 
 
