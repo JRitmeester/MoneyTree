@@ -1330,6 +1330,7 @@
 		flex-shrink: 0;
 	}
 	.remove-line-btn:hover { color: #dc2626; }
+	.add-row { border-bottom: none; }
 
 	/* Inline add row */
 	.add-row {
