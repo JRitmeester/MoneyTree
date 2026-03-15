@@ -1366,6 +1366,8 @@
 		white-space: nowrap;
 		font-variant-numeric: tabular-nums;
 		flex-shrink: 0;
+		min-width: 5rem;
+		text-align: right;
 	}
 
 	/* Onboarding state */
@@ -1460,8 +1462,8 @@
 		display: flex;
 		gap: 1.5rem;
 	}
-	.budgeted-amt { color: #666; font-size: 0.85rem; }
-	.actual-amt { font-weight: 600; }
+	.budgeted-amt { color: #666; font-size: 0.85rem; min-width: 5rem; text-align: right; }
+	.actual-amt { font-weight: 600; min-width: 5rem; text-align: right; }
 	.fixed-check { width: 2rem; text-align: center; }
 	.check-ok { color: #16a34a; font-size: 1.2rem; font-weight: bold; }
 	.check-warn { color: #dc2626; font-size: 1.2rem; font-weight: bold; }
