@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import {
 		getDashboardSummary, getByCategory, getCategoryChildren, getMonthlyTrend, getBudgets,
 		formatEuro, type DashboardSummary, type CategorySpending, type MonthlyTrend, type BudgetSummary
@@ -204,11 +203,6 @@
 			</div>
 		</div>
 
-		<div class="quick-actions">
-			<button onclick={() => goto('/import')}>Import CSV</button>
-			<button onclick={() => goto('/receipts/new')} class="secondary">Add Receipt</button>
-			<button onclick={() => goto('/transactions')} class="secondary">View Transactions</button>
-		</div>
 	{/if}
 </div>
 
@@ -355,25 +349,4 @@
 	.income-text { color: #16a34a; }
 	.expense-text { color: #dc2626; }
 
-	.quick-actions {
-		display: flex;
-		gap: 0.75rem;
-		flex-wrap: wrap;
-	}
-	.quick-actions button {
-		padding: 0.6rem 1.5rem;
-		border: none;
-		border-radius: 6px;
-		cursor: pointer;
-		font-size: 0.9rem;
-		background: #2d6a4f;
-		color: white;
-	}
-	.quick-actions button:hover { background: #1b4332; }
-	.quick-actions button.secondary {
-		background: white;
-		color: #2d6a4f;
-		border: 2px solid #2d6a4f;
-	}
-	.quick-actions button.secondary:hover { background: #f0fdf4; }
 </style>
