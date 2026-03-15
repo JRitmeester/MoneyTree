@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { dateRange } from '$lib/stores/dateRange';
+
 	interface Props {
 		dateFrom: string;
 		dateTo: string;
@@ -20,10 +23,14 @@
 
 	const PERIOD_PRESETS = [1, 2, 3, 6, 12] as const;
 
-	let activePreset: string | null = $state('1M');
+	let activePreset: string | null = $state(get(dateRange).activePreset);
 
 	function toISODate(d: Date): string {
 		return d.toISOString().split('T')[0];
+	}
+
+	function saveToStore() {
+		dateRange.set({ activePreset, dateFrom, dateTo });
 	}
 
 	function applyPreset(preset: typeof PRESETS[number]) {
@@ -37,6 +44,7 @@
 		dateFrom = toISODate(from);
 		dateTo = toISODate(to);
 		activePreset = preset.label;
+		saveToStore();
 		onchange(dateFrom, dateTo);
 	}
 
@@ -47,22 +55,22 @@
 		dateFrom = periods[lastIdx].start_date;
 		dateTo = periods[0].end_date;
 		activePreset = `${count}P`;
+		saveToStore();
 		onchange(dateFrom, dateTo);
 	}
 
 	function handleDateInput() {
 		activePreset = null;
+		saveToStore();
 		onchange(dateFrom, dateTo);
 	}
 
-	// Apply default 1M preset on mount
+	// Apply stored date range on mount (falls back to 1M default via store)
 	$effect(() => {
 		if (!dateFrom && !dateTo) {
-			const to = new Date();
-			const from = new Date();
-			from.setMonth(from.getMonth() - 1);
-			dateFrom = toISODate(from);
-			dateTo = toISODate(to);
+			const stored = get(dateRange);
+			dateFrom = stored.dateFrom;
+			dateTo = stored.dateTo;
 		}
 	});
 </script>

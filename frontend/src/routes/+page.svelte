@@ -5,14 +5,17 @@
 		formatEuro, type DashboardSummary, type CategorySpending, type MonthlyTrend, type BudgetSummary
 	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
+	import { dateRange } from '$lib/stores/dateRange';
+	import { get } from 'svelte/store';
 
+	const initialRange = get(dateRange);
 	let summary: DashboardSummary | null = $state(null);
 	let categories: CategorySpending[] = $state([]);
 	let monthlyTrend: MonthlyTrend[] = $state([]);
 	let budgetPeriods: BudgetSummary[] = $state([]);
 	let loading = $state(true);
-	let dateFrom = $state('');
-	let dateTo = $state('');
+	let dateFrom = $state(initialRange.dateFrom);
+	let dateTo = $state(initialRange.dateTo);
 
 	// Tracks expanded categories: category_id -> loaded children
 	let expandedChildren: Record<number, CategorySpending[]> = $state({});
