@@ -94,9 +94,14 @@ def _savings_balances(db: Session) -> dict[int, float]:
 
 def _budget_to_out(budget: Budget, db: Session) -> BudgetOut:
     """Convert a budget to output format with template-awareness."""
+    from .dashboard import _full_category_name
+
     templates = db.execute(select(BudgetTemplate)).scalars().all()
     template_by_cat = {t.category_id: t.amount for t in templates}
     balances = _savings_balances(db)
+
+    all_cats = db.execute(select(Category)).scalars().all()
+    cat_by_id = {c.id: c for c in all_cats}
 
     lines = []
     for line in budget.lines:
@@ -107,7 +112,7 @@ def _budget_to_out(budget: Budget, db: Session) -> BudgetOut:
         lines.append(BudgetLineOut(
             id=line.id,
             category_id=line.category_id,
-            category_name=cat.name,
+            category_name=_full_category_name(line.category_id, cat_by_id),
             category_type=cat.category_type,
             is_fixed=cat.is_fixed,
             amount=line.amount,

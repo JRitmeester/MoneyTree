@@ -36,6 +36,22 @@ def _build_hierarchy(db: Session) -> tuple[dict, dict]:
     return cat_id_to_cat, children_by_parent
 
 
+def _full_category_name(cat_id: int, cat_id_to_cat: dict) -> str:
+    """Build hierarchical name like 'Vervoer > Auto > Onderhoud'."""
+    parts = []
+    seen = set()
+    current = cat_id
+    while current in cat_id_to_cat:
+        if current in seen:
+            break
+        seen.add(current)
+        cat = cat_id_to_cat[current]
+        parts.append(cat.name)
+        current = cat.parent_id
+    parts.reverse()
+    return " > ".join(parts)
+
+
 def _find_root(cat_id: int, cat_id_to_cat: dict) -> int:
     seen = set()
     current = cat_id
@@ -484,7 +500,7 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
 
         line = BudgetVsActualLine(
             category_id=cat_id,
-            category_name=cat.name,
+            category_name=_full_category_name(cat_id, categories),
             category_type=cat.category_type,
             is_fixed=cat.is_fixed,
             budgeted=budgeted,
