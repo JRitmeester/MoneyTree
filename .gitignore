@@ -29,6 +29,7 @@ frontend/build/
 
 # Claude
 .claude/
+.worktrees/
 
 # Scripts
 sync-to-nas.sh
