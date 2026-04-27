@@ -24,6 +24,7 @@ from .routers import (
     debug,
     line_items,
     receipts,
+    sync,
     transactions,
     uncategorized,
 )
@@ -92,6 +93,7 @@ app.include_router(budget.router)
 app.include_router(budget_template.router)
 app.include_router(category_mappings.router)
 app.include_router(uncategorized.router)
+app.include_router(sync.router)
 
 if os.getenv("ENABLE_DEBUG_ROUTES", "").lower() == "true":
     app.include_router(debug.router)

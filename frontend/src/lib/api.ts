@@ -672,3 +672,55 @@ export async function replaceBudgetTemplate(lines: { category_id: number; amount
 		body: JSON.stringify(lines),
 	});
 }
+
+// --- Sync ---
+
+export interface ImportConflict {
+	code: string;
+	severity: 'soft' | 'hard';
+	message: string;
+}
+
+export interface ImportPreview {
+	will_add_categories: number;
+	will_add_category_mappings: number;
+	will_add_budgets: number;
+	will_add_budget_lines: number;
+	will_update_budget_lines: number;
+	will_add_budget_templates: number;
+	will_add_transactions: number;
+	will_update_transactions: number;
+	will_skip_transactions: number;
+	will_add_offsets: number;
+	soft_conflicts: ImportConflict[];
+	hard_conflicts: ImportConflict[];
+}
+
+export interface ImportResultResponse {
+	preview: ImportPreview;
+	committed: boolean;
+	backup_path: string | null;
+}
+
+export async function downloadSyncExport(since?: string): Promise<Blob> {
+	const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+	const res = await fetch(`/api/sync/export${qs}`, { credentials: 'include' });
+	if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+	return res.blob();
+}
+
+export async function previewSyncImport(file: File): Promise<ImportResultResponse> {
+	const form = new FormData();
+	form.append('file', file);
+	return request('/api/sync/import?dry_run=true', { method: 'POST', body: form });
+}
+
+export async function commitSyncImport(
+	file: File,
+	updateDuplicates: boolean,
+): Promise<ImportResultResponse> {
+	const form = new FormData();
+	form.append('file', file);
+	const qs = `?dry_run=false&update_duplicates=${updateDuplicates}`;
+	return request(`/api/sync/import${qs}`, { method: 'POST', body: form });
+}
