@@ -188,7 +188,7 @@
 						{#each preview.update_transactions as t}
 							<li>
 								<code>{t.datum}</code> <strong>{t.bedrag.toFixed(2)}</strong>
-								{t.merchant_name ?? t.omschrijving}
+								{t.new_merchant_name ?? t.old_merchant_name ?? t.omschrijving}
 								<ul>
 									{#if t.old_category_name !== t.new_category_name}
 										<li>Category: <s>{t.old_category_name ?? '—'}</s> → {t.new_category_name ?? '—'}</li>
