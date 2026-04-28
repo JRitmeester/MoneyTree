@@ -148,12 +148,27 @@
 		{/if}
 
 		{#if importResult?.committed}
-			<p class="ok">
-				Import committed.
+			<div class="post-import">
+				<p class="ok">Import committed successfully.</p>
 				{#if importResult.backup_path}
-					Backup: <code>{importResult.backup_path}</code>
+					<div class="backup-info">
+						<strong>Backup created before this import:</strong>
+						<code class="backup-path">{importResult.backup_path}</code>
+						<details>
+							<summary>How to restore</summary>
+							<p>
+								Stop the server, replace the live database file with this backup, and restart:
+							</p>
+							<pre>docker-compose stop
+cp "{importResult.backup_path}" data/moneytree.db
+docker-compose start</pre>
+							<p class="muted">
+								Old backups are kept in <code>data/backups/</code>. The 10 most recent are retained automatically.
+							</p>
+						</details>
+					</div>
 				{/if}
-			</p>
+			</div>
 		{/if}
 	</article>
 </section>
@@ -165,5 +180,10 @@
 	.error { color: tomato; }
 	.ok { color: seagreen; }
 	.hard { color: tomato; }
+	.muted { color: #666; font-size: 0.9em; }
 	label { display: block; margin-block: 0.5rem; }
+	.post-import { margin-top: 1rem; padding: 0.75rem; background: rgba(46, 139, 87, 0.08); border-radius: 6px; }
+	.backup-info { margin-top: 0.5rem; }
+	.backup-path { display: block; margin-block: 0.25rem; padding: 0.25rem 0.5rem; background: #f4f4f4; word-break: break-all; }
+	pre { background: #f4f4f4; padding: 0.5rem; border-radius: 4px; overflow-x: auto; }
 </style>
