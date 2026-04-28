@@ -6,6 +6,7 @@
 		type Budget, type BudgetSummary, type BudgetVsActualSummary, type BudgetVsActualLine, type Category
 	} from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
+	import { buildBudgetTree, buildBvaTree, type BudgetTreeNode, type BvaTreeNode } from '$lib/buildBudgetTree';
 
 	// --- State ---
 	let allPeriods: BudgetSummary[] = $state([]);
@@ -68,6 +69,37 @@
 	let bvaWishListTotals = $derived({ budgeted: bvaWishListLines.reduce((s, l) => s + l.budgeted, 0), actual: bvaWishListLines.reduce((s, l) => s + l.actual, 0) });
 	let bvaFlexibleTotals = $derived({ budgeted: bvaFlexibleExpenses.reduce((s, l) => s + l.budgeted, 0), actual: bvaFlexibleExpenses.reduce((s, l) => s + l.actual, 0) });
 
+	// BVA tree views
+	let bvaIncomeTree = $derived.by(() => buildBvaTree(bvaIncomeLines));
+	let bvaFixedTree = $derived.by(() => buildBvaTree(bvaFixedExpenses));
+	let bvaSinkingTree = $derived.by(() => buildBvaTree(bvaSinkingLines));
+	let bvaWishListTree = $derived.by(() => buildBvaTree(bvaWishListLines));
+	let bvaFlexibleTree = $derived.by(() => buildBvaTree(bvaFlexibleExpenses));
+
+	let bvaExpanded: Record<string, Set<string>> = $state({
+		income: new Set(), fixed: new Set(),
+		sinking: new Set(), wishlist: new Set(), flexible: new Set(),
+	});
+
+	function toggleBvaNode(section: string, path: string) {
+		const current = bvaExpanded[section] ?? new Set<string>();
+		const next = new Set(current);
+		if (next.has(path)) {
+			for (const p of next) {
+				if (p === path || p.startsWith(path + PATH_SEP)) {
+					next.delete(p);
+				}
+			}
+		} else {
+			next.add(path);
+		}
+		bvaExpanded = { ...bvaExpanded, [section]: next };
+	}
+
+	function isBvaExpanded(section: string, path: string): boolean {
+		return bvaExpanded[section]?.has(path) ?? false;
+	}
+
 	// Pacing — only meaningful for flexible spending in the current period
 	let periodProgress = $derived.by(() => {
 		if (!bvaData) return 0;
@@ -109,12 +141,13 @@
 	let wizardUnallocated = $derived(wizardDiscretionary - wizardTotalFlexible);
 
 	// Flat categories for picker
-	function flatCategories(cats: Category[], depth = 0): { id: number; name: string; category_type: string; is_fixed: boolean; depth: number }[] {
-		let result: { id: number; name: string; category_type: string; is_fixed: boolean; depth: number }[] = [];
+	function flatCategories(cats: Category[], parentPath = '', depth = 0): { id: number; name: string; fullPath: string; category_type: string; is_fixed: boolean; depth: number }[] {
+		let result: { id: number; name: string; fullPath: string; category_type: string; is_fixed: boolean; depth: number }[] = [];
 		for (const c of cats) {
-			result.push({ id: c.id, name: c.name, category_type: c.category_type, is_fixed: c.is_fixed, depth });
+			const fullPath = parentPath ? `${parentPath} > ${c.name}` : c.name;
+			result.push({ id: c.id, name: c.name, fullPath, category_type: c.category_type, is_fixed: c.is_fixed, depth });
 			if (c.children?.length) {
-				result = result.concat(flatCategories(c.children, depth + 1));
+				result = result.concat(flatCategories(c.children, fullPath, depth + 1));
 			}
 		}
 		return result;
@@ -346,7 +379,7 @@
 
 		editLines = [...editLines, {
 			category_id: cat.id,
-			category_name: cat.name,
+			category_name: cat.fullPath,
 			category_type: newType,
 			is_fixed: newFixed,
 			amount: 0,
@@ -437,6 +470,39 @@
 	function getWizardLineIndex(line: { category_id: number }): number {
 		return wizardLines.findIndex(l => l.category_id === line.category_id);
 	}
+
+	// --- Tree view for Plan tab ---
+	const PATH_SEP = ' > ';
+
+	let expandedPaths: Record<string, Set<string>> = $state({
+		income: new Set(), fixed: new Set(),
+		sinking: new Set(), wishlist: new Set(), flexible: new Set(),
+	});
+
+	function toggleNode(section: string, path: string) {
+		const current = expandedPaths[section] ?? new Set<string>();
+		const next = new Set(current);
+		if (next.has(path)) {
+			for (const p of next) {
+				if (p === path || p.startsWith(path + PATH_SEP)) {
+					next.delete(p);
+				}
+			}
+		} else {
+			next.add(path);
+		}
+		expandedPaths = { ...expandedPaths, [section]: next };
+	}
+
+	function isNodeExpanded(section: string, path: string): boolean {
+		return expandedPaths[section]?.has(path) ?? false;
+	}
+
+	let incomeTree = $derived.by(() => buildBudgetTree(editIncomeLines, editLines));
+	let fixedTree = $derived.by(() => buildBudgetTree(editFixedLines, editLines));
+	let sinkingTree = $derived.by(() => buildBudgetTree(editSinkingLines, editLines));
+	let wishListTree = $derived.by(() => buildBudgetTree(editWishListLines, editLines));
+	let flexibleTree = $derived.by(() => buildBudgetTree(editFlexibleLines, editLines));
 </script>
 
 <div class="budget-page">
@@ -627,17 +693,56 @@
 		</div>
 	{:else if activeTab === 'plan'}
 		<!-- ================ PLAN TAB ================ -->
+
+		{#snippet budgetTreeNode(node: BudgetTreeNode, section: string, depth: number, showBalance: boolean)}
+			{#if node.children.length > 0}
+				<button
+					class="tree-row tree-parent"
+					style="padding-left: {0.5 + depth * 1.25}rem"
+					onclick={() => toggleNode(section, node.path)}
+				>
+					<span class="tree-toggle">{isNodeExpanded(section, node.path) ? '▼' : '▶'}</span>
+					<span class="cat-name tree-name">{node.name}</span>
+					{#if node.categoryId !== null}
+						{@const idx = editLines.findIndex(l => l.category_id === node.categoryId)}
+						<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount}
+							onblur={handleAmountBlur} onkeydown={handleAmountKeydown}
+							onclick={(e) => e.stopPropagation()} />
+						{#if showBalance && editLines[idx].balance > 0}
+							<span class="balance-badge">{formatEuro(editLines[idx].balance)}</span>
+						{/if}
+						<button class="remove-line-btn" onclick={(e) => { e.stopPropagation(); removeBudgetLine(idx); }} title="Remove">&times;</button>
+					{:else}
+						<span class="tree-total">{formatEuro(node.total)}</span>
+					{/if}
+				</button>
+				{#if isNodeExpanded(section, node.path)}
+					<div class="children-panel" style="margin-left: {0.5 + depth * 0.5}rem">
+						{#each node.children as child (child.path)}
+							{@render budgetTreeNode(child, section, depth + 1, showBalance)}
+						{/each}
+					</div>
+				{/if}
+			{:else if node.categoryId !== null}
+				{@const idx = editLines.findIndex(l => l.category_id === node.categoryId)}
+				<div class="tree-row tree-leaf" style="padding-left: {0.5 + depth * 1.25}rem">
+					<span class="cat-name tree-name">{node.name}</span>
+					<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount}
+						onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
+					{#if showBalance && editLines[idx].balance > 0}
+						<span class="balance-badge">{formatEuro(editLines[idx].balance)}</span>
+					{/if}
+					<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
+				</div>
+			{/if}
+		{/snippet}
+
 		<div class="budget-grid">
 			<div class="section">
 				<h2>Income</h2>
 				<div class="edit-table">
-					{#each editIncomeLines as line}
-						{@const idx = getEditLineIndex(line)}
-						<div class="edit-row">
-							<span class="cat-name">{line.category_name}</span>
-							<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
-							<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
-						</div>
+					{#each incomeTree as node (node.path)}
+						{@render budgetTreeNode(node, 'income', 0, false)}
 					{/each}
 					<div class="edit-row add-row">
 						<div class="add-input-wrap">
@@ -658,13 +763,8 @@
 			<div class="section">
 				<h2>Fixed Bills</h2>
 				<div class="edit-table">
-					{#each editFixedLines as line}
-						{@const idx = getEditLineIndex(line)}
-						<div class="edit-row">
-							<span class="cat-name">{line.category_name}</span>
-							<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
-							<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
-						</div>
+					{#each fixedTree as node (node.path)}
+						{@render budgetTreeNode(node, 'fixed', 0, false)}
 					{/each}
 					<div class="edit-row add-row">
 						<div class="add-input-wrap">
@@ -686,16 +786,8 @@
 				<div class="section">
 					<h2>Sinking Funds</h2>
 					<div class="edit-table">
-						{#each editSinkingLines as line}
-							{@const idx = getEditLineIndex(line)}
-							<div class="edit-row">
-								<span class="cat-name">{line.category_name}</span>
-								<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
-								{#if line.balance > 0}
-									<span class="balance-badge">{formatEuro(line.balance)}</span>
-								{/if}
-								<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
-							</div>
+						{#each sinkingTree as node (node.path)}
+							{@render budgetTreeNode(node, 'sinking', 0, true)}
 						{/each}
 						<div class="edit-row add-row">
 							<div class="add-input-wrap">
@@ -712,16 +804,8 @@
 				<div class="section">
 					<h2>Saving Goals</h2>
 					<div class="edit-table">
-						{#each editWishListLines as line}
-							{@const idx = getEditLineIndex(line)}
-							<div class="edit-row">
-								<span class="cat-name">{line.category_name}</span>
-								<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
-								{#if line.balance > 0}
-									<span class="balance-badge">{formatEuro(line.balance)}</span>
-								{/if}
-								<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
-							</div>
+						{#each wishListTree as node (node.path)}
+							{@render budgetTreeNode(node, 'wishlist', 0, true)}
 						{/each}
 						<div class="edit-row add-row">
 							<div class="add-input-wrap">
@@ -744,13 +828,8 @@
 			<div class="section">
 				<h2>Flexible Spending</h2>
 				<div class="edit-table">
-					{#each editFlexibleLines as line}
-						{@const idx = getEditLineIndex(line)}
-						<div class="edit-row">
-							<span class="cat-name">{line.category_name}</span>
-							<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount} onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
-							<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
-						</div>
+					{#each flexibleTree as node (node.path)}
+						{@render budgetTreeNode(node, 'flexible', 0, false)}
 					{/each}
 					<div class="edit-row add-row">
 						<div class="add-input-wrap">
@@ -805,6 +884,126 @@
 				</div>
 			</div>
 
+			<!-- BVA tree snippets -->
+			{#snippet bvaParentRow(node: BvaTreeNode, section: string, depth: number, cols: number)}
+				<button class="bva-row bva-row-parent" onclick={() => toggleBvaNode(section, node.path)}>
+					<span class="cat-name" style="padding-left: {depth * 1.25}rem">
+						<span class="tree-toggle">{isBvaExpanded(section, node.path) ? '▼' : '▶'}</span>
+						{node.name}
+					</span>
+					<span class="right">{formatEuro(node.budgeted)}</span>
+					<span class="right">{formatEuro(node.actual)}</span>
+					<span class="right"></span>
+					{#if cols === 5}<span class="bar-col"></span>{/if}
+				</button>
+			{/snippet}
+
+			{#snippet bvaIncomeNode(node: BvaTreeNode, section: string, depth: number)}
+				{#if node.children.length > 0}
+					{@render bvaParentRow(node, section, depth, 5)}
+					{#if isBvaExpanded(section, node.path)}
+						<div class="bva-children">
+							{#each node.children as child (child.path)}
+								{@render bvaIncomeNode(child, section, depth + 1)}
+							{/each}
+						</div>
+					{/if}
+				{:else if node.categoryId !== null}
+					{@const line = bvaIncomeLines.find((l: BudgetVsActualLine) => l.category_id === node.categoryId)}
+					{#if line && bvaData}
+						<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
+							<span class="cat-name" style="padding-left: {depth * 1.25}rem">{node.name}</span>
+							<span class="right">{formatEuro(line.budgeted)}</span>
+							<span class="right">{formatEuro(line.actual)}</span>
+							<span class="right" class:positive={line.difference >= 0} class:negative={line.difference < 0}>{formatDiff(line)}</span>
+							<span class="bar-col"><div class="bar-bg"><div class="bar-fill income-bar" style="width: {progressWidth(line)}"></div></div></span>
+						</a>
+					{/if}
+				{/if}
+			{/snippet}
+
+			{#snippet bvaFixedNode(node: BvaTreeNode, section: string, depth: number)}
+				{#if node.children.length > 0}
+					{@render bvaParentRow(node, section, depth, 4)}
+					{#if isBvaExpanded(section, node.path)}
+						<div class="bva-children">
+							{#each node.children as child (child.path)}
+								{@render bvaFixedNode(child, section, depth + 1)}
+							{/each}
+						</div>
+					{/if}
+				{:else if node.categoryId !== null}
+					{@const line = bvaFixedExpenses.find((l: BudgetVsActualLine) => l.category_id === node.categoryId)}
+					{#if line && bvaData}
+						<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
+							<span class="cat-name" style="padding-left: {depth * 1.25}rem">{node.name}</span>
+							<span class="right">{formatEuro(line.budgeted)}</span>
+							<span class="right">{formatEuro(line.actual)}</span>
+							<span class="right">
+								{#if isWithinRange(line)}<span class="check-ok" title="Within budget">&#10003;</span>{:else}<span class="check-warn" title="Over budget">&#10007;</span>{/if}
+							</span>
+						</a>
+					{/if}
+				{/if}
+			{/snippet}
+
+			{#snippet bvaSavingsNode(node: BvaTreeNode, section: string, depth: number, lines: typeof bvaSinkingLines)}
+				{#if node.children.length > 0}
+					{@render bvaParentRow(node, section, depth, 4)}
+					{#if isBvaExpanded(section, node.path)}
+						<div class="bva-children">
+							{#each node.children as child (child.path)}
+								{@render bvaSavingsNode(child, section, depth + 1, lines)}
+							{/each}
+						</div>
+					{/if}
+				{:else if node.categoryId !== null}
+					{@const line = lines.find((l: BudgetVsActualLine) => l.category_id === node.categoryId)}
+					{#if line && bvaData}
+						<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
+							<span class="cat-name" style="padding-left: {depth * 1.25}rem">{node.name}</span>
+							<span class="right">{formatEuro(line.budgeted)}</span>
+							<span class="right">{formatEuro(line.actual)}</span>
+							<span class="right balance-text">{formatEuro(line.balance)}</span>
+						</a>
+					{/if}
+				{/if}
+			{/snippet}
+
+			{#snippet bvaFlexibleNode(node: BvaTreeNode, section: string, depth: number)}
+				{#if node.children.length > 0}
+					{@render bvaParentRow(node, section, depth, 5)}
+					{#if isBvaExpanded(section, node.path)}
+						<div class="bva-children">
+							{#each node.children as child (child.path)}
+								{@render bvaFlexibleNode(child, section, depth + 1)}
+							{/each}
+						</div>
+					{/if}
+				{:else if node.categoryId !== null}
+					{@const line = bvaFlexibleExpenses.find((l: BudgetVsActualLine) => l.category_id === node.categoryId)}
+					{#if line && bvaData}
+						<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link" class:over-budget={isOverBudget(line)}>
+							<span class="cat-name" style="padding-left: {depth * 1.25}rem">{node.name}</span>
+							<span class="right">{formatEuro(line.budgeted)}</span>
+							<span class="right">{formatEuro(line.actual)}</span>
+							<span class="right" class:positive={line.difference >= 0} class:negative={line.difference < 0}>{formatDiff(line)}</span>
+							<span class="bar-col">
+								<div class="bar-bg">
+									<div class="bar-fill" class:expense-bar-ok={!isOverBudget(line)} class:expense-bar-over={isOverBudget(line)} style="width: {progressWidth(line)}"></div>
+									{#if isCurrentPeriod && line.budgeted > 0}
+										<div class="pace-marker" style="left: {periodProgress * 100}%"></div>
+									{/if}
+								</div>
+								{#if pacingStatus(line) === 'ahead'}
+									<span class="pace-label pace-ahead">Ahead of pace</span>
+								{/if}
+							</span>
+						</a>
+					{/if}
+				{/if}
+			{/snippet}
+
 			<!-- Income -->
 			{#if bvaIncomeLines.length > 0}
 				<div class="section">
@@ -817,23 +1016,8 @@
 							<span class="right">Difference</span>
 							<span class="bar-col">Progress</span>
 						</div>
-						{#each bvaIncomeLines as line}
-							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
-								<span class="cat-name">{line.category_name}</span>
-								<span class="right">{formatEuro(line.budgeted)}</span>
-								<span class="right">{formatEuro(line.actual)}</span>
-								<span class="right" class:positive={line.difference >= 0} class:negative={line.difference < 0}>
-									{formatDiff(line)}
-								</span>
-								<span class="bar-col">
-									<div class="bar-bg">
-										<div
-											class="bar-fill income-bar"
-											style="width: {progressWidth(line)}"
-										></div>
-									</div>
-								</span>
-							</a>
+						{#each bvaIncomeTree as node (node.path)}
+							{@render bvaIncomeNode(node, 'income', 0)}
 						{/each}
 						{#if bvaIncomeLines.length > 1}
 							<div class="bva-row bva-subtotal">
@@ -859,19 +1043,8 @@
 							<span class="right">Actual</span>
 							<span class="right">Status</span>
 						</div>
-						{#each bvaFixedExpenses as line}
-							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
-								<span class="cat-name">{line.category_name}</span>
-								<span class="right">{formatEuro(line.budgeted)}</span>
-								<span class="right">{formatEuro(line.actual)}</span>
-								<span class="right">
-									{#if isWithinRange(line)}
-										<span class="check-ok" title="Within budget">&#10003;</span>
-									{:else}
-										<span class="check-warn" title="Over budget">&#10007;</span>
-									{/if}
-								</span>
-							</a>
+						{#each bvaFixedTree as node (node.path)}
+							{@render bvaFixedNode(node, 'fixed', 0)}
 						{/each}
 						{#if bvaFixedExpenses.length > 1}
 							<div class="bva-row bva-subtotal">
@@ -896,13 +1069,8 @@
 							<span class="right">Actual</span>
 							<span class="right">Balance</span>
 						</div>
-						{#each bvaSinkingLines as line}
-							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
-								<span class="cat-name">{line.category_name}</span>
-								<span class="right">{formatEuro(line.budgeted)}</span>
-								<span class="right">{formatEuro(line.actual)}</span>
-								<span class="right balance-text">{formatEuro(line.balance)}</span>
-							</a>
+						{#each bvaSinkingTree as node (node.path)}
+							{@render bvaSavingsNode(node, 'sinking', 0, bvaSinkingLines)}
 						{/each}
 						{#if bvaSinkingLines.length > 1}
 							<div class="bva-row bva-subtotal">
@@ -926,13 +1094,8 @@
 							<span class="right">Actual</span>
 							<span class="right">Balance</span>
 						</div>
-						{#each bvaWishListLines as line}
-							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
-								<span class="cat-name">{line.category_name}</span>
-								<span class="right">{formatEuro(line.budgeted)}</span>
-								<span class="right">{formatEuro(line.actual)}</span>
-								<span class="right balance-text">{formatEuro(line.balance)}</span>
-							</a>
+						{#each bvaWishListTree as node (node.path)}
+							{@render bvaSavingsNode(node, 'wishlist', 0, bvaWishListLines)}
 						{/each}
 						{#if bvaWishListLines.length > 1}
 							<div class="bva-row bva-subtotal">
@@ -958,31 +1121,8 @@
 							<span class="right">Remaining</span>
 							<span class="bar-col">Progress</span>
 						</div>
-						{#each bvaFlexibleExpenses as line}
-							<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link" class:over-budget={isOverBudget(line)}>
-								<span class="cat-name">{line.category_name}</span>
-								<span class="right">{formatEuro(line.budgeted)}</span>
-								<span class="right">{formatEuro(line.actual)}</span>
-								<span class="right" class:positive={line.difference >= 0} class:negative={line.difference < 0}>
-									{formatDiff(line)}
-								</span>
-								<span class="bar-col">
-									<div class="bar-bg">
-										<div
-											class="bar-fill"
-											class:expense-bar-ok={!isOverBudget(line)}
-											class:expense-bar-over={isOverBudget(line)}
-											style="width: {progressWidth(line)}"
-										></div>
-										{#if isCurrentPeriod && line.budgeted > 0}
-											<div class="pace-marker" style="left: {periodProgress * 100}%"></div>
-										{/if}
-									</div>
-									{#if pacingStatus(line) === 'ahead'}
-										<span class="pace-label pace-ahead">Ahead of pace</span>
-									{/if}
-								</span>
-							</a>
+						{#each bvaFlexibleTree as node (node.path)}
+							{@render bvaFlexibleNode(node, 'flexible', 0)}
 						{/each}
 						{#if bvaFlexibleExpenses.length > 1}
 							<div class="bva-row bva-subtotal">
@@ -1332,6 +1472,53 @@
 	.remove-line-btn:hover { color: #dc2626; }
 	.add-row { border-bottom: none; }
 
+	/* Tree view */
+	.tree-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.4rem 0;
+		border-bottom: 1px solid #f0f0f0;
+	}
+	.tree-parent {
+		background: none;
+		border: none;
+		width: 100%;
+		text-align: left;
+		cursor: pointer;
+		border-radius: 4px;
+		font-size: inherit;
+	}
+	.tree-parent:hover { background: #f9fafb; }
+	.tree-leaf { font-size: inherit; }
+	.tree-toggle {
+		display: inline-block;
+		width: 1em;
+		font-size: 0.65rem;
+		color: #999;
+		flex-shrink: 0;
+	}
+	.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.tree-total {
+		font-size: 0.85rem;
+		color: #999;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+	.tree-row input[type="number"] {
+		width: 80px;
+		padding: 0.35rem 0.5rem;
+		border: 1px solid #ddd;
+		border-radius: 4px;
+		font-size: 0.9rem;
+		text-align: right;
+	}
+	.tree-row input[type="number"]:focus { outline: none; border-color: #2d6a4f; }
+	.edit-table .children-panel {
+		border-left: 3px solid #2d6a4f;
+		margin-bottom: 0.15rem;
+	}
+
 	/* Inline add row */
 	.add-row {
 		margin-top: 0.25rem;
@@ -1490,6 +1677,25 @@
 		padding: 0.6rem 0;
 		border-bottom: 1px solid #f0f0f0;
 		align-items: center;
+	}
+
+	/* BVA tree parent rows */
+	.bva-row-parent {
+		background: none;
+		border: none;
+		width: 100%;
+		text-align: left;
+		cursor: pointer;
+		border-radius: 4px;
+		font-size: inherit;
+		font-weight: 500;
+		color: inherit;
+	}
+	.bva-row-parent:hover { background: #f9fafb; }
+	.bva-children {
+		border-left: 3px solid #2d6a4f;
+		margin-left: 0.5rem;
+		margin-bottom: 0.15rem;
 	}
 
 	/* Pacing */
