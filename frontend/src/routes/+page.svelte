@@ -1,7 +1,9 @@
 <script lang="ts">
 	import {
 		getDashboardSummary, getByCategory, getCategoryChildren, getMonthlyTrend, getBudgets,
-		formatEuro, type DashboardSummary, type CategorySpending, type MonthlyTrend, type BudgetSummary
+		getBudgetVsActual,
+		formatEuro, type DashboardSummary, type CategorySpending, type MonthlyTrend, type BudgetSummary,
+		type BudgetVsActualSummary
 	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
@@ -12,6 +14,7 @@
 	let categories: CategorySpending[] = $state([]);
 	let monthlyTrend: MonthlyTrend[] = $state([]);
 	let budgetPeriods: BudgetSummary[] = $state([]);
+	let bvaData: BudgetVsActualSummary | null = $state(null);
 	let loading = $state(true);
 	let dateFrom = $state(initialRange.dateFrom);
 	let dateTo = $state(initialRange.dateTo);
@@ -36,6 +39,16 @@
 		categories = c;
 		monthlyTrend = t;
 		budgetPeriods = bp;
+
+		// Load BVA for the current budget period (contains today)
+		const today = new Date().toISOString().slice(0, 10);
+		const currentPeriod = bp.find(p => p.start_date <= today && p.end_date > today);
+		if (currentPeriod) {
+			bvaData = await getBudgetVsActual(currentPeriod.id);
+		} else {
+			bvaData = null;
+		}
+
 		loading = false;
 	}
 
@@ -84,6 +97,24 @@
 	function isExpanded(cat: CategorySpending): boolean {
 		return cat.category_id != null && expandedChildren[cat.category_id] !== undefined;
 	}
+
+	let burndown = $derived.by(() => {
+		if (!bvaData) return null;
+		const flexLines = bvaData.expense_lines.filter(l => !l.is_fixed && l.category_type === 'expense');
+		const budget = flexLines.reduce((s, l) => s + l.budgeted, 0);
+		const actual = flexLines.reduce((s, l) => s + l.actual, 0);
+		if (budget === 0) return null;
+
+		const start = new Date(bvaData.start_date).getTime();
+		const end = new Date(bvaData.end_date).getTime();
+		const now = Date.now();
+		const totalDays = (end - start) / 86_400_000;
+		const elapsed = Math.max(0, Math.min(totalDays, (now - start) / 86_400_000));
+		const expected = (budget / totalDays) * elapsed;
+		const delta = expected - actual; // positive = under budget, negative = over
+
+		return { budget, actual, expected, delta, dailyAllowance: budget / totalDays, daysLeft: totalDays - elapsed };
+	});
 </script>
 
 <div class="dashboard">
@@ -104,10 +135,18 @@
 				<div class="card-value">{formatEuro(summary.total_expenses)}</div>
 				<div class="card-label">Expenses</div>
 			</div>
-			<div class="card net" class:positive={summary.net >= 0} class:negative={summary.net < 0}>
-				<div class="card-value">{formatEuro(summary.net)}</div>
-				<div class="card-label">Net</div>
-			</div>
+			{#if burndown}
+				<div class="card burndown" class:positive={burndown.delta >= 0} class:negative={burndown.delta < 0}>
+					<div class="card-value">{burndown.delta >= 0 ? '+' : ''}{formatEuro(burndown.delta)}</div>
+					<div class="card-label">{burndown.delta >= 0 ? 'Under' : 'Over'} budget pace</div>
+					<div class="card-detail">{formatEuro(burndown.actual)} / {formatEuro(burndown.budget)}</div>
+				</div>
+			{:else}
+				<div class="card net" class:positive={summary.net >= 0} class:negative={summary.net < 0}>
+					<div class="card-value">{formatEuro(summary.net)}</div>
+					<div class="card-label">Net</div>
+				</div>
+			{/if}
 			<div class="card info">
 				<div class="card-value">{summary.transaction_count}</div>
 				<div class="card-label">Transactions</div>
@@ -243,6 +282,8 @@
 	.card.income .card-value { color: #16a34a; }
 	.card.expenses .card-value { color: #dc2626; }
 	.card.net .card-value { color: #2d6a4f; }
+	.card.burndown .card-value { font-size: 1.3rem; }
+	.card-detail { font-size: 0.75rem; color: #999; margin-top: 0.15rem; }
 	.positive { color: #16a34a !important; }
 	.negative { color: #dc2626 !important; }
 
