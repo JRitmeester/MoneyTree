@@ -137,7 +137,7 @@
 		</div>
 
 		<div class="category-selector">
-			<label class="cat-label">Category</label>
+			<span class="cat-label">Category</span>
 			<div class="cat-input-wrap">
 				<CategoryInput
 					value={selectedCategory}
@@ -366,112 +366,6 @@
 	.split-btn:hover { background: #f0fdf4; }
 	.split-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-	/* Line items section */
-	.section-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 0.75rem;
-	}
-	.section-header h2 { margin: 0; }
-
-	table {
-		width: 100%;
-		border-collapse: collapse;
-	}
-	th {
-		text-align: left;
-		padding: 0.5rem;
-		border-bottom: 2px solid #e5e7eb;
-		font-size: 0.8rem;
-		color: #666;
-	}
-	td {
-		padding: 0.5rem;
-		border-bottom: 1px solid #f0f0f0;
-		font-size: 0.9rem;
-	}
-	.right { text-align: right; }
-	tfoot td {
-		border-top: 2px solid #e5e7eb;
-		border-bottom: none;
-	}
-
-	.cat-badge {
-		display: inline-block;
-		padding: 0.1rem 0.4rem;
-		background: #f0fdf4;
-		color: #2d6a4f;
-		border-radius: 4px;
-		font-size: 0.8rem;
-		margin: 0.1rem 0.15rem 0.1rem 0;
-	}
-
-	/* Remaining line item styling */
-	.remaining-row {
-		background: #f8fafc;
-		border-top: 2px dashed #d1d5db;
-	}
-	.remaining-label {
-		color: #6b7280;
-		font-style: italic;
-		font-size: 0.85rem;
-	}
-	.remaining-cat-input {
-		max-width: 250px;
-	}
-
-	.remaining-row-edit {
-		display: flex;
-		align-items: center;
-		gap: 1rem;
-		padding: 0.75rem 0.5rem;
-		margin-top: 0.5rem;
-		background: #f8fafc;
-		border-top: 2px dashed #d1d5db;
-		border-radius: 0 0 4px 4px;
-	}
-	.remaining-amount {
-		font-weight: 500;
-		font-size: 0.9rem;
-	}
-	.remaining-note {
-		color: #9ca3af;
-		font-size: 0.8rem;
-		font-style: italic;
-	}
-
-	td input[type="text"], td input[type="number"] {
-		width: 100%;
-		padding: 0.35rem 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 4px;
-		font-size: 0.85rem;
-		box-sizing: border-box;
-	}
-	.amt-input { width: 90px; }
-
-	.edit-actions {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-top: 0.75rem;
-		gap: 0.5rem;
-	}
-	.edit-actions-right {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.edit-btn {
-		padding: 0.3rem 0.75rem;
-		background: #2d6a4f;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-		font-size: 0.8rem;
-	}
 	.add-row-btn {
 		padding: 0.3rem 0.75rem;
 		background: none;
@@ -481,19 +375,6 @@
 		cursor: pointer;
 		font-size: 0.8rem;
 	}
-	.save-btn {
-		padding: 0.3rem 0.75rem;
-		background: #2d6a4f;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-		font-size: 0.8rem;
-	}
-	.save-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
 	.cancel-btn {
 		padding: 0.3rem 0.75rem;
 		background: #f5f5f5;
@@ -501,13 +382,6 @@
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.8rem;
-	}
-	.remove-btn {
-		background: none;
-		border: none;
-		color: #dc2626;
-		cursor: pointer;
-		font-size: 1rem;
 	}
 
 	/* Offsets */

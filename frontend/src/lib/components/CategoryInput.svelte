@@ -219,7 +219,13 @@
 
 <div class="category-input" bind:this={containerEl}>
 	{#if value != null && currentLabel && !editing}
-		<div class="tags-area" onclick={startEditing}>
+		<div
+			class="tags-area"
+			role="button"
+			tabindex="0"
+			onclick={startEditing}
+			onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEditing(); } }}
+		>
 			<span class="tag">
 				{#if currentLabel.includes(' > ')}
 					{@const parts = currentLabel.split(' > ')}
@@ -237,6 +243,10 @@
 			</span>
 		</div>
 	{:else}
+		<!-- This wrapper just forwards focus to the actual input; keyboard
+		     users can tab directly to the input, so click-only is fine here. -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="tags-area" onclick={() => inputEl?.focus()}>
 			<input
 				bind:this={inputEl}

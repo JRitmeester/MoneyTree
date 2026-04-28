@@ -8,6 +8,7 @@
 	} from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import { resolveAmount, evaluateExpression } from '$lib/calc';
+	import { focusOnMount } from '$lib/actions/focusOnMount';
 
 	let receipt: ReceiptDetail | null = $state(null);
 	let loading = $state(true);
@@ -133,7 +134,13 @@
 							<input type="date" bind:value={editValue} />
 							<button class="save-btn" onclick={saveEdit}>Save</button>
 						{:else}
-							<span class="value" onclick={() => startEdit('date', receipt?.date || '')}>
+							<span
+								class="value"
+								role="button"
+								tabindex="0"
+								onclick={() => startEdit('date', receipt?.date || '')}
+								onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit('date', receipt?.date || ''); } }}
+							>
 								{receipt.date ? formatDate(receipt.date) : 'Not set'}
 							</span>
 						{/if}
@@ -144,7 +151,13 @@
 							<input type="number" step="0.01" bind:value={editValue} />
 							<button class="save-btn" onclick={saveEdit}>Save</button>
 						{:else}
-							<span class="value" onclick={() => startEdit('total_amount', receipt?.total_amount?.toString() || '')}>
+							<span
+								class="value"
+								role="button"
+								tabindex="0"
+								onclick={() => startEdit('total_amount', receipt?.total_amount?.toString() || '')}
+								onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit('total_amount', receipt?.total_amount?.toString() || ''); } }}
+							>
 								{receipt.total_amount != null ? formatEuro(receipt.total_amount) : 'Not set'}
 							</span>
 						{/if}
@@ -155,7 +168,13 @@
 							<input type="text" bind:value={editValue} />
 							<button class="save-btn" onclick={saveEdit}>Save</button>
 						{:else}
-							<span class="value" onclick={() => startEdit('merchant_name', receipt?.merchant_name || '')}>
+							<span
+								class="value"
+								role="button"
+								tabindex="0"
+								onclick={() => startEdit('merchant_name', receipt?.merchant_name || '')}
+								onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit('merchant_name', receipt?.merchant_name || ''); } }}
+							>
 								{receipt.merchant_name || 'Not set'}
 							</span>
 						{/if}
@@ -235,7 +254,7 @@
 						{/each}
 						{#if addingItem}
 							<tr class="new-item-row">
-								<td><input type="text" bind:value={newItem.description} placeholder="Description" autofocus /></td>
+								<td><input type="text" bind:value={newItem.description} placeholder="Description" use:focusOnMount /></td>
 								<td><CategoryInput value={newItem.category_id} onchange={(v) => { newItem.category_id = v; }} placeholder="Category" /></td>
 								<td><input type="text" bind:value={newItem.amount} class="amt-input" placeholder="0.00" onblur={() => { newItem.amount = resolveAmount(newItem.amount); }} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveNewItem(); }}} /></td>
 								<td>

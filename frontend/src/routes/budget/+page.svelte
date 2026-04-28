@@ -538,7 +538,15 @@
 
 	<!-- Wizard Modal -->
 	{#if wizardOpen}
-		<div class="wizard-backdrop" onclick={() => { wizardOpen = false; }}>
+		<div
+			class="wizard-backdrop"
+			role="button"
+			tabindex="-1"
+			onclick={() => { wizardOpen = false; }}
+			onkeydown={(e) => { if (e.key === 'Escape') wizardOpen = false; }}
+		>
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div class="wizard-modal" onclick={(e) => e.stopPropagation()}>
 				<div class="wizard-header">
 					<h2>Create New Period</h2>
@@ -696,10 +704,13 @@
 
 		{#snippet budgetTreeNode(node: BudgetTreeNode, section: string, depth: number, showBalance: boolean)}
 			{#if node.children.length > 0}
-				<button
+				<div
 					class="tree-row tree-parent"
+					role="button"
+					tabindex="0"
 					style="padding-left: {0.5 + depth * 1.25}rem"
 					onclick={() => toggleNode(section, node.path)}
+					onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleNode(section, node.path); } }}
 				>
 					<span class="tree-toggle">{isNodeExpanded(section, node.path) ? '▼' : '▶'}</span>
 					<span class="cat-name tree-name">{node.name}</span>
@@ -715,7 +726,7 @@
 					{:else}
 						<span class="tree-total">{formatEuro(node.total)}</span>
 					{/if}
-				</button>
+				</div>
 				{#if isNodeExpanded(section, node.path)}
 					<div class="children-panel" style="margin-left: {0.5 + depth * 0.5}rem">
 						{#each node.children as child (child.path)}
@@ -1220,8 +1231,6 @@
 	.btn.primary:disabled { opacity: 0.5; cursor: default; }
 	.btn.secondary { background: white; color: #2d6a4f; border: 2px solid #2d6a4f; }
 	.btn.secondary:hover { background: #f0fdf4; }
-	.btn.danger-outline { background: white; color: #dc2626; border: 2px solid #dc2626; }
-	.btn.danger-outline:hover { background: #fef2f2; }
 	.btn.danger-text { background: none; color: #999; border: none; font-size: 0.8rem; }
 	.btn.danger-text:hover { color: #dc2626; }
 	.btn.small { padding: 0.4rem 0.75rem; font-size: 0.85rem; }

@@ -4,6 +4,7 @@
 		getCategoryMappings, getUnmappedCategories, createCategoryMapping, deleteCategoryMapping,
 		type Category, type CategoryMapping
 	} from '$lib/api';
+	import { focusOnMount } from '$lib/actions/focusOnMount';
 
 	let categories: Category[] = $state([]);
 	let mappings: CategoryMapping[] = $state([]);
@@ -182,10 +183,17 @@
 								bind:value={editingName}
 								onblur={() => saveRename(cat)}
 								onkeydown={(e) => handleRenameKeydown(e, cat)}
-								autofocus
+								use:focusOnMount
 							/>
 						{:else}
-							<span class="cat-name" ondblclick={() => startRename(cat)} title="Double-click to rename">{cat.name}</span>
+							<span
+								class="cat-name"
+								role="button"
+								tabindex="0"
+								ondblclick={() => startRename(cat)}
+								onkeydown={(e) => { if (e.key === 'F2' || e.key === 'Enter') startRename(cat); }}
+								title="Double-click to rename"
+							>{cat.name}</span>
 						{/if}
 						<button class="add-sub-btn" onclick={() => startAddSub(cat.id)} title="Add subcategory">+</button>
 						<span class="col-type">
@@ -322,12 +330,6 @@
 		font-weight: 500;
 		cursor: default;
 	}
-	.col-bank {
-		display: inline-block;
-		width: 40px;
-		text-align: center;
-		flex-shrink: 0;
-	}
 	.col-type {
 		display: inline-block;
 		width: 65px;
@@ -354,10 +356,6 @@
 		padding: 0.1rem 0.5rem;
 		border-radius: 4px;
 		font-size: 0.75rem;
-	}
-	.badge.bank {
-		background: #dbeafe;
-		color: #1d4ed8;
 	}
 	.type-badge {
 		cursor: pointer;

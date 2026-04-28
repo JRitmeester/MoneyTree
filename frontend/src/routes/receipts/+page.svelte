@@ -45,7 +45,13 @@
 {:else}
 	<div class="grid">
 		{#each receipts as receipt}
-			<div class="card" onclick={() => goto(`/receipts/${receipt.id}`)}>
+			<div
+				class="card"
+				role="button"
+				tabindex="0"
+				onclick={() => goto(`/receipts/${receipt.id}`)}
+				onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goto(`/receipts/${receipt.id}`); } }}
+			>
 				<div class="thumb">
 					{#if receipt.image_path?.endsWith('.pdf')}
 						<div class="pdf-placeholder">PDF</div>

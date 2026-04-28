@@ -192,7 +192,13 @@
 </div>
 
 {#if activeModal}
-	<div class="backdrop" onclick={closeModal}>
+	<div
+		class="backdrop"
+		role="button"
+		tabindex="-1"
+		onclick={closeModal}
+		onkeydown={(e) => { if (e.key === 'Escape') closeModal(); }}
+	>
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="modal" onclick={(e) => e.stopPropagation()}>
