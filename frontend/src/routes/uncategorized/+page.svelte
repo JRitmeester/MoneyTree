@@ -7,7 +7,10 @@
 	let loading = $state(true);
 	let applying = $state(false);
 
-	let searchQuery = $state('');
+	let nameQuery = $state('');
+	let nameFilter = $state('');
+	let descriptionQuery = $state('');
+	let showNameSuggestions = $state(false);
 	let dateFrom = $state('');
 	let dateTo = $state('');
 	let selectedIds: Set<number> = $state(new Set());
@@ -84,12 +87,46 @@
 		return Math.round(n * 100) / 100;
 	}
 
-	function matchesSearch(tx: { merchant_name?: string | null; naam?: string | null; omschrijving: string }): boolean {
-		const q = searchQuery.trim().toLowerCase();
+	let allNames = $derived.by(() => {
+		const names = new Set<string>();
+		for (const g of groups) {
+			for (const tx of g.transactions) {
+				if (!matchesDateRange(tx) || !matchesDescription(tx)) continue;
+				const name = tx.merchant_name || tx.naam;
+				if (name) names.add(name);
+			}
+		}
+		return [...names].sort((a, b) => a.localeCompare(b));
+	});
+
+	let nameSuggestions = $derived.by(() => {
+		const q = nameQuery.trim().toLowerCase();
+		if (q === '') return allNames;
+		return allNames.filter(n => n.toLowerCase().includes(q));
+	});
+
+	function selectName(name: string) {
+		nameFilter = name;
+		nameQuery = name;
+		showNameSuggestions = false;
+	}
+
+	function clearNameFilter() {
+		nameFilter = '';
+		nameQuery = '';
+		showNameSuggestions = false;
+	}
+
+	function matchesName(tx: { merchant_name?: string | null; naam?: string | null }): boolean {
+		if (nameFilter === '') return true;
+		const name = tx.merchant_name || tx.naam || '';
+		return name === nameFilter;
+	}
+
+	function matchesDescription(tx: { omschrijving: string }): boolean {
+		const q = descriptionQuery.trim().toLowerCase();
 		if (q === '') return true;
-		return [tx.merchant_name, tx.naam, tx.omschrijving]
-			.filter(Boolean)
-			.some(field => (field as string).toLowerCase().includes(q));
+		return tx.omschrijving.toLowerCase().includes(q);
 	}
 
 	function matchesDateRange(tx: { datum: string }): boolean {
@@ -99,11 +136,11 @@
 	}
 
 	function matchesFilters(tx: { merchant_name?: string | null; naam?: string | null; omschrijving: string; datum: string }): boolean {
-		return matchesSearch(tx) && matchesDateRange(tx);
+		return matchesName(tx) && matchesDescription(tx) && matchesDateRange(tx);
 	}
 
 	let filteredGroups = $derived.by(() => {
-		const hasFilters = searchQuery.trim() !== '' || dateFrom || dateTo;
+		const hasFilters = nameFilter !== '' || descriptionQuery.trim() !== '' || dateFrom || dateTo;
 		if (!hasFilters) return groups;
 		return groups
 			.map(g => {
@@ -138,15 +175,38 @@
 		<div class="sticky-bar">
 			<div class="bar-left">
 				<span class="selected-count">{selectedCount} selected</span>
+				<div class="search-wrap name-search">
+					<input
+						type="text"
+						class="search-input"
+						placeholder="Filter by name..."
+						bind:value={nameQuery}
+						onfocus={() => { showNameSuggestions = true; }}
+						onblur={() => { setTimeout(() => { showNameSuggestions = false; }, 150); }}
+						oninput={() => { nameFilter = ''; showNameSuggestions = true; }}
+					/>
+					{#if nameFilter}
+						<button class="search-clear" onclick={clearNameFilter}>×</button>
+					{/if}
+					{#if showNameSuggestions && nameSuggestions.length > 0 && nameFilter === ''}
+						<ul class="name-suggestions">
+							{#each nameSuggestions as name}
+								<li>
+									<button onmousedown={() => selectName(name)}>{name}</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
 				<div class="search-wrap">
 					<input
 						type="text"
 						class="search-input"
-						placeholder="Filter descriptions..."
-						bind:value={searchQuery}
+						placeholder="Filter by description..."
+						bind:value={descriptionQuery}
 					/>
-					{#if searchQuery}
-						<button class="search-clear" onclick={() => { searchQuery = ''; }}>×</button>
+					{#if descriptionQuery}
+						<button class="search-clear" onclick={() => { descriptionQuery = ''; }}>×</button>
 					{/if}
 				</div>
 			</div>
@@ -194,6 +254,7 @@
 							<tr>
 								<th class="check-col"></th>
 								<th>Date</th>
+								<th>Name</th>
 								<th>Description</th>
 								<th class="amount">Amount</th>
 							</tr>
@@ -209,7 +270,8 @@
 										/>
 									</td>
 									<td class="date clickable" onclick={() => window.location.href = `/transactions/${tx.id}`}>{formatDate(tx.datum)}</td>
-									<td class="merchant clickable" onclick={() => window.location.href = `/transactions/${tx.id}`}>{tx.merchant_name || tx.naam || tx.omschrijving.substring(0, 60)}</td>
+									<td class="merchant clickable" onclick={() => window.location.href = `/transactions/${tx.id}`}>{tx.merchant_name || tx.naam || ''}</td>
+									<td class="description clickable" onclick={() => window.location.href = `/transactions/${tx.id}`}>{tx.omschrijving}</td>
 									<td class="amount negative clickable" onclick={() => window.location.href = `/transactions/${tx.id}`}>{formatEuro(tx.bedrag)}</td>
 								</tr>
 							{/each}
@@ -288,6 +350,43 @@
 		line-height: 1;
 	}
 	.search-clear:hover { color: #333; }
+
+	.name-search {
+		position: relative;
+	}
+
+	.name-suggestions {
+		position: absolute;
+		top: 100%;
+		left: 0;
+		right: 0;
+		max-height: 200px;
+		overflow-y: auto;
+		background: white;
+		border: 1px solid #d1d5db;
+		border-top: none;
+		border-radius: 0 0 4px 4px;
+		box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		z-index: 20;
+	}
+
+	.name-suggestions li button {
+		display: block;
+		width: 100%;
+		padding: 0.35rem 0.5rem;
+		border: none;
+		background: none;
+		text-align: left;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+
+	.name-suggestions li button:hover {
+		background: #f0f7f4;
+	}
 
 	.selected-count {
 		font-weight: 600;
@@ -426,6 +525,16 @@
 
 	.merchant {
 		font-weight: 500;
+		white-space: nowrap;
+	}
+
+	.description {
+		font-size: 0.8rem;
+		color: #666;
+		max-width: 300px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.amount {
