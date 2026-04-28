@@ -69,6 +69,7 @@ class ExportTransactionOffset(BaseModel):
 
 class ExportFile(BaseModel):
     format_version: Literal[1]
+    export_id: Optional[str] = None
     exported_at: datetime
     since: Optional[date] = None
     categories: list[ExportCategory]

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..models import (
     Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping,
-    Transaction, TransactionOffset,
+    ImportedExport, Transaction, TransactionOffset,
 )
 from ..sync_schemas import ExportFile, ImportConflict, ImportPreview
 
@@ -35,6 +35,20 @@ def _budget_overlaps(db: Session, start, end, exclude_start=None) -> Budget | No
 
 def preview_import(db: Session, export: ExportFile) -> ImportPreview:
     preview = ImportPreview()
+
+    if export.export_id:
+        prior = db.execute(
+            select(ImportedExport).where(ImportedExport.export_id == export.export_id)
+        ).scalar_one_or_none()
+        if prior is not None:
+            preview.soft_conflicts.append(ImportConflict(
+                code="export_already_imported", severity="soft",
+                message=(
+                    f"This export (id {export.export_id}) was already imported on "
+                    f"{prior.imported_at.isoformat()}. Re-importing is safe (idempotent), "
+                    "but you may be looking for a newer export."
+                ),
+            ))
 
     cat_idx = _category_index(db)
     for ec in export.categories:
@@ -268,6 +282,19 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
             expense_transaction_id=expense.id, income_transaction_id=income.id,
         ))
         income_locked_ids.add(income.id)
+
+    # 8. Record this export as imported (idempotency audit)
+    if export.export_id:
+        already = db.execute(
+            select(ImportedExport).where(ImportedExport.export_id == export.export_id)
+        ).scalar_one_or_none()
+        if already is None:
+            db.add(ImportedExport(
+                export_id=export.export_id,
+                transactions_added=preview.will_add_transactions,
+                transactions_updated=preview.will_update_transactions,
+                categories_added=preview.will_add_categories,
+            ))
 
     db.commit()
     return preview

@@ -1,3 +1,4 @@
+import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -111,6 +112,7 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
 
     return ExportFile(
         format_version=1,
+        export_id=str(uuid.uuid4()),
         exported_at=datetime.now(timezone.utc),
         since=since,
         categories=export_categories,

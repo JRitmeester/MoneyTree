@@ -216,3 +216,14 @@ class WebAuthnChallenge(Base):
     token: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
     challenge: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class ImportedExport(Base):
+    __tablename__ = "imported_exports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    export_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
+    imported_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    transactions_added: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    transactions_updated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    categories_added: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
