@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..auth import require_auth
 from ..database import get_db
 from ..models import Budget, BudgetLine, BudgetTemplate, Category, LineItem, Receipt, Transaction
+from ..services.sync_events import EVENT_BUDGET_DELETE, record_event
 from ..schemas import (
     BudgetCreate,
     BudgetLineOut,
@@ -281,6 +282,7 @@ def delete_budget(budget_id: int, db: Session = Depends(get_db)):
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
 
+    record_event(db, EVENT_BUDGET_DELETE, {"start_date": budget.start_date})
     db.delete(budget)
     db.commit()
     return {"ok": True}

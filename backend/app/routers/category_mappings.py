@@ -6,6 +6,7 @@ from ..auth import require_auth
 from ..database import get_db
 from ..models import Category, CategoryMapping
 from ..schemas import CategoryMappingCreate, CategoryMappingOut
+from ..services.sync_events import EVENT_CATEGORY_MAPPING_DELETE, record_event
 
 router = APIRouter(prefix="/api/category-mappings", tags=["category_mappings"], dependencies=[Depends(require_auth)])
 
@@ -89,6 +90,7 @@ def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found")
 
+    record_event(db, EVENT_CATEGORY_MAPPING_DELETE, {"bank_category": mapping.bank_category})
     db.delete(mapping)
     db.commit()
     return {"ok": True}

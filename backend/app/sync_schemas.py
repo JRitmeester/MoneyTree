@@ -67,6 +67,13 @@ class ExportTransactionOffset(BaseModel):
     income_import_hash: str
 
 
+class ExportSyncEvent(BaseModel):
+    event_id: str
+    event_type: str
+    payload: dict
+    created_at: datetime
+
+
 class ExportFile(BaseModel):
     format_version: Literal[1]
     export_id: Optional[str] = None
@@ -79,6 +86,7 @@ class ExportFile(BaseModel):
     budget_templates: list[ExportBudgetTemplate]
     transactions: list[ExportTransaction]
     transaction_offsets: list[ExportTransactionOffset]
+    sync_events: list[ExportSyncEvent] = Field(default_factory=list)
 
 
 class ImportConflict(BaseModel):
@@ -123,6 +131,8 @@ class ImportPreview(BaseModel):
     will_update_transactions: int = 0
     will_skip_transactions: int = 0
     will_add_offsets: int = 0
+    will_apply_sync_events: int = 0
+    will_skip_sync_events: int = 0
     add_categories: list[str] = Field(default_factory=list)
     add_transactions: list[TransactionPreview] = Field(default_factory=list)
     skip_transactions: list[TransactionPreview] = Field(default_factory=list)

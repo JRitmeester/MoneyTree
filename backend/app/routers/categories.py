@@ -6,6 +6,10 @@ from ..auth import require_auth
 from ..database import get_db
 from ..models import Category
 from ..schemas import CategoryCreate, CategoryOut
+from ..services.sync_events import (
+    EVENT_CATEGORY_DELETE, EVENT_CATEGORY_RENAME, EVENT_CATEGORY_UPDATE,
+    record_event,
+)
 
 router = APIRouter(prefix="/api/categories", tags=["categories"], dependencies=[Depends(require_auth)])
 
@@ -47,16 +51,39 @@ def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
 
 @router.patch("/{category_id}", response_model=CategoryOut)
 def update_category(category_id: int, data: CategoryCreate, db: Session = Depends(get_db)):
-    """Rename a category."""
+    """Rename a category and/or change its attributes."""
     cat = db.get(Category, category_id)
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
+
+    old_name = cat.name
+    new_parent_id = data.parent_id if data.parent_id is not None else cat.parent_id
+    attr_changed = (
+        data.category_type != cat.category_type
+        or data.is_fixed != cat.is_fixed
+        or new_parent_id != cat.parent_id
+    )
+
+    if data.name != old_name:
+        record_event(db, EVENT_CATEGORY_RENAME, {
+            "old_name": old_name, "new_name": data.name,
+        })
 
     cat.name = data.name
     if data.parent_id is not None:
         cat.parent_id = data.parent_id
     cat.category_type = data.category_type
     cat.is_fixed = data.is_fixed
+
+    if attr_changed:
+        new_parent = db.get(Category, cat.parent_id) if cat.parent_id else None
+        record_event(db, EVENT_CATEGORY_UPDATE, {
+            "name": cat.name,
+            "parent_name": new_parent.name if new_parent else None,
+            "is_fixed": cat.is_fixed,
+            "category_type": cat.category_type,
+        })
+
     db.commit()
     db.refresh(cat)
     return cat
@@ -72,6 +99,7 @@ def delete_category(category_id: int, db: Session = Depends(get_db)):
     if cat.children:
         raise HTTPException(status_code=409, detail="Category has children, delete them first")
 
+    record_event(db, EVENT_CATEGORY_DELETE, {"name": cat.name})
     db.delete(cat)
     db.commit()
     return {"ok": True}

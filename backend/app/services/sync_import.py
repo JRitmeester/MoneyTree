@@ -1,16 +1,17 @@
+import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete as sa_delete, select, update as sa_update
 from sqlalchemy.orm import Session
 
 from ..models import (
     Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping,
-    ImportedExport, Transaction, TransactionOffset,
+    ImportedExport, LineItem, SyncEvent, Transaction, TransactionOffset,
 )
 from ..sync_schemas import (
-    ExportFile, ImportConflict, ImportPreview,
+    ExportFile, ExportSyncEvent, ImportConflict, ImportPreview,
     PREVIEW_SAMPLE_LIMIT, TransactionPreview, TransactionUpdatePreview,
 )
 
@@ -180,7 +181,82 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
         else:
             preview.will_add_offsets += 1
 
+    if export.sync_events:
+        applied_event_ids = set(
+            db.execute(select(SyncEvent.event_id)).scalars().all()
+        )
+        for ev in export.sync_events:
+            if ev.event_id in applied_event_ids:
+                preview.will_skip_sync_events += 1
+            else:
+                preview.will_apply_sync_events += 1
+
     return preview
+
+
+def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
+    """Apply a single sync event to the destination DB. Missing entities are no-ops."""
+    payload = ev.payload
+    if ev.event_type == "category.rename":
+        cat = db.execute(
+            select(Category).where(Category.name == payload["old_name"])
+        ).scalar_one_or_none()
+        if cat is None:
+            return
+        # If a category with the new name already exists, skip the rename
+        clash = db.execute(
+            select(Category).where(Category.name == payload["new_name"])
+        ).scalar_one_or_none()
+        if clash is not None and clash.id != cat.id:
+            return
+        cat.name = payload["new_name"]
+    elif ev.event_type == "category.delete":
+        cat = db.execute(
+            select(Category).where(Category.name == payload["name"])
+        ).scalar_one_or_none()
+        if cat is None:
+            return
+        # Mirror settings.py delete_all_categories cleanup for FK safety
+        db.execute(sa_delete(CategoryMapping).where(CategoryMapping.category_id == cat.id))
+        db.execute(sa_delete(BudgetTemplate).where(BudgetTemplate.category_id == cat.id))
+        db.execute(sa_delete(BudgetLine).where(BudgetLine.category_id == cat.id))
+        db.execute(sa_update(LineItem).where(LineItem.category_id == cat.id).values(category_id=None))
+        db.execute(sa_update(Transaction).where(Transaction.category_id == cat.id).values(category_id=None))
+        # If any other category points to this as parent, nullify
+        db.execute(sa_update(Category).where(Category.parent_id == cat.id).values(parent_id=None))
+        db.delete(cat)
+    elif ev.event_type == "category.update":
+        cat = db.execute(
+            select(Category).where(Category.name == payload["name"])
+        ).scalar_one_or_none()
+        if cat is None:
+            return
+        cat.is_fixed = payload.get("is_fixed", cat.is_fixed)
+        cat.category_type = payload.get("category_type", cat.category_type)
+        parent_name = payload.get("parent_name")
+        if parent_name is None:
+            cat.parent_id = None
+        else:
+            parent = db.execute(
+                select(Category).where(Category.name == parent_name)
+            ).scalar_one_or_none()
+            if parent is not None:
+                cat.parent_id = parent.id
+    elif ev.event_type == "category_mapping.delete":
+        m = db.execute(
+            select(CategoryMapping).where(CategoryMapping.bank_category == payload["bank_category"])
+        ).scalar_one_or_none()
+        if m is not None:
+            db.delete(m)
+    elif ev.event_type == "budget.delete":
+        from datetime import date as _date
+        start = _date.fromisoformat(payload["start_date"])
+        budget = db.execute(
+            select(Budget).where(Budget.start_date == start)
+        ).scalar_one_or_none()
+        if budget is not None:
+            db.delete(budget)
+    # Unknown event types are ignored (forward compat)
 
 
 def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> ImportPreview:
@@ -190,6 +266,26 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
             f"Import aborted by {len(preview.hard_conflicts)} hard conflict(s): "
             + "; ".join(c.message for c in preview.hard_conflicts)
         )
+
+    # 0. Apply sync events first (renames + deletes), so the additive merge
+    #    that follows sees the post-mutation state.
+    if export.sync_events:
+        applied_event_ids = set(
+            db.execute(select(SyncEvent.event_id)).scalars().all()
+        )
+        # Sort by created_at to apply in original order
+        ordered_events = sorted(export.sync_events, key=lambda e: e.created_at)
+        for ev in ordered_events:
+            if ev.event_id in applied_event_ids:
+                continue
+            _apply_sync_event(db, ev)
+            db.add(SyncEvent(
+                event_id=ev.event_id,
+                event_type=ev.event_type,
+                payload_json=json.dumps(ev.payload),
+                created_at=ev.created_at.replace(tzinfo=None) if ev.created_at.tzinfo else ev.created_at,
+            ))
+        db.flush()
 
     # 1. Categories -- insert missing, in two passes (parents first via topological sort)
     cat_idx = _category_index(db)

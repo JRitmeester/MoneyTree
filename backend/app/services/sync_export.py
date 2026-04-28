@@ -5,13 +5,16 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+import json
+
 from ..models import (
     Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping,
-    Transaction, TransactionOffset,
+    SyncEvent, Transaction, TransactionOffset,
 )
 from ..sync_schemas import (
     ExportBudget, ExportBudgetLine, ExportBudgetTemplate, ExportCategory,
-    ExportCategoryMapping, ExportFile, ExportTransaction, ExportTransactionOffset,
+    ExportCategoryMapping, ExportFile, ExportSyncEvent, ExportTransaction,
+    ExportTransactionOffset,
 )
 
 
@@ -112,6 +115,21 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
         if o.expense_transaction_id in tx_ids and o.income_transaction_id in tx_ids
     ]
 
+    event_query = select(SyncEvent).order_by(SyncEvent.created_at)
+    if since is not None:
+        cutoff = datetime.combine(since, datetime.min.time(), tzinfo=timezone.utc)
+        event_query = event_query.where(SyncEvent.created_at >= cutoff)
+    events = db.execute(event_query).scalars().all()
+    export_events = [
+        ExportSyncEvent(
+            event_id=e.event_id,
+            event_type=e.event_type,
+            payload=json.loads(e.payload_json),
+            created_at=e.created_at,
+        )
+        for e in events
+    ]
+
     return ExportFile(
         format_version=1,
         export_id=str(uuid.uuid4()),
@@ -124,4 +142,5 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
         budget_templates=export_templates,
         transactions=export_txs,
         transaction_offsets=export_offsets,
+        sync_events=export_events,
     )

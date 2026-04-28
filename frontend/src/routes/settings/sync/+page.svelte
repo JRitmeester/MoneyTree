@@ -131,6 +131,14 @@
 				</li>
 				<li>Transactions to skip (dedup): {preview.will_skip_transactions}</li>
 				<li>Offsets to add: {preview.will_add_offsets}</li>
+				{#if preview.will_apply_sync_events > 0 || preview.will_skip_sync_events > 0}
+					<li>
+						Sync events to apply: {preview.will_apply_sync_events}
+						{#if preview.will_skip_sync_events > 0}
+							<span class="muted">({preview.will_skip_sync_events} already applied)</span>
+						{/if}
+					</li>
+				{/if}
 			</ul>
 
 			{#if preview.add_categories.length > 0}

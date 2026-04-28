@@ -230,3 +230,20 @@ class ImportedExport(Base):
     transactions_added: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     transactions_updated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     categories_added: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class SyncEvent(Base):
+    """Append-only log of mutations that need to propagate via the sync feature.
+
+    Records renames/deletes that the additive sync merge cannot infer from
+    natural keys alone. Each event has a UUID so applying twice is a no-op.
+    """
+    __tablename__ = "sync_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, nullable=False, index=True
+    )
