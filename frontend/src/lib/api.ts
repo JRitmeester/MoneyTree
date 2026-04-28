@@ -673,6 +673,58 @@ export async function replaceBudgetTemplate(lines: { category_id: number; amount
 	});
 }
 
+// --- Settings ---
+
+export interface VirtualReceipt {
+	receipt_id: number;
+	transaction_id: number;
+	transaction_date: string;
+	transaction_merchant: string | null;
+	transaction_amount: number;
+}
+
+export async function getVirtualReceipts(): Promise<VirtualReceipt[]> {
+	return request('/api/settings/virtual-receipts');
+}
+
+export async function deleteAllVirtualReceipts(): Promise<{ deleted: number }> {
+	return request('/api/settings/virtual-receipts', { method: 'DELETE' });
+}
+
+export async function deleteAllTransactions(): Promise<{ deleted: number }> {
+	return request('/api/settings/transactions', { method: 'DELETE' });
+}
+
+export async function deleteAllBudgets(): Promise<{ deleted: number }> {
+	return request('/api/settings/budgets', { method: 'DELETE' });
+}
+
+export async function deleteAllReceipts(): Promise<{ deleted: number }> {
+	return request('/api/settings/receipts', { method: 'DELETE' });
+}
+
+export async function deleteAllCategories(): Promise<{ deleted: number }> {
+	return request('/api/settings/categories', { method: 'DELETE' });
+}
+
+export async function deleteEverything(): Promise<{ ok: boolean }> {
+	return request('/api/settings/everything', { method: 'DELETE' });
+}
+
+export interface PasskeySummary {
+	id: number;
+	name: string;
+	created_at: string | null;
+}
+
+export async function getPasskeys(): Promise<PasskeySummary[]> {
+	return request('/api/settings/passkeys');
+}
+
+export async function deletePasskey(id: number): Promise<void> {
+	return request(`/api/settings/passkeys/${id}`, { method: 'DELETE' });
+}
+
 // --- Sync ---
 
 export interface ImportConflict {
