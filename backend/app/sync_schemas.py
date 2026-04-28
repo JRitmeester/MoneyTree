@@ -4,6 +4,11 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
+# Alias to avoid Pydantic v2 field-name shadowing (a field named `date` with an
+# Optional[date] annotation resolves the type to None when defaulted to None).
+DateType = date
+
+
 SUPPORTED_FORMAT_VERSIONS = {1}
 
 
@@ -62,6 +67,33 @@ class ExportTransaction(BaseModel):
     created_at: datetime
 
 
+class ExportLineItem(BaseModel):
+    description: str
+    amount: float
+    quantity: int = 1
+    category_name: Optional[str] = None
+    sort_order: int = 0
+    is_remaining: bool = False
+
+
+class ExportReceipt(BaseModel):
+    """A receipt linked to a transaction by import_hash.
+
+    Standalone receipts (without an attached transaction) are excluded from
+    the sync export — they remain local-only.
+    """
+    transaction_import_hash: str
+    date: Optional[DateType] = None
+    total_amount: Optional[float] = None
+    merchant_name: Optional[str] = None
+    image_filename: Optional[str] = None
+    image_base64: Optional[str] = None
+    ocr_raw_text: Optional[str] = None
+    match_confidence: Optional[float] = None
+    created_at: datetime
+    line_items: list[ExportLineItem] = Field(default_factory=list)
+
+
 class ExportTransactionOffset(BaseModel):
     expense_import_hash: str
     income_import_hash: str
@@ -86,6 +118,7 @@ class ExportFile(BaseModel):
     budget_templates: list[ExportBudgetTemplate]
     transactions: list[ExportTransaction]
     transaction_offsets: list[ExportTransactionOffset]
+    receipts: list[ExportReceipt] = Field(default_factory=list)
     sync_events: list[ExportSyncEvent] = Field(default_factory=list)
 
 
@@ -133,6 +166,8 @@ class ImportPreview(BaseModel):
     will_add_offsets: int = 0
     will_apply_sync_events: int = 0
     will_skip_sync_events: int = 0
+    will_add_receipts: int = 0
+    will_skip_receipts: int = 0
     add_categories: list[str] = Field(default_factory=list)
     add_transactions: list[TransactionPreview] = Field(default_factory=list)
     skip_transactions: list[TransactionPreview] = Field(default_factory=list)

@@ -713,6 +713,8 @@ export interface ImportPreview {
 	will_add_offsets: number;
 	will_apply_sync_events: number;
 	will_skip_sync_events: number;
+	will_add_receipts: number;
+	will_skip_receipts: number;
 	add_categories: string[];
 	add_transactions: TransactionPreview[];
 	skip_transactions: TransactionPreview[];

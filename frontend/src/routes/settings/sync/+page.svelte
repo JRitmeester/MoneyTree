@@ -139,6 +139,14 @@
 						{/if}
 					</li>
 				{/if}
+				{#if preview.will_add_receipts > 0 || preview.will_skip_receipts > 0}
+					<li>
+						Receipts to add: {preview.will_add_receipts}
+						{#if preview.will_skip_receipts > 0}
+							<span class="muted">({preview.will_skip_receipts} skipped — destination already has one)</span>
+						{/if}
+					</li>
+				{/if}
 			</ul>
 
 			{#if preview.add_categories.length > 0}

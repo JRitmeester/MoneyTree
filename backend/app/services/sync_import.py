@@ -1,3 +1,4 @@
+import base64
 import json
 import shutil
 from datetime import datetime, timezone
@@ -6,12 +7,13 @@ from pathlib import Path
 from sqlalchemy import delete as sa_delete, select, update as sa_update
 from sqlalchemy.orm import Session
 
+from ..config import UPLOADS_DIR
 from ..models import (
     Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping,
-    ImportedExport, LineItem, SyncEvent, Transaction, TransactionOffset,
+    ImportedExport, LineItem, Receipt, SyncEvent, Transaction, TransactionOffset,
 )
 from ..sync_schemas import (
-    ExportFile, ExportSyncEvent, ImportConflict, ImportPreview,
+    ExportFile, ExportReceipt, ExportSyncEvent, ImportConflict, ImportPreview,
     PREVIEW_SAMPLE_LIMIT, TransactionPreview, TransactionUpdatePreview,
 )
 
@@ -191,7 +193,83 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
             else:
                 preview.will_apply_sync_events += 1
 
+    if export.receipts:
+        # A receipt will be skipped if the destination's matching transaction
+        # already has a receipt, or if the transaction doesn't exist yet.
+        dest_tx_with_receipt = set(db.execute(
+            select(Transaction.import_hash).where(
+                select(Receipt.id).where(Receipt.transaction_id == Transaction.id).exists()
+            )
+        ).scalars().all())
+        for er in export.receipts:
+            if er.transaction_import_hash in dest_tx_with_receipt:
+                preview.will_skip_receipts += 1
+            else:
+                preview.will_add_receipts += 1
+
     return preview
+
+
+def _apply_receipts(
+    db: Session,
+    receipts: list[ExportReceipt],
+    tx_by_hash: dict[str, Transaction],
+    cat_idx: dict[str, Category],
+) -> None:
+    """Insert receipts (with their line items + image files) for transactions
+    that don't yet have one on the destination. NAS-wins on existing receipts."""
+    for er in receipts:
+        tx = tx_by_hash.get(er.transaction_import_hash)
+        if tx is None:
+            continue
+        existing = db.execute(
+            select(Receipt).where(Receipt.transaction_id == tx.id)
+        ).scalar_one_or_none()
+        if existing is not None:
+            continue
+
+        relative_path = None
+        if er.image_base64 and er.image_filename:
+            # Place inside uploads/sync/<imported-yyyy-mm>/ to keep imports separate
+            stamp = datetime.now(timezone.utc)
+            target_dir = Path(UPLOADS_DIR) / "sync" / f"{stamp.year}" / f"{stamp.month:02d}"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / er.image_filename
+            # If a file with this name already exists, suffix to avoid clobbering
+            if target.exists():
+                stem = target.stem
+                suffix = target.suffix
+                idx = 1
+                while target.exists():
+                    target = target_dir / f"{stem}-{idx}{suffix}"
+                    idx += 1
+            target.write_bytes(base64.b64decode(er.image_base64))
+            relative_path = str(target.relative_to(UPLOADS_DIR))
+
+        receipt = Receipt(
+            transaction_id=tx.id,
+            date=er.date,
+            total_amount=er.total_amount,
+            merchant_name=er.merchant_name,
+            image_path=relative_path,
+            ocr_raw_text=er.ocr_raw_text,
+            match_confidence=er.match_confidence,
+            created_at=er.created_at.replace(tzinfo=None) if er.created_at.tzinfo else er.created_at,
+        )
+        db.add(receipt)
+        db.flush()
+
+        for eli in er.line_items:
+            cat = cat_idx.get(eli.category_name) if eli.category_name else None
+            db.add(LineItem(
+                receipt_id=receipt.id,
+                description=eli.description,
+                amount=eli.amount,
+                quantity=eli.quantity,
+                category_id=cat.id if cat else None,
+                sort_order=eli.sort_order,
+                is_remaining=eli.is_remaining,
+            ))
 
 
 def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
@@ -411,6 +489,10 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
             expense_transaction_id=expense.id, income_transaction_id=income.id,
         ))
         income_locked_ids.add(income.id)
+
+    # 7b. Receipts -- create only if the transaction has no receipt yet (NAS-wins)
+    if export.receipts:
+        _apply_receipts(db, export.receipts, existing_tx, cat_idx)
 
     # 8. Record this export as imported (idempotency audit)
     if export.export_id:
