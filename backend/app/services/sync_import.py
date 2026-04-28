@@ -9,7 +9,10 @@ from ..models import (
     Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping,
     ImportedExport, Transaction, TransactionOffset,
 )
-from ..sync_schemas import ExportFile, ImportConflict, ImportPreview
+from ..sync_schemas import (
+    ExportFile, ImportConflict, ImportPreview,
+    PREVIEW_SAMPLE_LIMIT, TransactionPreview, TransactionUpdatePreview,
+)
 
 
 def _category_index(db: Session) -> dict[str, Category]:
@@ -55,6 +58,8 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
         existing = cat_idx.get(ec.name)
         if existing is None:
             preview.will_add_categories += 1
+            if len(preview.add_categories) < PREVIEW_SAMPLE_LIMIT:
+                preview.add_categories.append(ec.name)
         else:
             attr_diff = (
                 existing.is_fixed != ec.is_fixed
@@ -122,12 +127,40 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
                 message=f"BudgetTemplate for '{et.category_name}' exists; NAS amount kept.",
             ))
 
-    existing_hashes = _tx_hashes(db)
+    existing_tx_by_hash = {
+        t.import_hash: t
+        for t in db.execute(select(Transaction)).scalars().all()
+    }
     for et in export.transactions:
-        if et.import_hash in existing_hashes:
+        existing = existing_tx_by_hash.get(et.import_hash)
+        if existing is not None:
             preview.will_skip_transactions += 1
+            if len(preview.skip_transactions) < PREVIEW_SAMPLE_LIMIT:
+                preview.skip_transactions.append(TransactionPreview(
+                    import_hash=et.import_hash, datum=et.datum, bedrag=et.bedrag,
+                    merchant_name=et.merchant_name, omschrijving=et.omschrijving,
+                ))
+            existing_cat_name = existing.category.name if existing.category else None
+            cat_diff = (existing_cat_name or None) != (et.category_name or None)
+            merchant_diff = (existing.merchant_name or None) != (et.merchant_name or None)
+            if cat_diff or merchant_diff:
+                preview.will_update_transactions += 1
+                if len(preview.update_transactions) < PREVIEW_SAMPLE_LIMIT:
+                    preview.update_transactions.append(TransactionUpdatePreview(
+                        import_hash=et.import_hash, datum=et.datum, bedrag=et.bedrag,
+                        omschrijving=et.omschrijving,
+                        old_category_name=existing_cat_name,
+                        new_category_name=et.category_name,
+                        old_merchant_name=existing.merchant_name,
+                        new_merchant_name=et.merchant_name,
+                    ))
         else:
             preview.will_add_transactions += 1
+            if len(preview.add_transactions) < PREVIEW_SAMPLE_LIMIT:
+                preview.add_transactions.append(TransactionPreview(
+                    import_hash=et.import_hash, datum=et.datum, bedrag=et.bedrag,
+                    merchant_name=et.merchant_name, omschrijving=et.omschrijving,
+                ))
 
     income_locked = set(db.execute(
         select(TransactionOffset.income_transaction_id)

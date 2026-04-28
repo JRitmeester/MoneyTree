@@ -681,6 +681,25 @@ export interface ImportConflict {
 	message: string;
 }
 
+export interface TransactionPreview {
+	import_hash: string;
+	datum: string;
+	bedrag: number;
+	merchant_name: string | null;
+	omschrijving: string;
+}
+
+export interface TransactionUpdatePreview {
+	import_hash: string;
+	datum: string;
+	bedrag: number;
+	omschrijving: string;
+	old_category_name: string | null;
+	new_category_name: string | null;
+	old_merchant_name: string | null;
+	new_merchant_name: string | null;
+}
+
 export interface ImportPreview {
 	will_add_categories: number;
 	will_add_category_mappings: number;
@@ -692,6 +711,11 @@ export interface ImportPreview {
 	will_update_transactions: number;
 	will_skip_transactions: number;
 	will_add_offsets: number;
+	add_categories: string[];
+	add_transactions: TransactionPreview[];
+	skip_transactions: TransactionPreview[];
+	update_transactions: TransactionUpdatePreview[];
+	sample_truncated_at: number;
 	soft_conflicts: ImportConflict[];
 	hard_conflicts: ImportConflict[];
 }

@@ -123,10 +123,90 @@
 				<li>Budget lines to update: {preview.will_update_budget_lines}</li>
 				<li>Budget templates to add: {preview.will_add_budget_templates}</li>
 				<li>Transactions to add: {preview.will_add_transactions}</li>
-				<li>Transactions to update: {preview.will_update_transactions}</li>
+				<li>
+					Transactions to update: {preview.will_update_transactions}
+					{#if preview.will_update_transactions > 0 && !updateDuplicates}
+						<span class="muted">(toggle "Overwrite" above to apply)</span>
+					{/if}
+				</li>
 				<li>Transactions to skip (dedup): {preview.will_skip_transactions}</li>
 				<li>Offsets to add: {preview.will_add_offsets}</li>
 			</ul>
+
+			{#if preview.add_categories.length > 0}
+				<details>
+					<summary>New categories ({preview.will_add_categories})</summary>
+					<ul class="detail-list">
+						{#each preview.add_categories as name}
+							<li>{name}</li>
+						{/each}
+						{#if preview.will_add_categories > preview.add_categories.length}
+							<li class="muted">… and {preview.will_add_categories - preview.add_categories.length} more</li>
+						{/if}
+					</ul>
+				</details>
+			{/if}
+
+			{#if preview.add_transactions.length > 0}
+				<details>
+					<summary>New transactions ({preview.will_add_transactions})</summary>
+					<ul class="detail-list">
+						{#each preview.add_transactions as t}
+							<li>
+								<code>{t.datum}</code>
+								<strong>{t.bedrag.toFixed(2)}</strong>
+								{t.merchant_name ?? t.omschrijving}
+							</li>
+						{/each}
+						{#if preview.will_add_transactions > preview.add_transactions.length}
+							<li class="muted">… and {preview.will_add_transactions - preview.add_transactions.length} more</li>
+						{/if}
+					</ul>
+				</details>
+			{/if}
+
+			{#if preview.update_transactions.length > 0}
+				<details>
+					<summary>Transactions with field changes ({preview.will_update_transactions})</summary>
+					<ul class="detail-list">
+						{#each preview.update_transactions as t}
+							<li>
+								<code>{t.datum}</code> <strong>{t.bedrag.toFixed(2)}</strong>
+								{t.merchant_name ?? t.omschrijving}
+								<ul>
+									{#if t.old_category_name !== t.new_category_name}
+										<li>Category: <s>{t.old_category_name ?? '—'}</s> → {t.new_category_name ?? '—'}</li>
+									{/if}
+									{#if t.old_merchant_name !== t.new_merchant_name}
+										<li>Merchant: <s>{t.old_merchant_name ?? '—'}</s> → {t.new_merchant_name ?? '—'}</li>
+									{/if}
+								</ul>
+							</li>
+						{/each}
+						{#if preview.will_update_transactions > preview.update_transactions.length}
+							<li class="muted">… and {preview.will_update_transactions - preview.update_transactions.length} more</li>
+						{/if}
+					</ul>
+				</details>
+			{/if}
+
+			{#if preview.skip_transactions.length > 0}
+				<details>
+					<summary>Skipped transactions ({preview.will_skip_transactions})</summary>
+					<ul class="detail-list">
+						{#each preview.skip_transactions as t}
+							<li>
+								<code>{t.datum}</code>
+								<strong>{t.bedrag.toFixed(2)}</strong>
+								{t.merchant_name ?? t.omschrijving}
+							</li>
+						{/each}
+						{#if preview.will_skip_transactions > preview.skip_transactions.length}
+							<li class="muted">… and {preview.will_skip_transactions - preview.skip_transactions.length} more</li>
+						{/if}
+					</ul>
+				</details>
+			{/if}
 
 			{#if preview.hard_conflicts.length > 0}
 				<h4>Hard conflicts (must resolve before import)</h4>
@@ -186,4 +266,8 @@ docker-compose start</pre>
 	.backup-info { margin-top: 0.5rem; }
 	.backup-path { display: block; margin-block: 0.25rem; padding: 0.25rem 0.5rem; background: #f4f4f4; word-break: break-all; }
 	pre { background: #f4f4f4; padding: 0.5rem; border-radius: 4px; overflow-x: auto; }
+	details { margin-block: 0.5rem; }
+	summary { cursor: pointer; padding: 0.25rem 0; }
+	.detail-list { font-size: 0.9em; max-height: 300px; overflow-y: auto; padding-left: 1.25rem; }
+	.detail-list code { background: #f4f4f4; padding: 0 0.25em; border-radius: 2px; }
 </style>
