@@ -273,13 +273,28 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
     return preview
 
 
+BACKUP_RETENTION_COUNT = 10
+
+
 def snapshot_sqlite_db(db_path: Path, backup_dir: Path) -> str | None:
     db_path = Path(db_path)
     if not db_path.exists():
         return None
     backup_dir = Path(backup_dir)
     backup_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S-%fZ")
     target = backup_dir / f"{db_path.stem}-pre-import-{stamp}.db"
     shutil.copy2(db_path, target)
+    _prune_old_backups(backup_dir, db_path.stem)
     return str(target)
+
+
+def _prune_old_backups(backup_dir: Path, db_stem: str) -> None:
+    """Keep only the BACKUP_RETENTION_COUNT most recent pre-import backups."""
+    pattern = f"{db_stem}-pre-import-*.db"
+    backups = sorted(backup_dir.glob(pattern), key=lambda p: p.stat().st_mtime)
+    excess = len(backups) - BACKUP_RETENTION_COUNT
+    if excess <= 0:
+        return
+    for stale in backups[:excess]:
+        stale.unlink(missing_ok=True)
