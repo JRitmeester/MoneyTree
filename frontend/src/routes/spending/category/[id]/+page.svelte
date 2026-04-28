@@ -11,10 +11,10 @@
 	const urlFrom = page.url.searchParams.get('date_from');
 	const urlTo = page.url.searchParams.get('date_to');
 	const initialRange = (urlFrom && urlTo) ? { dateFrom: urlFrom, dateTo: urlTo } : get(dateRange);
-	let data: CategoryDetail | null = $state(null);
+	let data = $state<CategoryDetail | null>(null);
 	let budgetPeriods: BudgetSummary[] = $state([]);
 	let loading = $state(true);
-	let error: string | null = $state(null);
+	let error = $state<string | null>(null);
 	let dateFrom = $state(initialRange.dateFrom);
 	let dateTo = $state(initialRange.dateTo);
 

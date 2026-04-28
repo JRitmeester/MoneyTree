@@ -22,12 +22,12 @@
 	});
 
 	// Upload
-	let file: File | null = $state(null);
-	let previewUrl: string | null = $state(null);
+	let file = $state<File | null>(null);
+	let previewUrl = $state<string | null>(null);
 	let isPdf = $derived(file?.type === 'application/pdf');
 
 	// OCR result
-	let receiptId: number | null = $state(null);
+	let receiptId = $state<number | null>(null);
 	let receiptDate = $state('');
 	let totalAmount = $state('');
 	let merchantName = $state('');

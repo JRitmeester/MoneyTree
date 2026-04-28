@@ -8,12 +8,12 @@
 	} from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 
-	let tx: TransactionDetail | null = $state(null);
+	let tx = $state<TransactionDetail | null>(null);
 	let loading = $state(true);
-	let error: string | null = $state(null);
+	let error = $state<string | null>(null);
 
 	// Category selection
-	let selectedCategory: number | null = $state(null);
+	let selectedCategory = $state<number | null>(null);
 	let savingCategory = $state(false);
 	let splitting = $state(false);
 

@@ -19,8 +19,8 @@
 	let loading = $state(true);
 	let error: string | null = $state(null);
 
-	let budgetData: Budget | null = $state(null);
-	let bvaData: BudgetVsActualSummary | null = $state(null);
+	let budgetData = $state<Budget | null>(null);
+	let bvaData = $state<BudgetVsActualSummary | null>(null);
 	let categories: Category[] = $state([]);
 
 	// Wizard state

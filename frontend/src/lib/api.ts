@@ -600,7 +600,11 @@ export async function getBudget(budgetId: number): Promise<Budget> {
 	return request(`/api/budgets/${budgetId}`);
 }
 
-export async function createBudget(data: { start_date: string; end_date: string }): Promise<Budget> {
+export async function createBudget(data: {
+	start_date: string;
+	end_date: string;
+	lines?: { category_id: number; amount: number }[];
+}): Promise<Budget> {
 	return request('/api/budgets', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
