@@ -74,7 +74,7 @@
 		<h2>Export</h2>
 		<p>Download all categories, budgets, mappings, and transactions as a single JSON file.</p>
 		<label>
-			Only transactions created on or after:
+			Only transactions added or edited on or after:
 			<input type="date" bind:value={since} />
 		</label>
 		<button onclick={handleExport} disabled={exporting}>

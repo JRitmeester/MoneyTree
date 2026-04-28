@@ -66,7 +66,9 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
     tx_query = select(Transaction)
     if since is not None:
         cutoff = datetime.combine(since, datetime.min.time(), tzinfo=timezone.utc)
-        tx_query = tx_query.where(Transaction.created_at >= cutoff)
+        # Filter by updated_at so transactions edited (recategorized) during the
+        # outage are included even if they were originally imported earlier.
+        tx_query = tx_query.where(Transaction.updated_at >= cutoff)
     txs = db.execute(tx_query).scalars().all()
     tx_by_id = {t.id: t for t in txs}
     export_txs = [

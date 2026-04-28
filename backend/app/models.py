@@ -40,6 +40,9 @@ class Transaction(Base):
     merchant_name: Mapped[str | None] = mapped_column(String(255))
     import_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
     category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
 
     receipt: Mapped["Receipt | None"] = relationship(back_populates="transaction")

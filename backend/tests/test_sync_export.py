@@ -43,8 +43,10 @@ def test_build_export_filters_transactions_by_since(db):
     cat = make_category(db, name="Groceries")
     old_tx = make_transaction(db, category_id=cat.id)
     old_tx.created_at = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    old_tx.updated_at = datetime(2026, 3, 1, tzinfo=timezone.utc)
     new_tx = make_transaction(db, category_id=cat.id)
     new_tx.created_at = datetime(2026, 4, 15, tzinfo=timezone.utc)
+    new_tx.updated_at = datetime(2026, 4, 15, tzinfo=timezone.utc)
     db.commit()
 
     export = build_export(db, since=date(2026, 4, 1))
@@ -52,3 +54,18 @@ def test_build_export_filters_transactions_by_since(db):
     hashes = {t.import_hash for t in export.transactions}
     assert new_tx.import_hash in hashes
     assert old_tx.import_hash not in hashes
+
+
+def test_build_export_includes_edited_transaction_via_updated_at(db):
+    """A transaction created before the cutoff but edited during the outage
+    should be included in the export when filtering by `since`."""
+    cat = make_category(db, name="Groceries")
+    edited_tx = make_transaction(db, category_id=cat.id)
+    # Created before outage, edited during outage
+    edited_tx.created_at = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    edited_tx.updated_at = datetime(2026, 4, 15, tzinfo=timezone.utc)
+    db.commit()
+
+    export = build_export(db, since=date(2026, 4, 1))
+    hashes = {t.import_hash for t in export.transactions}
+    assert edited_tx.import_hash in hashes
