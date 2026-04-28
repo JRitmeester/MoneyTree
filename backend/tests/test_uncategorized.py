@@ -79,7 +79,7 @@ class TestCategorizeSelected:
         assert tx1.category_id == existing_cat.id  # unchanged
         assert tx2.category_id == new_cat.id
 
-    def test_skips_income_transactions(self, client, db: Session):
+    def test_categorizes_both_expenses_and_income(self, client, db: Session):
         cat = make_category(db, name="Food")
         expense = make_transaction(db, bedrag=-25.0)
         income = make_transaction(db, bedrag=100.0)
@@ -90,12 +90,12 @@ class TestCategorizeSelected:
             json={"transaction_ids": [expense.id, income.id], "category_id": cat.id},
         )
         assert response.status_code == 200
-        assert response.json() == {"updated": 1}
+        assert response.json() == {"updated": 2}
 
         db.refresh(expense)
         db.refresh(income)
         assert expense.category_id == cat.id
-        assert income.category_id is None
+        assert income.category_id == cat.id
 
     def test_skips_transactions_with_receipt(self, client, db: Session):
         cat = make_category(db, name="Food")
@@ -183,15 +183,15 @@ class TestListUncategorized:
         assert len(data) == 1
         assert data[0]["count"] == 1
 
-    def test_excludes_income_transactions(self, client, db: Session):
+    def test_includes_both_income_and_expense_transactions(self, client, db: Session):
         make_transaction(db, bedrag=100.0, categorie="Salaris")
         make_transaction(db, bedrag=-10.0, categorie="Boodschappen")
         db.commit()
 
         response = client.get("/api/uncategorized")
         data = response.json()
-        assert len(data) == 1
-        assert data[0]["bank_category"] == "Boodschappen"
+        bank_categories = {row["bank_category"] for row in data}
+        assert bank_categories == {"Salaris", "Boodschappen"}
 
     def test_sorted_by_total_descending(self, client, db: Session):
         make_transaction(db, categorie="Cheap", bedrag=-5.0)
