@@ -1,6 +1,6 @@
 services:
   moneytree:
-    build: .
+    image: moneytree:latest
     volumes:
       - ./data:/app/data
       - ./backend/uploads:/app/backend/uploads

@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
-RUN useradd -r -s /bin/false appuser
+RUN useradd -r -s /bin/false -u 502 appuser
 
 COPY backend/ ./backend/
 COPY --from=frontend-build /app/frontend/build ./frontend/build
