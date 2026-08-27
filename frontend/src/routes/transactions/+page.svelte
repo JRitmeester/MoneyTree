@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { page as pageStore } from '$app/state';
-	import { getTransactions, getBudgets, setTransactionFlags, formatEuro, formatDate, type Transaction, type BudgetSummary } from '$lib/api';
+	import {
+		getTransactions, getBudgets, setTransactionFlags, bulkSetFlags,
+		getIncidentalLabels, createIncidentalLabel,
+		formatEuro, formatDate,
+		type Transaction, type BudgetSummary, type IncidentalLabelSummary, type TransactionFlags
+	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
@@ -27,8 +32,21 @@
 
 	let searchTimeout: ReturnType<typeof setTimeout>;
 
+	// Bulk selection
+	let selected: Record<number, boolean> = $state({});
+	let labels: IncidentalLabelSummary[] = $state([]);
+	let labelChoice: number | 'none' | 'new' = $state('none');
+	let newLabelName = $state('');
+	let bulkBusy = $state(false);
+
+	let selectedIds = $derived(Object.entries(selected).filter(([, v]) => v).map(([k]) => Number(k)));
+	let allOnPageSelected = $derived(
+		transactions.length > 0 && transactions.every((tx) => selected[tx.id])
+	);
+
 	async function load() {
 		loading = true;
+		selected = {};
 		try {
 			const res = await getTransactions({
 				page,
@@ -88,6 +106,7 @@
 	$effect(() => {
 		load();
 		getBudgets().then(bp => { budgetPeriods = bp; });
+		getIncidentalLabels().then(ls => { labels = ls; }).catch(() => { labels = []; });
 	});
 
 	let totalPages = $derived(Math.ceil(total / perPage));
@@ -100,10 +119,90 @@
 	async function toggleIncidental(tx: Transaction) {
 		try {
 			const updated = await setTransactionFlags(tx.id, { is_incidental: !tx.is_incidental });
-			transactions = transactions.map((t) => (t.id === tx.id ? { ...t, is_incidental: updated.is_incidental } : t));
+			transactions = transactions.map((t) =>
+				t.id === tx.id
+					? { ...t, is_incidental: updated.is_incidental, incidental_label_id: updated.incidental_label_id }
+					: t
+			);
 		} catch (e: any) {
 			error = e.message;
 		}
+	}
+
+	function toggleSelect(tx: Transaction) {
+		selected = { ...selected, [tx.id]: !selected[tx.id] };
+	}
+
+	function toggleSelectAll() {
+		if (allOnPageSelected) {
+			selected = {};
+		} else {
+			const next: Record<number, boolean> = {};
+			for (const tx of transactions) next[tx.id] = true;
+			selected = next;
+		}
+	}
+
+	async function resolveLabelId(): Promise<number | null> {
+		if (labelChoice === 'none') return null;
+		if (labelChoice === 'new') {
+			const name = newLabelName.trim();
+			if (!name) return null;
+			const created = await createIncidentalLabel(name);
+			labels = [...labels, { ...created, total: 0, count: 0, date_from: null, date_to: null }]
+				.sort((a, b) => a.name.localeCompare(b.name));
+			labelChoice = created.id;
+			newLabelName = '';
+			return created.id;
+		}
+		return labelChoice;
+	}
+
+	async function applyBulk(kind: 'incidental' | 'not-incidental' | 'transfer' | 'not-transfer') {
+		if (selectedIds.length === 0 || bulkBusy) return;
+		bulkBusy = true;
+		error = null;
+		try {
+			const flags: TransactionFlags = {};
+			if (kind === 'incidental') {
+				flags.is_incidental = true;
+				const labelId = await resolveLabelId();
+				if (labelId != null) flags.incidental_label_id = labelId;
+			} else if (kind === 'not-incidental') {
+				flags.is_incidental = false;
+			} else {
+				flags.is_internal_transfer = kind === 'transfer';
+			}
+
+			await bulkSetFlags(selectedIds, flags);
+
+			const ids = new Set(selectedIds);
+			transactions = transactions.map((t) => {
+				if (!ids.has(t.id)) return t;
+				const next = { ...t };
+				if (flags.is_incidental === true) {
+					next.is_incidental = true;
+					if (flags.incidental_label_id != null) next.incidental_label_id = flags.incidental_label_id;
+				} else if (flags.is_incidental === false) {
+					next.is_incidental = false;
+					next.incidental_label_id = null;
+				}
+				if (flags.is_internal_transfer !== undefined) {
+					next.is_internal_transfer = flags.is_internal_transfer;
+				}
+				return next;
+			});
+			selected = {};
+		} catch (e: any) {
+			error = e.message;
+		} finally {
+			bulkBusy = false;
+		}
+	}
+
+	function labelName(id: number | null): string | null {
+		if (id == null) return null;
+		return labels.find((l) => l.id === id)?.name ?? null;
 	}
 </script>
 
@@ -127,6 +226,29 @@
 	<div class="error">{error}</div>
 {/if}
 
+{#if selectedIds.length > 0}
+	<div class="bulk-bar">
+		<span class="bulk-count">{selectedIds.length} selected</span>
+		<div class="bulk-label">
+			<select bind:value={labelChoice} aria-label="Incidental label">
+				<option value="none">No label</option>
+				{#each labels as label (label.id)}
+					<option value={label.id}>{label.name}</option>
+				{/each}
+				<option value="new">+ New label...</option>
+			</select>
+			{#if labelChoice === 'new'}
+				<input placeholder="Label name" bind:value={newLabelName} />
+			{/if}
+		</div>
+		<button class="bulk-btn" disabled={bulkBusy} onclick={() => applyBulk('incidental')}>Mark incidental</button>
+		<button class="bulk-btn" disabled={bulkBusy} onclick={() => applyBulk('not-incidental')}>Unmark incidental</button>
+		<button class="bulk-btn" disabled={bulkBusy} onclick={() => applyBulk('transfer')}>Mark as transfer</button>
+		<button class="bulk-btn" disabled={bulkBusy} onclick={() => applyBulk('not-transfer')}>Unmark transfer</button>
+		<button class="bulk-btn clear" disabled={bulkBusy} onclick={() => { selected = {}; }}>Clear</button>
+	</div>
+{/if}
+
 {#if loading}
 	<div class="loading">Loading...</div>
 {:else}
@@ -134,6 +256,14 @@
 		<table>
 			<thead>
 				<tr>
+					<th class="select-col">
+						<input
+							type="checkbox"
+							checked={allOnPageSelected}
+							onchange={toggleSelectAll}
+							aria-label="Select all transactions on this page"
+						/>
+					</th>
 					<th>Date</th>
 					<th>Merchant</th>
 					<th>Category</th>
@@ -144,6 +274,14 @@
 			<tbody>
 				{#each transactions as tx, i}
 					<tr class:date-divider={isNewDate(i)} onclick={() => window.location.href = `/transactions/${tx.id}`}>
+						<td class="select-col" onclick={(e) => e.stopPropagation()}>
+							<input
+								type="checkbox"
+								checked={!!selected[tx.id]}
+								onchange={() => toggleSelect(tx)}
+								aria-label="Select transaction"
+							/>
+						</td>
 						<td class="date">{formatDate(tx.datum)}</td>
 						<td class="merchant">
 							{tx.merchant_name || tx.naam || tx.omschrijving.substring(0, 40)}
@@ -154,12 +292,15 @@
 								<span class="badge transfer">transfer</span>
 							{/if}
 							{#if tx.is_incidental}
-								<span class="badge incidental">incidental</span>
+								<span class="badge incidental">
+									{labelName(tx.incidental_label_id) ?? 'incidental'}
+								</span>
 							{/if}
 							{#if tx.bedrag < 0 && !tx.is_internal_transfer}
 								<button
 									class="flag-toggle"
 									title={tx.is_incidental ? 'Unmark as incidental (one-off)' : 'Mark as incidental (one-off)'}
+									aria-label={tx.is_incidental ? 'Unmark as incidental' : 'Mark as incidental'}
 									onclick={(e) => { e.stopPropagation(); toggleIncidental(tx); }}
 								>{tx.is_incidental ? '★' : '☆'}</button>
 							{/if}
@@ -227,6 +368,61 @@
 		color: #dc2626;
 		font-size: 0.85rem;
 		margin-bottom: 0.75rem;
+	}
+	.bulk-bar {
+		position: sticky;
+		top: 0;
+		z-index: 5;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		background: #1a1a1a;
+		color: white;
+		border-radius: 8px;
+		padding: 0.5rem 0.9rem;
+		margin-bottom: 0.75rem;
+	}
+	.bulk-count {
+		font-size: 0.85rem;
+		font-weight: 600;
+		margin-right: 0.25rem;
+	}
+	.bulk-label {
+		display: flex;
+		gap: 0.4rem;
+		align-items: center;
+	}
+	.bulk-label select, .bulk-label input {
+		padding: 0.3rem 0.5rem;
+		border-radius: 6px;
+		border: 1px solid #444;
+		font-size: 0.8rem;
+	}
+	.bulk-btn {
+		padding: 0.35rem 0.7rem;
+		background: white;
+		color: #1a1a1a;
+		border: none;
+		border-radius: 6px;
+		font-size: 0.8rem;
+		cursor: pointer;
+	}
+	.bulk-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.bulk-btn.clear {
+		background: transparent;
+		color: #ccc;
+		border: 1px solid #555;
+	}
+	.select-col {
+		width: 36px;
+		text-align: center;
+	}
+	.select-col input {
+		cursor: pointer;
 	}
 	.table-wrap {
 		overflow-x: auto;

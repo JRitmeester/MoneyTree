@@ -2,9 +2,10 @@
 	import { page } from '$app/state';
 	import {
 		getTransaction, getTransactions, updateTransaction, setTransactionFlags,
+		getIncidentalLabels, createIncidentalLabel,
 		linkOffset, unlinkOffset, splitTransactionReceipt,
 		formatEuro, formatDate,
-		type TransactionDetail, type Transaction
+		type IncidentalLabelSummary, type TransactionDetail, type Transaction
 	} from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 
@@ -53,6 +54,33 @@
 			tx = { ...tx, ...(await setTransactionFlags(tx.id, { is_incidental: !tx.is_incidental })) };
 		} catch (e: any) {
 			error = e.message;
+		}
+	}
+
+	let labels: IncidentalLabelSummary[] = $state([]);
+
+	$effect(() => {
+		getIncidentalLabels().then((ls) => { labels = ls; }).catch(() => { labels = []; });
+	});
+
+	async function handleLabelChange(e: Event) {
+		if (!tx) return;
+		const raw = (e.target as HTMLSelectElement).value;
+		try {
+			if (raw === 'new') {
+				const name = prompt('Name for the new label:')?.trim();
+				if (!name) return;
+				const created = await createIncidentalLabel(name);
+				labels = [...labels, { ...created, total: 0, count: 0, date_from: null, date_to: null }]
+					.sort((a, b) => a.name.localeCompare(b.name));
+				tx = { ...tx, ...(await setTransactionFlags(tx.id, { incidental_label_id: created.id })) };
+			} else if (raw === '') {
+				tx = { ...tx, ...(await setTransactionFlags(tx.id, { incidental_label_id: null })) };
+			} else {
+				tx = { ...tx, ...(await setTransactionFlags(tx.id, { incidental_label_id: Number(raw) })) };
+			}
+		} catch (err: any) {
+			error = err.message;
 		}
 	}
 
@@ -205,6 +233,18 @@
 					<input type="checkbox" checked={tx.is_incidental} onchange={handleToggleIncidental} />
 					Incidental (one-off, excluded from structural savings capacity)
 				</label>
+				{#if tx.is_incidental}
+					<label class="label-picker">
+						Label
+						<select value={tx.incidental_label_id == null ? '' : String(tx.incidental_label_id)} onchange={handleLabelChange}>
+							<option value="">No label</option>
+							{#each labels as label (label.id)}
+								<option value={String(label.id)}>{label.name}</option>
+							{/each}
+							<option value="new">+ New label...</option>
+						</select>
+					</label>
+				{/if}
 			{/if}
 			<label>
 				<input type="checkbox" checked={tx.is_internal_transfer} onchange={handleToggleInternalTransfer} />
@@ -350,6 +390,20 @@
 	.saving-indicator { font-size: 0.8rem; color: #666; }
 	.details {
 		margin-top: 1.25rem;
+	}
+	.label-picker {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.85rem;
+		color: #666;
+		margin-left: 1.6rem;
+	}
+	.label-picker select {
+		padding: 0.3rem 0.5rem;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		font-size: 0.85rem;
 	}
 	.flags {
 		display: flex;

@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { getSavingsCapacity, formatEuro, type SavingsCapacitySummary } from '$lib/api';
+	import { getIncidentalLabels, getSavingsCapacity, formatEuro, type IncidentalLabelSummary, type SavingsCapacitySummary } from '$lib/api';
 
 	let data = $state<SavingsCapacitySummary | null>(null);
+	let labelSummaries: IncidentalLabelSummary[] = $state([]);
 	let loading = $state(true);
 	let error = $state('');
 
@@ -12,6 +13,9 @@
 			.then((d) => { data = d; })
 			.catch((e) => { error = e instanceof Error ? e.message : 'Failed to load savings capacity'; })
 			.finally(() => { loading = false; });
+		getIncidentalLabels()
+			.then((ls) => { labelSummaries = ls.filter((l) => l.count > 0); })
+			.catch(() => { labelSummaries = []; });
 	});
 
 	let headline = $derived(data?.trailing_6_structural ?? data?.trailing_3_structural ?? null);
@@ -67,6 +71,18 @@
 				({formatEuro(data.trailing_3_raw ?? 0)} including incidentals)
 			</p>
 		{/if}
+		{#if labelSummaries.length > 0}
+			<div class="labels">
+				<h3>Incidental by label</h3>
+				{#each labelSummaries as label (label.id)}
+					<div class="label-row">
+						<span class="label-name">{label.name}</span>
+						<span class="label-range">{label.date_from} to {label.date_to}</span>
+						<span class="label-total">{formatEuro(label.total)}</span>
+					</div>
+				{/each}
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -89,4 +105,10 @@
 	.expense-text { color: #dc2626; }
 	.incidental-text { color: #a16207; }
 	.footnote { font-size: 0.7rem; color: #999; margin: 0.4rem 0 0; }
+	.labels { margin-top: 1rem; border-top: 1px solid #f0f0f0; padding-top: 0.75rem; }
+	h3 { font-size: 0.85rem; margin: 0 0 0.5rem; color: #666; }
+	.label-row { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.85rem; padding: 0.2rem 0; }
+	.label-name { font-weight: 500; }
+	.label-range { color: #999; font-size: 0.75rem; flex: 1; text-align: right; }
+	.label-total { font-weight: 600; color: #a16207; }
 </style>

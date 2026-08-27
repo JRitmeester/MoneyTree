@@ -35,6 +35,7 @@ export interface Transaction {
 	has_receipt: boolean;
 	is_internal_transfer: boolean;
 	is_incidental: boolean;
+	incidental_label_id: number | null;
 	created_at: string;
 }
 
@@ -907,9 +908,15 @@ export async function getSavingsCapacity(months = 6): Promise<SavingsCapacitySum
 	return request(`/api/dashboard/savings-capacity?months=${months}`);
 }
 
+export interface TransactionFlags {
+	is_incidental?: boolean;
+	is_internal_transfer?: boolean;
+	incidental_label_id?: number | null;
+}
+
 export async function setTransactionFlags(
 	id: number,
-	flags: { is_incidental?: boolean; is_internal_transfer?: boolean }
+	flags: TransactionFlags
 ): Promise<Transaction> {
 	return request(`/api/transactions/${id}`, {
 		method: 'PATCH',
@@ -918,13 +925,51 @@ export async function setTransactionFlags(
 	});
 }
 
-export async function bulkSetIncidental(
+export async function bulkSetFlags(
 	transactionIds: number[],
-	isIncidental: boolean
+	flags: TransactionFlags
 ): Promise<{ updated: number }> {
-	return request('/api/transactions/bulk-incidental', {
+	return request('/api/transactions/bulk-flags', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ transaction_ids: transactionIds, is_incidental: isIncidental })
+		body: JSON.stringify({ transaction_ids: transactionIds, ...flags })
 	});
+}
+
+// --- Incidental labels ---
+
+export interface IncidentalLabel {
+	id: number;
+	name: string;
+}
+
+export interface IncidentalLabelSummary extends IncidentalLabel {
+	total: number;
+	count: number;
+	date_from: string | null;
+	date_to: string | null;
+}
+
+export async function getIncidentalLabels(): Promise<IncidentalLabelSummary[]> {
+	return request('/api/incidental-labels');
+}
+
+export async function createIncidentalLabel(name: string): Promise<IncidentalLabel> {
+	return request('/api/incidental-labels', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ name })
+	});
+}
+
+export async function renameIncidentalLabel(id: number, name: string): Promise<IncidentalLabel> {
+	return request(`/api/incidental-labels/${id}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ name })
+	});
+}
+
+export async function deleteIncidentalLabel(id: number): Promise<void> {
+	await request(`/api/incidental-labels/${id}`, { method: 'DELETE' });
 }
