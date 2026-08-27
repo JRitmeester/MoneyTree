@@ -12,6 +12,7 @@ from ..models import (
     Category,
     CategoryMapping,
     LineItem,
+    OwnAccount,
     PasskeyCredential,
     Receipt,
     Transaction,
@@ -187,6 +188,7 @@ def delete_everything(db: Session = Depends(get_db)):
     from sqlalchemy import update
     db.execute(update(Category).values(parent_id=None))
     db.execute(delete(Category))
+    db.execute(delete(OwnAccount))
 
     db.commit()
     return {"ok": True}

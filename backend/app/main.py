@@ -23,6 +23,7 @@ from .routers import (
     dashboard,
     debug,
     line_items,
+    own_accounts,
     receipts,
     settings,
     sync,
@@ -96,6 +97,7 @@ app.include_router(category_mappings.router)
 app.include_router(uncategorized.router)
 app.include_router(settings.router)
 app.include_router(sync.router)
+app.include_router(own_accounts.router)
 
 if os.getenv("ENABLE_DEBUG_ROUTES", "").lower() == "true":
     app.include_router(debug.router)

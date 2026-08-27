@@ -1,7 +1,7 @@
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 # Alias to avoid Pydantic v2 field-name shadowing (field named "date" with default
 # None causes Pydantic to resolve the type annotation "date" as None).
@@ -389,3 +389,34 @@ class BudgetVsActualSummary(BaseModel):
     expense_lines: list[BudgetVsActualLine]
     unmapped_expenses: float
     unmapped_income: float
+
+
+# --- Own Accounts ---
+
+
+class OwnAccountCreate(BaseModel):
+    iban: str = Field(min_length=8, max_length=34)
+    name: str = Field(min_length=1, max_length=100)
+    account_type: Literal["checking", "savings"]
+    starting_balance: Optional[float] = None
+    starting_balance_date: Optional[date] = None
+
+
+class OwnAccountUpdate(BaseModel):
+    iban: Optional[str] = Field(default=None, min_length=8, max_length=34)
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    account_type: Optional[Literal["checking", "savings"]] = None
+    starting_balance: Optional[float] = None
+    starting_balance_date: Optional[date] = None
+
+
+class OwnAccountOut(BaseModel):
+    id: int
+    iban: str
+    name: str
+    account_type: str
+    starting_balance: Optional[float]
+    starting_balance_date: Optional[date]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
