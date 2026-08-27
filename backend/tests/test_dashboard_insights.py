@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.models import OwnAccount
 from app.services.transfers import backfill_internal_transfers
 
-from .conftest import make_transaction
+from .conftest import make_category, make_transaction
 
 SAVINGS_IBAN = "NL00ASNB0000000002"
 
@@ -38,10 +38,30 @@ class TestSummaryExcludesTransfers:
 class TestByCategoryExcludesTransfers:
     def test_transfer_not_in_category_spending(self, client, db: Session):
         setup_savings(db)
-        make_transaction(db, bedrag=-500.0, tegenrekening=SAVINGS_IBAN, categorie="Overboeking")
+        cat = make_category(db, name="Sparen")
+        make_transaction(
+            db,
+            bedrag=-500.0,
+            tegenrekening=SAVINGS_IBAN,
+            categorie="Overboeking",
+            category_id=cat.id,
+        )
         backfill_internal_transfers(db)
         db.commit()
+
+        # Transfer is flagged and categorized: it must not appear.
         assert client.get("/api/dashboard/by-category").json() == []
+
+        # A real, non-transfer categorized expense in the same category
+        # DOES appear, proving the filter discriminates on the flag
+        # rather than accidentally hiding the whole category.
+        make_transaction(db, bedrag=-50.0, categorie="Boodschappen", category_id=cat.id)
+        db.commit()
+
+        result = client.get("/api/dashboard/by-category").json()
+        assert len(result) == 1
+        assert result[0]["category_id"] == cat.id
+        assert result[0]["total"] == 50.0
 
 
 class TestMonthlyTrendExcludesTransfers:
