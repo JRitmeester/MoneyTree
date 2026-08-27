@@ -843,7 +843,14 @@ def _current_month_projection(
 
     Structural (excl. incidental) to stay consistent with the existing
     month bucketing; transfers are already excluded upstream. None when the
-    current month has no data yet."""
+    current month has no data yet.
+
+    Known caveat: if an actual payment lands outside DATE_MATCH_WINDOW_DAYS
+    of its expected date, it won't be matched to an occurrence yet, so
+    next_expected_date still reports the un-advanced date within this
+    month; that payment's amount is then subtracted here even though it may
+    already be reflected in the actuals above, double-subtracting until the
+    next rescan/match. Accepted as a rare, self-correcting edge case."""
     today = date.today()
     month_key = today.strftime("%Y-%m")
     bucket = buckets.get(month_key)

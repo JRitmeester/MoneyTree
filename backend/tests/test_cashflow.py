@@ -109,3 +109,23 @@ class TestCashflowPeriods:
         body = resp.json()
         assert len(body) == 3
         assert body[0]["start_date"] == salary_dates[-1].isoformat()
+
+    def test_tie_break_on_equal_occurrence_count_picks_latest_occurrence(
+        self, client, db: Session
+    ):
+        today = date.today()
+        # Two confirmed income patterns, both with 2 occurrences: the
+        # tie-break must pick the one with the more recent latest occurrence,
+        # not whichever was inserted (and thus assigned an id) first.
+        older_latest = _make_confirmed_income(
+            db, [today - timedelta(days=40), today - timedelta(days=10)], name="Older"
+        )
+        newer_latest = _make_confirmed_income(
+            db, [today - timedelta(days=35), today - timedelta(days=5)], name="Newer"
+        )
+        assert older_latest.id < newer_latest.id  # inserted first, so id can't be the deciding factor
+
+        resp = client.get("/api/cashflow/periods")
+        body = resp.json()
+        assert len(body) == 2
+        assert body[0]["start_date"] == (today - timedelta(days=5)).isoformat()

@@ -39,34 +39,42 @@ def _format_period_date(d: date) -> str:
     return f"{d.day} {d.strftime('%b')}"
 
 
+def _find_salary_payment_id(db: Session) -> int | None:
+    """The confirmed income recurring payment most likely to be the salary:
+    most occurrences wins; ties broken by the latest occurrence date, then
+    by lowest id, so the pick is deterministic."""
+    row = db.execute(
+        select(
+            RecurringPaymentOccurrence.recurring_payment_id,
+            func.count(RecurringPaymentOccurrence.id).label("occurrence_count"),
+            func.max(RecurringPaymentOccurrence.date).label("latest_date"),
+        )
+        .join(RecurringPayment, RecurringPayment.id == RecurringPaymentOccurrence.recurring_payment_id)
+        .where(RecurringPayment.status == "confirmed", RecurringPayment.is_income.is_(True))
+        .group_by(RecurringPaymentOccurrence.recurring_payment_id)
+        .order_by(
+            func.count(RecurringPaymentOccurrence.id).desc(),
+            func.max(RecurringPaymentOccurrence.date).desc(),
+            RecurringPaymentOccurrence.recurring_payment_id.asc(),
+        )
+        .limit(1)
+    ).first()
+    return row[0] if row else None
+
+
 @router.get("/periods", response_model=list[CashflowPeriodOut])
 def get_periods(count: int = Query(6, ge=1, le=24), db: Session = Depends(get_db)):
     """Salary-anchored pay periods, newest first.
 
     The salary is the confirmed income recurring payment with the most
-    occurrences. Each period runs from one salary occurrence date
-    (inclusive) to the day before the next; the newest period is open,
-    running from its occurrence date through today. Returns [] when there
-    is no confirmed income recurring payment."""
-    salary_row = db.execute(
-        select(
-            RecurringPaymentOccurrence.recurring_payment_id,
-            func.count(RecurringPaymentOccurrence.id).label("occurrence_count"),
-        )
-        .join(
-            RecurringPayment,
-            RecurringPayment.id == RecurringPaymentOccurrence.recurring_payment_id,
-        )
-        .where(RecurringPayment.status == "confirmed", RecurringPayment.is_income.is_(True))
-        .group_by(RecurringPaymentOccurrence.recurring_payment_id)
-        .order_by(func.count(RecurringPaymentOccurrence.id).desc())
-        .limit(1)
-    ).first()
-
-    if salary_row is None:
+    occurrences (see `_find_salary_payment_id`). Each period runs from one
+    salary occurrence date (inclusive) to the day before the next; the
+    newest period is open, running from its occurrence date through today.
+    Returns [] when there is no confirmed income recurring payment."""
+    payment_id = _find_salary_payment_id(db)
+    if payment_id is None:
         return []
 
-    payment_id = salary_row[0]
     occurrence_dates = db.execute(
         select(RecurringPaymentOccurrence.date)
         .where(RecurringPaymentOccurrence.recurring_payment_id == payment_id)
@@ -89,21 +97,6 @@ def get_periods(count: int = Query(6, ge=1, le=24), db: Session = Depends(get_db
 
     periods.reverse()
     return periods[:count]
-
-
-def _find_salary_payment_id(db: Session) -> int | None:
-    row = db.execute(
-        select(
-            RecurringPaymentOccurrence.recurring_payment_id,
-            func.count(RecurringPaymentOccurrence.id).label("occurrence_count"),
-        )
-        .join(RecurringPayment, RecurringPayment.id == RecurringPaymentOccurrence.recurring_payment_id)
-        .where(RecurringPayment.status == "confirmed", RecurringPayment.is_income.is_(True))
-        .group_by(RecurringPaymentOccurrence.recurring_payment_id)
-        .order_by(func.count(RecurringPaymentOccurrence.id).desc())
-        .limit(1)
-    ).first()
-    return row[0] if row else None
 
 
 @router.get("/calendar", response_model=CashflowCalendarOut)

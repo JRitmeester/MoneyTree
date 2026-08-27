@@ -5,6 +5,7 @@
 		type RecurringPayment, type RecurringNotice
 	} from '$lib/api';
 	import { extractErrorDetail } from '$lib/errors';
+	import { invalidatePayPeriods } from '$lib/stores/dateRange';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 
 	let suggested: RecurringPayment[] = $state([]);
@@ -119,6 +120,7 @@
 		try {
 			await confirmRecurring(paymentId, { name: confirmName, category_id: confirmCategoryId });
 			confirmingId = null;
+			invalidatePayPeriods();
 			await load();
 		} catch (e) {
 			error = extractErrorDetail(e);
@@ -147,6 +149,7 @@
 		error = null;
 		try {
 			await dismissRecurring(payment.id);
+			invalidatePayPeriods();
 			await load();
 		} catch (e) {
 			error = extractErrorDetail(e);
@@ -158,6 +161,7 @@
 		try {
 			await updateRecurring(paymentId, { status: 'confirmed' });
 			dismissedLoaded = false;
+			invalidatePayPeriods();
 			await load();
 		} catch (e) {
 			error = extractErrorDetail(e);

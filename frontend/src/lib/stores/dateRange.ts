@@ -54,6 +54,9 @@ export const dateRange = createDateRangeStore();
 
 // Pay periods are fetched once per app session and memoized: several pages
 // share DateRangeFilter, and the periods rarely change within a session.
+// Invalidated by invalidatePayPeriods(), called wherever the salary pattern's
+// confirmed status or occurrences could change (recurring confirm/re-confirm/
+// stop-tracking on /recurring).
 let payPeriodsPromise: Promise<CashflowPeriod[]> | null = null;
 
 export function getPayPeriods(): Promise<CashflowPeriod[]> {
@@ -65,4 +68,8 @@ export function getPayPeriods(): Promise<CashflowPeriod[]> {
 		});
 	}
 	return payPeriodsPromise;
+}
+
+export function invalidatePayPeriods(): void {
+	payPeriodsPromise = null;
 }

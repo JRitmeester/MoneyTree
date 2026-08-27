@@ -234,26 +234,33 @@ class TestSavingsCapacity:
         assert body["current_month_projection"] is None
 
     def test_current_month_projection_subtracts_upcoming_confirmed_expenses(
-        self, client, db: Session
+        self, client, db: Session, monkeypatch
     ):
-        from calendar import monthrange
-
         from app.models import RecurringPayment
 
-        today = date.today()
-        month_end = date(today.year, today.month, monthrange(today.year, today.month)[1])
+        # Freeze "today" mid-month so due-before-end vs. due-next-month is
+        # never vacuous, regardless of the real calendar date the suite runs
+        # on (e.g. the last day of a month).
+        today = date(2025, 6, 15)
+
+        class _FixedDate(date):
+            @classmethod
+            def today(cls):
+                return today
+
+        monkeypatch.setattr("app.routers.dashboard.date", _FixedDate)
+
         # Actuals so far this month.
         make_transaction(db, bedrag=3000.0, datum=today.replace(day=1))
         make_transaction(db, bedrag=-500.0, datum=today.replace(day=1))
 
         # Confirmed expense due before month-end (after today): reduces the projection.
-        due_day = min(today.day + 1, month_end.day)
         due_before_end = RecurringPayment(
             merchant_pattern="Rent",
             name="Rent",
             expected_amount=-800.0,
             cadence="monthly",
-            expected_day=due_day,
+            expected_day=today.day + 1,
             anchor_date=today.replace(day=1) - timedelta(days=1),
             status="confirmed",
             is_income=False,
