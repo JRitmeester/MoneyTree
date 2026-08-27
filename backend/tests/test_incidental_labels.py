@@ -129,6 +129,27 @@ class TestBulkFlags:
         })
         assert resp.status_code == 422
 
+    def test_bulk_explicit_null_label_clears_label_keeps_incidental(self, client, db: Session):
+        label = make_label(db)
+        a = make_transaction(db, bedrag=-100.0)
+        b = make_transaction(db, bedrag=-200.0)
+        for tx in (a, b):
+            tx.is_incidental = True
+            tx.incidental_label_id = label.id
+        db.commit()
+        resp = client.post("/api/transactions/bulk-flags", json={
+            "transaction_ids": [a.id, b.id],
+            "is_incidental": True,
+            "incidental_label_id": None,
+        })
+        assert resp.status_code == 200
+        db.refresh(a)
+        db.refresh(b)
+        assert a.is_incidental is True
+        assert a.incidental_label_id is None
+        assert b.is_incidental is True
+        assert b.incidental_label_id is None
+
     def test_bulk_rejects_unknown_label(self, client, db: Session):
         tx = make_transaction(db, bedrag=-100.0)
         db.commit()

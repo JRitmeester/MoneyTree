@@ -1,5 +1,9 @@
 <script lang="ts">
-	import { getUncategorized, categorizeSelected, bulkCategorize, updateTransaction, formatEuro, formatDate, type UncategorizedGroup } from '$lib/api';
+	import {
+		getUncategorized, categorizeSelected, bulkCategorize, updateTransaction,
+		getCategoryMappings, deleteCategoryMapping,
+		formatEuro, formatDate, type UncategorizedGroup
+	} from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import UndoBar from '$lib/components/UndoBar.svelte';
@@ -10,7 +14,18 @@
 	let loading = $state(true);
 	let applying = $state(false);
 	let error: string | null = $state(null);
-	let undoInfo: { id: number; count: number; previous: Map<number, number | null> } | null = $state(null);
+	interface UndoInfo {
+		id: number;
+		count: number;
+		previous: Map<number, number | null>;
+		// Set only when the forward action was a bulkCategorize with save_mapping=true;
+		// used to know whether undo must also delete the mapping it created.
+		mappingBankCategory: string | null;
+		mappingKept: boolean;
+	}
+	// Single-slot undo, intentionally last-action-only: a new apply replaces
+	// whatever undoInfo was showing rather than stacking a history of undos.
+	let undoInfo: UndoInfo | null = $state(null);
 	let undoCounter = 0;
 
 	let nameQuery = $state('');
@@ -72,6 +87,8 @@
 		error = null;
 		const capturedIds = [...selectedIds];
 		const categoryId = selectedCategoryId;
+		let mappingBankCategory: string | null = null;
+		let mappingKept = false;
 		try {
 			const mappingGroup = fullySelectedGroup;
 			if (mappingGroup) {
@@ -80,6 +97,12 @@
 					category_id: categoryId,
 					save_mapping: saveMapping,
 				});
+				if (saveMapping) {
+					// Only relevant when a mapping could have been created or reaffirmed;
+					// captured pre-action so undo knows whether to delete it.
+					mappingBankCategory = mappingGroup.bank_category;
+					mappingKept = mappingGroup.has_mapping;
+				}
 			} else {
 				await categorizeSelected({
 					transaction_ids: capturedIds,
@@ -95,7 +118,7 @@
 			// Every transaction shown here was uncategorized, so its previous category_id
 			// is null regardless of which path (mapping group or explicit selection) applied.
 			const previous = new Map<number, number | null>(capturedIds.map((id) => [id, null]));
-			undoInfo = { id: ++undoCounter, count: capturedIds.length, previous };
+			undoInfo = { id: ++undoCounter, count: capturedIds.length, previous, mappingBankCategory, mappingKept };
 		} catch (e: any) {
 			error = extractErrorDetail(e);
 		} finally {
@@ -105,22 +128,41 @@
 
 	async function handleUndoCategorize() {
 		if (!undoInfo) return;
-		const { previous } = undoInfo;
+		const { previous, count, mappingBankCategory, mappingKept } = undoInfo;
 		const groups = computeUndoGroups(previous);
-		try {
-			for (const group of groups) {
-				if (group.value != null && group.ids.length > 1) {
-					await categorizeSelected({ transaction_ids: group.ids, category_id: group.value });
-				} else {
-					await Promise.all(group.ids.map((id) => updateTransaction(id, { category_id: group.value })));
-				}
+		let restored = 0;
+		for (const group of groups) {
+			if (group.value != null && group.ids.length > 1) {
+				const [result] = await Promise.allSettled([
+					categorizeSelected({ transaction_ids: group.ids, category_id: group.value })
+				]);
+				if (result.status === 'fulfilled') restored += group.ids.length;
+			} else {
+				const results = await Promise.allSettled(
+					group.ids.map((id) => updateTransaction(id, { category_id: group.value }))
+				);
+				restored += results.filter((r) => r.status === 'fulfilled').length;
 			}
-			await load();
-		} catch (e: any) {
-			error = extractErrorDetail(e);
-		} finally {
-			undoInfo = null;
 		}
+
+		// Undo a bulkCategorize+save_mapping apply by deleting the mapping it created,
+		// but only if there wasn't already one before the action (that one is kept).
+		if (mappingBankCategory && !mappingKept) {
+			try {
+				const mappings = await getCategoryMappings();
+				const created = mappings.find((m) => m.bank_category === mappingBankCategory);
+				if (created) await deleteCategoryMapping(created.id);
+			} catch {
+				// Best-effort cleanup: leaving a stray mapping behind is recoverable from
+				// the categories page and shouldn't block the rest of the undo.
+			}
+		}
+
+		await load();
+		if (restored < count) {
+			error = `Undo incomplete: ${restored} of ${count} restored, refresh to verify`;
+		}
+		undoInfo = null;
 	}
 
 	function round(n: number): number {
@@ -230,7 +272,12 @@
 
 		{#if undoInfo}
 			{#key undoInfo.id}
-				<UndoBar count={undoInfo.count} onUndo={handleUndoCategorize} onDismiss={() => { undoInfo = null; }} />
+				<UndoBar
+					count={undoInfo.count}
+					note={undoInfo.mappingBankCategory && undoInfo.mappingKept ? 'mapping kept' : undefined}
+					onUndo={handleUndoCategorize}
+					onDismiss={() => { undoInfo = null; }}
+				/>
 			{/key}
 		{/if}
 

@@ -48,6 +48,8 @@
 	let labelChoice: number | 'none' | 'new' = $state('none');
 	let newLabelName = $state('');
 	let bulkBusy = $state(false);
+	// Single-slot undo, intentionally last-action-only: a new bulk action replaces
+	// whatever undoInfo was showing rather than stacking a history of undos.
 	let undoInfo: { id: number; count: number; previous: Map<number, FlagsSnapshot> } | null = $state(null);
 	let undoCounter = 0;
 
@@ -216,22 +218,32 @@
 
 	async function handleUndoBulk() {
 		if (!undoInfo) return;
-		const { previous } = undoInfo;
+		const { previous, count } = undoInfo;
 		const groups = computeUndoGroups(previous);
+		const restoredIds = new Set<number>();
 		try {
 			for (const group of groups) {
+				// group.value always carries all three flag fields (see snapshotFlags), so
+				// incidental_label_id is sent explicitly (including null) rather than omitted,
+				// which lets the backend distinguish "clear the label" from "leave it alone".
 				if (group.ids.length === 1) {
-					await setTransactionFlags(group.ids[0], group.value);
+					const [result] = await Promise.allSettled([setTransactionFlags(group.ids[0], group.value)]);
+					if (result.status === 'fulfilled') restoredIds.add(group.ids[0]);
 				} else {
-					await bulkSetFlags(group.ids, group.value);
+					const [result] = await Promise.allSettled([bulkSetFlags(group.ids, group.value)]);
+					if (result.status === 'fulfilled') {
+						for (const id of group.ids) restoredIds.add(id);
+					}
 				}
 			}
 			transactions = transactions.map((t) => {
+				if (!restoredIds.has(t.id)) return t;
 				const snapshot = previous.get(t.id);
 				return snapshot ? { ...t, ...snapshot } : t;
 			});
-		} catch (e: any) {
-			error = extractErrorDetail(e);
+			if (restoredIds.size < count) {
+				error = `Undo incomplete: ${restoredIds.size} of ${count} restored, refresh to verify`;
+			}
 		} finally {
 			undoInfo = null;
 		}

@@ -300,10 +300,19 @@ def bulk_set_flags(payload: BulkFlagsRequest, db: Session = Depends(get_db)):
     """Set incidental/transfer flags on many transactions at once.
 
     Assigning a label implies incidental; clearing incidental clears the label.
+    An explicit `incidental_label_id: null` (as opposed to the field being
+    absent) clears just the label while leaving is_incidental as otherwise
+    determined, mirroring the single-transaction PATCH below — this lets a
+    bulk undo restore "incidental with no label" exactly.
     Setting the transfer flag marks the rows as manual so backfills skip them."""
     if payload.incidental_label_id is not None:
         if not db.get(IncidentalLabel, payload.incidental_label_id):
             raise HTTPException(status_code=404, detail="Label not found")
+
+    explicit_null_label = (
+        "incidental_label_id" in payload.model_fields_set
+        and payload.incidental_label_id is None
+    )
 
     txs = db.execute(
         select(Transaction).where(Transaction.id.in_(payload.transaction_ids))
@@ -315,11 +324,14 @@ def bulk_set_flags(payload: BulkFlagsRequest, db: Session = Depends(get_db)):
         if payload.is_incidental is False:
             tx.is_incidental = False
             tx.incidental_label_id = None
-        elif payload.incidental_label_id is not None:
-            tx.is_incidental = True
-            tx.incidental_label_id = payload.incidental_label_id
-        elif payload.is_incidental is True:
-            tx.is_incidental = True
+        else:
+            if payload.incidental_label_id is not None:
+                tx.is_incidental = True
+                tx.incidental_label_id = payload.incidental_label_id
+            elif explicit_null_label:
+                tx.incidental_label_id = None
+            if payload.is_incidental is True:
+                tx.is_incidental = True
     db.commit()
     return {"updated": len(txs)}
 

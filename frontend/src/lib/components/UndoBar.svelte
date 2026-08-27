@@ -5,9 +5,11 @@
 		count: number;
 		onUndo: () => void | Promise<void>;
 		onDismiss: () => void;
+		/** Optional parenthetical appended to the message, e.g. "mapping kept". */
+		note?: string;
 	}
 
-	let { count, onUndo, onDismiss }: Props = $props();
+	let { count, onUndo, onDismiss, note }: Props = $props();
 	let undoing = $state(false);
 
 	$effect(() => {
@@ -27,7 +29,7 @@
 </script>
 
 <div class="undo-bar" role="status">
-	<span class="undo-message">Applied to {count} transaction{count === 1 ? '' : 's'}</span>
+	<span class="undo-message">Applied to {count} transaction{count === 1 ? '' : 's'}{note ? ` (${note})` : ''}</span>
 	<button class="undo-btn" onclick={handleUndo} disabled={undoing}>
 		{undoing ? 'Undoing...' : 'Undo'}
 	</button>
