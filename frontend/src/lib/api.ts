@@ -1004,3 +1004,90 @@ export async function renameIncidentalLabel(id: number, name: string): Promise<I
 export async function deleteIncidentalLabel(id: number): Promise<void> {
 	await request(`/api/incidental-labels/${id}`, { method: 'DELETE' });
 }
+
+// --- Recurring Payments ---
+
+export interface RecurringPayment {
+	id: number;
+	merchant_pattern: string;
+	counterparty_iban: string | null;
+	name: string;
+	expected_amount: number;
+	amount_tolerance: number;
+	cadence: 'monthly' | 'four_weekly' | 'yearly' | string;
+	expected_day: number | null;
+	anchor_date: string;
+	status: 'suggested' | 'confirmed' | 'dismissed';
+	category_id: number | null;
+	is_income: boolean;
+	created_at: string;
+	updated_at: string;
+	next_expected: string | null;
+}
+
+export interface RecurringPaymentOccurrence {
+	id: number;
+	transaction_id: number;
+	amount: number;
+	date: string;
+}
+
+export interface RescanResult {
+	suggested: number;
+	confirmed: number;
+	dismissed: number;
+}
+
+export interface RecurringNotice {
+	recurring_payment_id: number;
+	name: string;
+	type: 'amount_changed' | 'possibly_missed';
+	detail: string;
+	date: string;
+}
+
+export async function getRecurringPayments(status?: 'suggested' | 'confirmed' | 'dismissed'): Promise<RecurringPayment[]> {
+	const qs = status ? `?status=${status}` : '';
+	return request(`/api/recurring${qs}`);
+}
+
+export async function getRecurringNotices(): Promise<RecurringNotice[]> {
+	return request('/api/recurring/notices');
+}
+
+export async function rescanRecurring(): Promise<RescanResult> {
+	return request('/api/recurring/rescan', { method: 'POST' });
+}
+
+export async function getRecurringOccurrences(paymentId: number): Promise<RecurringPaymentOccurrence[]> {
+	return request(`/api/recurring/${paymentId}/occurrences`);
+}
+
+export async function confirmRecurring(paymentId: number, data: { name?: string; category_id?: number | null }): Promise<RecurringPayment> {
+	return request(`/api/recurring/${paymentId}/confirm`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data)
+	});
+}
+
+export async function dismissRecurring(paymentId: number): Promise<RecurringPayment> {
+	return request(`/api/recurring/${paymentId}/dismiss`, { method: 'POST' });
+}
+
+export async function updateRecurring(
+	paymentId: number,
+	data: {
+		name?: string;
+		category_id?: number | null;
+		expected_amount?: number;
+		amount_tolerance?: number;
+		status?: 'suggested' | 'confirmed' | 'dismissed';
+	}
+): Promise<RecurringPayment> {
+	return request(`/api/recurring/${paymentId}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data)
+	});
+}

@@ -16,6 +16,7 @@
 			<div class="links">
 				<a href="/budget">Budget</a>
 				<a href="/transactions">Transactions</a>
+				<a href="/recurring">Recurring</a>
 				<a href="/receipts">Receipts</a>
 				<a href="/categories">Categories</a>
 				<a href="/uncategorized">Uncategorized</a>

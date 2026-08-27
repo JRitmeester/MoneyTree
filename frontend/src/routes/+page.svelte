@@ -1,9 +1,9 @@
 <script lang="ts">
 	import {
 		getDashboardSummary, getByCategory, getCategoryChildren, getMonthlyTrend, getBudgets,
-		getBudgetVsActual, getSavingsBalance,
+		getBudgetVsActual, getSavingsBalance, getRecurringNotices,
 		formatEuro, type DashboardSummary, type CategorySpending, type MonthlyTrend, type BudgetSummary,
-		type BudgetVsActualSummary, type SavingsBalance
+		type BudgetVsActualSummary, type SavingsBalance, type RecurringNotice
 	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import BalanceChart from '$lib/components/BalanceChart.svelte';
@@ -18,6 +18,7 @@
 	let budgetPeriods: BudgetSummary[] = $state([]);
 	let bvaData: BudgetVsActualSummary | null = $state(null);
 	let savingsBalance: SavingsBalance | null = $state(null);
+	let recurringNotices: RecurringNotice[] = $state([]);
 	let loading = $state(true);
 	let dateFrom = $state(initialRange.dateFrom);
 	let dateTo = $state(initialRange.dateTo);
@@ -32,18 +33,20 @@
 		if (dateFrom) params.date_from = dateFrom;
 		if (dateTo) params.date_to = dateTo;
 
-		const [s, c, t, bp, sb] = await Promise.all([
+		const [s, c, t, bp, sb, notices] = await Promise.all([
 			getDashboardSummary(params),
 			getByCategory(params),
 			getMonthlyTrend(12),
 			getBudgets(),
 			getSavingsBalance(),
+			getRecurringNotices().catch(() => []),
 		]);
 		summary = s;
 		categories = c;
 		monthlyTrend = t;
 		budgetPeriods = bp;
 		savingsBalance = sb;
+		recurringNotices = notices;
 
 		// Load BVA for the current budget period (contains today)
 		const today = new Date().toISOString().slice(0, 10);
@@ -148,6 +151,11 @@
 	<div class="header">
 		<h1>Dashboard</h1>
 		<div class="header-filter">
+			{#if recurringNotices.length > 0}
+				<a class="recurring-notice-badge" href="/recurring">
+					{recurringNotices.length} recurring notice{recurringNotices.length === 1 ? '' : 's'}
+				</a>
+			{/if}
 			<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} periods={budgetPeriods} />
 			{#if dataThroughLabel}
 				<span
@@ -330,6 +338,19 @@
 	.data-through.amber {
 		color: #a16207;
 		font-weight: 600;
+	}
+	.recurring-notice-badge {
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: #a16207;
+		background: #fef3c7;
+		padding: 0.3rem 0.6rem;
+		border-radius: 999px;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+	.recurring-notice-badge:hover {
+		background: #fde68a;
 	}
 
 	.summary-cards {
