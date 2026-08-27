@@ -618,7 +618,10 @@ def get_savings_capacity(
     """Monthly income vs structural expenses, transfers excluded.
 
     A month counts toward the trailing averages only when the imported data
-    fully covers it. Incidental (one-off) expenses are reported separately."""
+    fully covers it. The trailing averages are drawn from complete months
+    across the entire history, not just the displayed `months` window, so a
+    partial current month never starves the averaging pool. Incidental
+    (one-off) expenses are reported separately."""
     txs = db.execute(
         select(Transaction).where(Transaction.is_internal_transfer.is_(False))
     ).scalars().all()
@@ -664,10 +667,13 @@ def get_savings_capacity(
             cat = cat_id_to_cat.get(item.category_id)
             s["fixed" if cat and cat.is_fixed else "flexible"] += item.amount
 
-    month_keys = sorted(buckets.keys())[-months:]
-    result_months = []
+    # Build entries for the FULL history so the trailing-average pool of complete
+    # months isn't starved by the display window (e.g. months=6 with a partial
+    # current month would otherwise leave only 5 complete months to average over).
+    all_month_keys = sorted(buckets.keys())
+    all_months = []
     complete_months = []
-    for key in month_keys:
+    for key in all_month_keys:
         start, end = _month_bounds(key)
         partial = min_datum > start or max_datum < end
         b = buckets[key]
@@ -685,9 +691,12 @@ def get_savings_capacity(
             net_raw=round(b["income"] - b["expenses_total"], 2),
             net_structural=round(b["income"] - b["expenses_structural"], 2),
         )
-        result_months.append(entry)
+        all_months.append(entry)
         if not partial:
             complete_months.append(entry)
+
+    # The response's displayed list stays the last `months` entries only.
+    result_months = all_months[-months:]
 
     def trailing(window: int, attr: str) -> float | None:
         if len(complete_months) < window:

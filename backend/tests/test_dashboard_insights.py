@@ -191,6 +191,22 @@ class TestSavingsCapacity:
         assert jan["flexible"] == 300.0
         assert jan["uncategorized"] == 50.0
 
+    def test_trailing_6_not_starved_by_partial_current_month(self, client, db: Session):
+        # 7 fully complete months, then a partial current (8th) month.
+        for m in range(1, 8):
+            self._seed_month(db, 2025, m)
+        make_transaction(db, bedrag=-100.0, datum=date(2025, 8, 10))
+        db.commit()
+
+        body = client.get("/api/dashboard/savings-capacity").json()
+        # Display window (default months=6) still returns exactly 6 entries.
+        assert len(body["months"]) == 6
+        # Averaging pool is drawn from the full history's complete months
+        # (months 1-7), not just the 6-month display window (months 3-8,
+        # which would only contain 5 complete months and starve trailing_6).
+        assert body["trailing_6_raw"] is not None
+        assert body["trailing_6_raw"] == 999.0
+
     def test_empty_database(self, client):
         body = client.get("/api/dashboard/savings-capacity").json()
         assert body["months"] == []
