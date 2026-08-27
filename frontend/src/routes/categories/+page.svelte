@@ -6,6 +6,7 @@
 	} from '$lib/api';
 	import { focusOnMount } from '$lib/actions/focusOnMount';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
+	import { extractErrorDetail } from '$lib/errors';
 
 	let categories: Category[] = $state([]);
 	let mappings: CategoryMapping[] = $state([]);
@@ -35,18 +36,6 @@
 	}
 
 	$effect(() => { load(); });
-
-	function extractErrorDetail(e: any): string {
-		const message = e?.message ?? String(e);
-		const jsonStart = message.indexOf('{');
-		if (jsonStart === -1) return message;
-		try {
-			const parsed = JSON.parse(message.slice(jsonStart));
-			return parsed.detail ?? message;
-		} catch {
-			return message;
-		}
-	}
 
 	// Add root category
 	let addingRoot = $state(false);

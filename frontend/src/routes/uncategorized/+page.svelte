@@ -1,11 +1,17 @@
 <script lang="ts">
-	import { getUncategorized, categorizeSelected, bulkCategorize, formatEuro, formatDate, type UncategorizedGroup } from '$lib/api';
+	import { getUncategorized, categorizeSelected, bulkCategorize, updateTransaction, formatEuro, formatDate, type UncategorizedGroup } from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
+	import UndoBar from '$lib/components/UndoBar.svelte';
+	import { computeUndoGroups } from '$lib/undo';
+	import { extractErrorDetail } from '$lib/errors';
 
 	let groups: UncategorizedGroup[] = $state([]);
 	let loading = $state(true);
 	let applying = $state(false);
+	let error: string | null = $state(null);
+	let undoInfo: { id: number; count: number; previous: Map<number, number | null> } | null = $state(null);
+	let undoCounter = 0;
 
 	let nameQuery = $state('');
 	let nameFilter = $state('');
@@ -63,18 +69,21 @@
 	async function applySelected() {
 		if (selectedIds.size === 0 || selectedCategoryId == null) return;
 		applying = true;
+		error = null;
+		const capturedIds = [...selectedIds];
+		const categoryId = selectedCategoryId;
 		try {
 			const mappingGroup = fullySelectedGroup;
 			if (mappingGroup) {
 				await bulkCategorize({
 					bank_category: mappingGroup.bank_category,
-					category_id: selectedCategoryId,
+					category_id: categoryId,
 					save_mapping: saveMapping,
 				});
 			} else {
 				await categorizeSelected({
-					transaction_ids: [...selectedIds],
-					category_id: selectedCategoryId,
+					transaction_ids: capturedIds,
+					category_id: categoryId,
 				});
 			}
 			// Refetch from the server rather than optimistically stripping the applied
@@ -83,8 +92,34 @@
 			// can flip has_mapping on other groups, so only the server's view is accurate.
 			await load();
 			saveMapping = true;
+			// Every transaction shown here was uncategorized, so its previous category_id
+			// is null regardless of which path (mapping group or explicit selection) applied.
+			const previous = new Map<number, number | null>(capturedIds.map((id) => [id, null]));
+			undoInfo = { id: ++undoCounter, count: capturedIds.length, previous };
+		} catch (e: any) {
+			error = extractErrorDetail(e);
 		} finally {
 			applying = false;
+		}
+	}
+
+	async function handleUndoCategorize() {
+		if (!undoInfo) return;
+		const { previous } = undoInfo;
+		const groups = computeUndoGroups(previous);
+		try {
+			for (const group of groups) {
+				if (group.value != null && group.ids.length > 1) {
+					await categorizeSelected({ transaction_ids: group.ids, category_id: group.value });
+				} else {
+					await Promise.all(group.ids.map((id) => updateTransaction(id, { category_id: group.value })));
+				}
+			}
+			await load();
+		} catch (e: any) {
+			error = extractErrorDetail(e);
+		} finally {
+			undoInfo = null;
 		}
 	}
 
@@ -189,6 +224,16 @@
 			<a href="/" class="back">&larr; Back to dashboard</a>
 		</div>
 	{:else}
+		{#if error}
+			<div class="error">{error}</div>
+		{/if}
+
+		{#if undoInfo}
+			{#key undoInfo.id}
+				<UndoBar count={undoInfo.count} onUndo={handleUndoCategorize} onDismiss={() => { undoInfo = null; }} />
+			{/key}
+		{/if}
+
 		<div class="date-filter-row">
 			<DateRangeFilter
 				bind:dateFrom
@@ -325,6 +370,14 @@
 	.subtitle { margin: 0 0 1.5rem; color: #666; font-size: 0.9rem; }
 	.date-filter-row { margin-bottom: 0.75rem; }
 	.muted { color: #999; font-style: italic; }
+
+	.error {
+		padding: 1rem;
+		background: #fef2f2;
+		color: #dc2626;
+		border-radius: 8px;
+		margin-bottom: 1rem;
+	}
 
 	.empty {
 		background: white;

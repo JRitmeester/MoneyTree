@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { importCsv, linkReceipt, formatEuro, type ImportResult, type MatchCandidate } from '$lib/api';
+	import { extractErrorDetail } from '$lib/errors';
 
 	let file: File | null = $state(null);
 	let loading = $state(false);
@@ -8,18 +9,6 @@
 	let error: string | null = $state(null);
 	let pendingMatches: MatchCandidate[] = $state([]);
 	let confirmedCount = $state(0);
-
-	function extractErrorDetail(e: any): string {
-		const message = e?.message ?? String(e);
-		const jsonStart = message.indexOf('{');
-		if (jsonStart === -1) return message;
-		try {
-			const parsed = JSON.parse(message.slice(jsonStart));
-			return parsed.detail ?? message;
-		} catch {
-			return message;
-		}
-	}
 
 	async function handleImport() {
 		if (!file) return;

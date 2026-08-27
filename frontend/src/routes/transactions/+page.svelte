@@ -9,8 +9,17 @@
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import { applyFlagsToTransactions } from '$lib/transactionFlags';
+	import { computeUndoGroups } from '$lib/undo';
+	import { extractErrorDetail } from '$lib/errors';
+	import UndoBar from '$lib/components/UndoBar.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
 	import { get } from 'svelte/store';
+
+	interface FlagsSnapshot {
+		is_incidental: boolean;
+		incidental_label_id: number | null;
+		is_internal_transfer: boolean;
+	}
 
 	// URL params override store (for direct links), otherwise use stored range
 	const urlParams = new URLSearchParams(pageStore.url.search);
@@ -39,6 +48,8 @@
 	let labelChoice: number | 'none' | 'new' = $state('none');
 	let newLabelName = $state('');
 	let bulkBusy = $state(false);
+	let undoInfo: { id: number; count: number; previous: Map<number, FlagsSnapshot> } | null = $state(null);
+	let undoCounter = 0;
 
 	let selectedIds = $derived(Object.entries(selected).filter(([, v]) => v).map(([k]) => Number(k)));
 	let allOnPageSelected = $derived(
@@ -126,7 +137,7 @@
 					: t
 			);
 		} catch (e: any) {
-			error = e.message;
+			error = extractErrorDetail(e);
 		}
 	}
 
@@ -159,10 +170,21 @@
 		return labelChoice;
 	}
 
+	function snapshotFlags(id: number): FlagsSnapshot | undefined {
+		const t = transactions.find((tx) => tx.id === id);
+		if (!t) return undefined;
+		return {
+			is_incidental: t.is_incidental,
+			incidental_label_id: t.incidental_label_id,
+			is_internal_transfer: t.is_internal_transfer
+		};
+	}
+
 	async function applyBulk(kind: 'incidental' | 'not-incidental' | 'transfer' | 'not-transfer') {
 		if (selectedIds.length === 0 || bulkBusy) return;
 		bulkBusy = true;
 		error = null;
+		const targetIds = [...selectedIds];
 		try {
 			const flags: TransactionFlags = {};
 			if (kind === 'incidental') {
@@ -175,13 +197,43 @@
 				flags.is_internal_transfer = kind === 'transfer';
 			}
 
-			await bulkSetFlags(selectedIds, flags);
-			transactions = applyFlagsToTransactions(transactions, selectedIds, flags);
+			const previous = new Map<number, FlagsSnapshot>();
+			for (const id of targetIds) {
+				const snapshot = snapshotFlags(id);
+				if (snapshot) previous.set(id, snapshot);
+			}
+
+			await bulkSetFlags(targetIds, flags);
+			transactions = applyFlagsToTransactions(transactions, targetIds, flags);
 			selected = {};
+			undoInfo = { id: ++undoCounter, count: targetIds.length, previous };
 		} catch (e: any) {
-			error = e.message;
+			error = extractErrorDetail(e);
 		} finally {
 			bulkBusy = false;
+		}
+	}
+
+	async function handleUndoBulk() {
+		if (!undoInfo) return;
+		const { previous } = undoInfo;
+		const groups = computeUndoGroups(previous);
+		try {
+			for (const group of groups) {
+				if (group.ids.length === 1) {
+					await setTransactionFlags(group.ids[0], group.value);
+				} else {
+					await bulkSetFlags(group.ids, group.value);
+				}
+			}
+			transactions = transactions.map((t) => {
+				const snapshot = previous.get(t.id);
+				return snapshot ? { ...t, ...snapshot } : t;
+			});
+		} catch (e: any) {
+			error = extractErrorDetail(e);
+		} finally {
+			undoInfo = null;
 		}
 	}
 
@@ -209,6 +261,12 @@
 
 {#if error}
 	<div class="error">{error}</div>
+{/if}
+
+{#if undoInfo}
+	{#key undoInfo.id}
+		<UndoBar count={undoInfo.count} onUndo={handleUndoBulk} onDismiss={() => { undoInfo = null; }} />
+	{/key}
 {/if}
 
 {#if selectedIds.length > 0}
