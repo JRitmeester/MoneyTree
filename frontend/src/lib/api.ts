@@ -373,12 +373,20 @@ export interface BreadcrumbItem {
 	name: string;
 }
 
+export interface CategoryLineItemGroup {
+	category_id: number;
+	category_name: string;
+	total: number;
+	line_items: SpendingLineItem[];
+}
+
 export interface CategoryDetail {
 	category_id: number;
 	category_name: string;
 	breadcrumb: BreadcrumbItem[];
 	total: number;
 	line_items: SpendingLineItem[];
+	groups: CategoryLineItemGroup[];
 }
 
 export async function getCategoryDetail(categoryId: number, params: {

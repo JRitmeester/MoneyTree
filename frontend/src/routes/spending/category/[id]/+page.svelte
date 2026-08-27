@@ -44,6 +44,14 @@
 
 	let explicitItems = $derived(data?.line_items.filter(li => !li.is_remaining) ?? []);
 	let remainingItems = $derived(data?.line_items.filter(li => li.is_remaining) ?? []);
+	let allItems = $derived([
+		...(data?.line_items ?? []),
+		...(data?.groups.flatMap((g) => g.line_items) ?? [])
+	]);
+	let itemCount = $derived(allItems.filter((li) => !li.is_remaining).length);
+	let directTotal = $derived(
+		(data?.line_items ?? []).reduce((s, li) => s + li.amount * li.quantity, 0)
+	);
 </script>
 
 {#if loading}
@@ -75,81 +83,101 @@
 			<div class="card-label">Total spending</div>
 		</div>
 		<div class="card">
-			<div class="card-value">{explicitItems.length}</div>
+			<div class="card-value">{itemCount}</div>
 			<div class="card-label">Line items</div>
 		</div>
 		<div class="card">
-			<div class="card-value">{new Set(data.line_items.map(li => li.transaction_id)).size}</div>
+			<div class="card-value">{new Set(allItems.map(li => li.transaction_id)).size}</div>
 			<div class="card-label">Transactions</div>
 		</div>
 	</div>
 
-	<div class="table-wrap">
-		{#if explicitItems.length === 0 && remainingItems.length === 0}
-			<p class="muted">No line items in this period.</p>
-		{:else}
-			<table>
-				<thead>
-					<tr>
-						<th>Date</th>
-						<th>Description</th>
-						<th>Category</th>
-						<th class="right">Amount</th>
-						<th>Transaction</th>
+	{#snippet itemsTable(items: SpendingLineItem[], footTotal: number | null)}
+		<table>
+			<thead>
+				<tr>
+					<th>Date</th>
+					<th>Description</th>
+					<th>Category</th>
+					<th class="right">Amount</th>
+					<th>Transaction</th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each items as item}
+					<tr class:remaining-row={item.is_remaining}>
+						<td class="date">{formatDate(item.transaction_date)}</td>
+						<td>
+							{#if item.is_remaining}
+								<span class="remaining-label">Remaining</span>
+							{:else}
+								{item.description}
+							{/if}
+						</td>
+						<td>
+							{#if item.category_name}
+								<span class="cat-badge">{item.category_name}</span>
+							{:else}
+								<span class="muted">-</span>
+							{/if}
+						</td>
+						<td class="right">{formatEuro(item.amount * item.quantity)}</td>
+						<td>
+							<a href="/transactions/{item.transaction_id}" class="tx-link">
+								{item.transaction_merchant || 'Transaction'} ({formatEuro(item.transaction_amount)})
+							</a>
+						</td>
 					</tr>
-				</thead>
-				<tbody>
-					{#each explicitItems as item}
-						<tr>
-							<td class="date">{formatDate(item.transaction_date)}</td>
-							<td>{item.description}</td>
-							<td>
-								{#if item.category_name}
-									<span class="cat-badge">{item.category_name}</span>
-								{:else}
-									<span class="muted">-</span>
-								{/if}
-							</td>
-							<td class="right">{formatEuro(item.amount * item.quantity)}</td>
-							<td>
-								<a href="/transactions/{item.transaction_id}" class="tx-link">
-									{item.transaction_merchant || 'Transaction'} ({formatEuro(item.transaction_amount)})
-								</a>
-							</td>
-						</tr>
-					{/each}
-					{#if remainingItems.length > 0}
-						{#each remainingItems as item}
-							<tr class="remaining-row">
-								<td class="date">{formatDate(item.transaction_date)}</td>
-								<td><span class="remaining-label">Remaining</span></td>
-								<td>
-									{#if item.category_name}
-										<span class="cat-badge">{item.category_name}</span>
-									{:else}
-										<span class="muted">-</span>
-									{/if}
-								</td>
-								<td class="right">{formatEuro(item.amount * item.quantity)}</td>
-								<td>
-									<a href="/transactions/{item.transaction_id}" class="tx-link">
-										{item.transaction_merchant || 'Transaction'} ({formatEuro(item.transaction_amount)})
-									</a>
-								</td>
-							</tr>
-						{/each}
-					{/if}
-				</tbody>
+				{/each}
+			</tbody>
+			{#if footTotal != null}
 				<tfoot>
 					<tr>
 						<td colspan="3"><strong>Total</strong></td>
-						<td class="right"><strong>{formatEuro(data.total)}</strong></td>
+						<td class="right"><strong>{formatEuro(footTotal)}</strong></td>
 						<td></td>
 					</tr>
 				</tfoot>
-			</table>
+			{/if}
+		</table>
+	{/snippet}
+
+	{#if data.line_items.length === 0 && data.groups.length === 0}
+		<div class="table-wrap"><p class="muted">No line items in this period.</p></div>
+	{:else}
+		{#if data.line_items.length > 0}
+			{#if data.groups.length > 0}
+				<div class="group-header">
+					<h2>{data.category_name}</h2>
+					<span class="group-total">{formatEuro(directTotal)}</span>
+				</div>
+			{/if}
+			<div class="table-wrap">
+				{@render itemsTable(data.line_items, data.groups.length === 0 ? data.total : null)}
+			</div>
 		{/if}
-	</div>
+
+		{#each data.groups as group (group.category_id)}
+			<div class="group-header">
+				<h2>
+					<a href="/spending/category/{group.category_id}?date_from={dateFrom}&date_to={dateTo}">
+						{group.category_name}
+					</a>
+				</h2>
+				<span class="group-total">{formatEuro(group.total)}</span>
+			</div>
+			<div class="table-wrap">
+				{@render itemsTable(group.line_items, null)}
+			</div>
+		{/each}
+
+		{#if data.groups.length > 0}
+			<div class="grand-total">
+				<strong>Total</strong>
+				<strong>{formatEuro(data.total)}</strong>
+			</div>
+		{/if}
+	{/if}
 {/if}
 
 <style>
@@ -255,5 +283,32 @@
 	tfoot td {
 		border-top: 2px solid #e5e7eb;
 		border-bottom: none;
+	}
+	.group-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		margin: 1.25rem 0 0.5rem;
+	}
+	.group-header h2 {
+		font-size: 1rem;
+		margin: 0;
+	}
+	.group-header h2 a {
+		color: #2d6a4f;
+		text-decoration: none;
+	}
+	.group-header h2 a:hover { text-decoration: underline; }
+	.group-total {
+		font-weight: 600;
+		font-size: 0.95rem;
+	}
+	.grand-total {
+		display: flex;
+		justify-content: space-between;
+		background: white;
+		border-radius: 8px;
+		padding: 0.75rem 1rem;
+		margin-top: 1rem;
 	}
 </style>

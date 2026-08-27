@@ -212,3 +212,52 @@ class TestSavingsCapacity:
         assert body["months"] == []
         assert body["trailing_3_structural"] is None
         assert body["current_month_projection"] is None
+
+
+class TestCategoryLineItemGroups:
+    def _tree(self, db):
+        from app.models import Category
+        parent = Category(name="Vrije Tijd", category_type="expense")
+        db.add(parent)
+        db.flush()
+        child_a = Category(name="Hobby", parent_id=parent.id, category_type="expense")
+        child_b = Category(name="Uitgaan", parent_id=parent.id, category_type="expense")
+        db.add_all([child_a, child_b])
+        db.flush()
+        grandchild = Category(name="Lego", parent_id=child_a.id, category_type="expense")
+        db.add(grandchild)
+        db.flush()
+        return parent, child_a, child_b, grandchild
+
+    def test_direct_items_and_child_groups(self, client, db: Session):
+        parent, child_a, child_b, grandchild = self._tree(db)
+        make_transaction(db, bedrag=-10.0, category_id=parent.id, datum=date(2026, 8, 1))
+        make_transaction(db, bedrag=-20.0, category_id=child_a.id, datum=date(2026, 8, 2))
+        make_transaction(db, bedrag=-40.0, category_id=grandchild.id, datum=date(2026, 8, 3))
+        make_transaction(db, bedrag=-5.0, category_id=child_b.id, datum=date(2026, 8, 4))
+        db.commit()
+
+        body = client.get(f"/api/dashboard/category/{parent.id}/line-items").json()
+
+        assert body["total"] == 75.0
+        # Direct items: only the transaction categorized on the parent itself.
+        assert [li["amount"] for li in body["line_items"]] == [10.0]
+
+        # One group per direct child with spending, sorted by total descending.
+        groups = body["groups"]
+        assert [g["category_name"] for g in groups] == ["Hobby", "Uitgaan"]
+        hobby = groups[0]
+        assert hobby["category_id"] == child_a.id
+        assert hobby["total"] == 60.0
+        # Grandchild items roll up into the direct child's group, newest first.
+        assert [li["amount"] for li in hobby["line_items"]] == [40.0, 20.0]
+        assert groups[1]["total"] == 5.0
+
+    def test_leaf_category_has_no_groups(self, client, db: Session):
+        parent, child_a, child_b, grandchild = self._tree(db)
+        make_transaction(db, bedrag=-40.0, category_id=grandchild.id, datum=date(2026, 8, 3))
+        db.commit()
+
+        body = client.get(f"/api/dashboard/category/{grandchild.id}/line-items").json()
+        assert body["groups"] == []
+        assert [li["amount"] for li in body["line_items"]] == [40.0]

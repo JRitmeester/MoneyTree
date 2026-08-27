@@ -246,12 +246,21 @@ class BreadcrumbItem(BaseModel):
     name: str
 
 
+class CategoryLineItemGroup(BaseModel):
+    category_id: int
+    category_name: str
+    total: float
+    line_items: list[SpendingLineItem]
+
+
 class CategoryDetail(BaseModel):
     category_id: int
     category_name: str
     breadcrumb: list[BreadcrumbItem]
     total: float
+    # Items categorized on this category itself; child spending lives in groups.
     line_items: list[SpendingLineItem]
+    groups: list[CategoryLineItemGroup] = []
 
 
 class MonthlyTrend(BaseModel):

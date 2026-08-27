@@ -14,6 +14,7 @@ from ..schemas import (
     BudgetVsActualLine,
     BudgetVsActualSummary,
     CategoryDetail,
+    CategoryLineItemGroup,
     CategorySpending,
     DashboardSummary,
     MonthlyTrend,
@@ -371,8 +372,9 @@ def get_category_line_items(
     date_to: date | None = None,
     db: Session = Depends(get_db),
 ):
-    """Line items under a category (including descendants), with transaction context."""
-    cat_id_to_cat, _ = _build_hierarchy(db)
+    """Line items under a category: items on the category itself first, then
+    one group per direct child aggregating that child's whole subtree."""
+    cat_id_to_cat, children_by_parent = _build_hierarchy(db)
     cat = cat_id_to_cat.get(category_id)
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -388,7 +390,8 @@ def get_category_line_items(
         current = c.parent_id
     breadcrumb.reverse()
 
-    items = []
+    direct_items: list[SpendingLineItem] = []
+    grouped_items: dict[int, list[SpendingLineItem]] = {}
     total = 0.0
     for item in _iter_expense_items(db, date_from, date_to):
         if item.category_id is None:
@@ -396,6 +399,16 @@ def get_category_line_items(
         if not _is_descendant_of(item.category_id, category_id, cat_id_to_cat):
             continue
         total += item.amount
+        if item.category_id == category_id:
+            items = direct_items
+        else:
+            child_id = _find_direct_child_ancestor(
+                item.category_id, category_id, children_by_parent, cat_id_to_cat
+            )
+            if child_id is None:
+                items = direct_items
+            else:
+                items = grouped_items.setdefault(child_id, [])
         if item.li is not None:
             items.append(SpendingLineItem(
                 line_item_id=item.li.id,
@@ -426,14 +439,27 @@ def get_category_line_items(
                 transaction_amount=item.tx.bedrag,
             ))
 
-    items.sort(key=lambda x: x.transaction_date, reverse=True)
+    direct_items.sort(key=lambda x: x.transaction_date, reverse=True)
+
+    groups = []
+    for child_id, child_items in grouped_items.items():
+        child = cat_id_to_cat.get(child_id)
+        child_items.sort(key=lambda x: x.transaction_date, reverse=True)
+        groups.append(CategoryLineItemGroup(
+            category_id=child_id,
+            category_name=child.name if child else f"Category #{child_id}",
+            total=round(sum(li.amount * li.quantity for li in child_items), 2),
+            line_items=child_items,
+        ))
+    groups.sort(key=lambda g: g.total, reverse=True)
 
     return CategoryDetail(
         category_id=category_id,
         category_name=cat.name,
         breadcrumb=breadcrumb,
         total=round(total, 2),
-        line_items=items,
+        line_items=direct_items,
+        groups=groups,
     )
 
 
