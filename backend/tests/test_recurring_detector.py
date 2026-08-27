@@ -58,6 +58,21 @@ class TestDetectCadence:
         dates = [date(2025, 1, 1), date(2025, 1, 10), date(2025, 3, 1), date(2025, 6, 1)]
         assert rd.detect_cadence(dates) is None
 
+    def test_erratic_series_with_matching_median_gap_is_not_four_weekly(self):
+        # Median gap (27.5) falls inside the four_weekly window and the
+        # day-of-month is not stable enough for monthly, but the gaps
+        # themselves are not tightly clustered (25, 26, 29, 30 -> spread 5)
+        # and the day-of-month jumps around non-monotonically (1, 27, 26,
+        # 23, 21). This must not be misclassified as a drifting four_weekly
+        # pattern: it's just noise.
+        d0 = date(2025, 1, 1)
+        d1 = d0 + timedelta(days=26)
+        d2 = d1 + timedelta(days=30)
+        d3 = d2 + timedelta(days=25)
+        d4 = d3 + timedelta(days=29)
+        dates = [d0, d1, d2, d3, d4]
+        assert rd.detect_cadence(dates) is None
+
 
 class TestAmountsQualify:
     def test_all_amounts_within_tolerance_qualify(self):
@@ -79,6 +94,11 @@ class TestAmountsQualify:
 
     def test_too_many_outliers_disqualify(self):
         amounts = [-100.0, -200.0, -50.0, -300.0]
+        assert rd.amounts_qualify(amounts) is False
+
+    def test_three_occurrences_two_within_tolerance_does_not_qualify(self):
+        # 2 of 3 within 15% of median is 2/3 ~= 0.667, below the 75% bar.
+        amounts = [-100.0, -101.0, -200.0]
         assert rd.amounts_qualify(amounts) is False
 
 
@@ -244,3 +264,66 @@ class TestUpsertRecurringPayments:
         assert len(occurrences) == 4
         all_rows = db.query(RecurringPayment).all()
         assert len(all_rows) == 1
+
+    def test_stale_suggested_row_removed_when_group_key_changes(self, db: Session):
+        # First run: merchant normalizes to "spotify".
+        dates = [date(2025, 1, 5), date(2025, 2, 5), date(2025, 3, 6)]
+        txs = [
+            make_transaction(db, bedrag=-9.99, naam=None, merchant_name="Spotify 123", datum=d)
+            for d in dates
+        ]
+        from app.models import Transaction
+        candidates_first = rd.build_candidates(db.query(Transaction).all())
+        rows_first = rd.upsert_recurring_payments(db, candidates_first)
+        db.flush()
+        assert len(rows_first) == 1
+        assert rows_first[0].merchant_pattern == "spotify"
+
+        # Second run: every historical transaction in the group is renamed
+        # (e.g. the merchant rebranded), so the group key changes to
+        # "spotify premium". The old "spotify" key no longer appears in the
+        # latest detection and should be cleaned up since it was only ever
+        # suggested (never confirmed/dismissed).
+        for tx in txs:
+            tx.merchant_name = "Spotify Premium 456"
+        db.flush()
+        candidates_second = rd.build_candidates(db.query(Transaction).all())
+        rows_second = rd.upsert_recurring_payments(db, candidates_second)
+        db.flush()
+
+        new_keys = {r.merchant_pattern for r in rows_second}
+        assert "spotify premium" in new_keys
+
+        # Exactly one row remains for this merchant lineage, and it carries
+        # the new key, not the old one. (Not asserting on stale_id directly:
+        # SQLite may reuse a deleted row's integer id for the next insert,
+        # so id equality alone can't distinguish "same row kept" from
+        # "old row deleted, new row happens to get the same id".)
+        all_rows = db.query(RecurringPayment).all()
+        assert len(all_rows) == 1
+        assert all(r.merchant_pattern != "spotify" for r in all_rows)
+
+    def test_stale_confirmed_row_not_removed_when_group_key_vanishes(self, db: Session):
+        confirmed = RecurringPayment(
+            merchant_pattern="oldgym",
+            counterparty_iban=None,
+            name="Old Gym",
+            expected_amount=-30.0,
+            cadence="monthly",
+            expected_day=1,
+            anchor_date=date(2024, 12, 1),
+            status="confirmed",
+            is_income=False,
+        )
+        db.add(confirmed)
+        db.flush()
+        confirmed_id = confirmed.id
+
+        # No current transactions produce the "oldgym" group key at all.
+        candidates = rd.build_candidates([])
+        rd.upsert_recurring_payments(db, candidates)
+        db.flush()
+
+        still_there = db.query(RecurringPayment).filter_by(id=confirmed_id).one_or_none()
+        assert still_there is not None
+        assert still_there.status == "confirmed"

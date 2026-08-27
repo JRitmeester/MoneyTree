@@ -32,6 +32,10 @@ MONTHLY_GAP_MIN_DAYS = 26
 MONTHLY_GAP_MAX_DAYS = 36
 FOUR_WEEKLY_GAP_MIN_DAYS = 26
 FOUR_WEEKLY_GAP_MAX_DAYS = 30
+# Gaps must be tightly clustered around ~28 days for a four_weekly call: this
+# is the simpler, robust stand-in for "day-of-month drifts consistently"
+# (a steady drift produces near-identical gaps; erratic noise does not).
+FOUR_WEEKLY_GAP_SPREAD_MAX_DAYS = 4
 YEARLY_GAP_MIN_DAYS = 350
 YEARLY_GAP_MAX_DAYS = 380
 
@@ -103,7 +107,11 @@ def detect_cadence(dates: Sequence[date]) -> CadenceResult | None:
                 cadence="monthly", expected_day=round(median_day), anchor_date=ordered[-1]
             )
 
-        if FOUR_WEEKLY_GAP_MIN_DAYS <= median_gap <= FOUR_WEEKLY_GAP_MAX_DAYS:
+        gap_spread = max(gaps) - min(gaps)
+        if (
+            FOUR_WEEKLY_GAP_MIN_DAYS <= median_gap <= FOUR_WEEKLY_GAP_MAX_DAYS
+            and gap_spread <= FOUR_WEEKLY_GAP_SPREAD_MAX_DAYS
+        ):
             return CadenceResult(
                 cadence="four_weekly", expected_day=None, anchor_date=ordered[-1]
             )
@@ -222,9 +230,18 @@ def upsert_recurring_payments(
     """Refresh `suggested` recurring_payments rows in place, matched by
     group key. Never creates a competing row for a group that already has a
     confirmed or dismissed pattern, and never modifies confirmed/dismissed
-    rows."""
+    rows. A `suggested` row whose group key no longer appears in this run's
+    candidates is removed, keeping the suggestion list clean; confirmed and
+    dismissed rows are kept regardless (the user's decision persists even if
+    the pattern temporarily drops out of detection)."""
     existing_rows = db.query(RecurringPayment).all()
     by_key = {_row_key(row): row for row in existing_rows}
+    current_keys = {candidate.group_key for candidate in candidates}
+
+    for key, row in by_key.items():
+        if row.status == "suggested" and key not in current_keys:
+            db.delete(row)
+    db.flush()
 
     result: list[RecurringPayment] = []
     for candidate in candidates:
