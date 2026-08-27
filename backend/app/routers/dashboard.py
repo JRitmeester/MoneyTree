@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,6 +18,8 @@ from ..schemas import (
     DashboardSummary,
     MonthlyTrend,
     SavingsBalanceOut,
+    SavingsCapacityMonth,
+    SavingsCapacitySummary,
     SpendingLineItem,
     SubcategorySpending,
 )
@@ -599,4 +602,103 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
         expense_lines=expense_lines,
         unmapped_expenses=unmapped_expenses,
         unmapped_income=unmapped_income,
+    )
+
+
+def _month_bounds(month_key: str) -> tuple[date, date]:
+    year, month = (int(p) for p in month_key.split("-"))
+    return date(year, month, 1), date(year, month, monthrange(year, month)[1])
+
+
+@router.get("/savings-capacity", response_model=SavingsCapacitySummary)
+def get_savings_capacity(
+    months: int = Query(6, ge=1, le=24),
+    db: Session = Depends(get_db),
+):
+    """Monthly income vs structural expenses, transfers excluded.
+
+    A month counts toward the trailing averages only when the imported data
+    fully covers it. Incidental (one-off) expenses are reported separately."""
+    txs = db.execute(
+        select(Transaction).where(Transaction.is_internal_transfer.is_(False))
+    ).scalars().all()
+
+    empty = SavingsCapacitySummary(
+        months=[], trailing_3_raw=None, trailing_3_structural=None,
+        trailing_6_raw=None, trailing_6_structural=None,
+    )
+    if not txs:
+        return empty
+
+    min_datum = min(tx.datum for tx in txs)
+    max_datum = max(tx.datum for tx in txs)
+
+    buckets: dict[str, dict[str, float]] = {}
+    for tx in txs:
+        key = tx.datum.strftime("%Y-%m")
+        b = buckets.setdefault(key, {
+            "income": 0.0, "expenses_total": 0.0,
+            "expenses_structural": 0.0, "incidental": 0.0,
+        })
+        if tx.bedrag > 0:
+            b["income"] += tx.bedrag
+        else:
+            amount = abs(tx.bedrag)
+            b["expenses_total"] += amount
+            if tx.is_incidental:
+                b["incidental"] += amount
+            else:
+                b["expenses_structural"] += amount
+
+    # Fixed/flexible/uncategorized split, line-item aware, incidentals excluded.
+    cat_id_to_cat, _ = _build_hierarchy(db)
+    splits: dict[str, dict[str, float]] = {}
+    for item in _iter_expense_items(db, None, None):
+        if item.tx.is_incidental:
+            continue
+        s = splits.setdefault(item.tx.datum.strftime("%Y-%m"),
+                              {"fixed": 0.0, "flexible": 0.0, "uncategorized": 0.0})
+        if item.category_id is None:
+            s["uncategorized"] += item.amount
+        else:
+            cat = cat_id_to_cat.get(item.category_id)
+            s["fixed" if cat and cat.is_fixed else "flexible"] += item.amount
+
+    month_keys = sorted(buckets.keys())[-months:]
+    result_months = []
+    complete_months = []
+    for key in month_keys:
+        start, end = _month_bounds(key)
+        partial = min_datum > start or max_datum < end
+        b = buckets[key]
+        s = splits.get(key, {"fixed": 0.0, "flexible": 0.0, "uncategorized": 0.0})
+        entry = SavingsCapacityMonth(
+            month=key,
+            partial=partial,
+            income=round(b["income"], 2),
+            expenses_total=round(b["expenses_total"], 2),
+            expenses_structural=round(b["expenses_structural"], 2),
+            incidental=round(b["incidental"], 2),
+            fixed=round(s["fixed"], 2),
+            flexible=round(s["flexible"], 2),
+            uncategorized=round(s["uncategorized"], 2),
+            net_raw=round(b["income"] - b["expenses_total"], 2),
+            net_structural=round(b["income"] - b["expenses_structural"], 2),
+        )
+        result_months.append(entry)
+        if not partial:
+            complete_months.append(entry)
+
+    def trailing(window: int, attr: str) -> float | None:
+        if len(complete_months) < window:
+            return None
+        tail = complete_months[-window:]
+        return round(sum(getattr(m, attr) for m in tail) / window, 2)
+
+    return SavingsCapacitySummary(
+        months=result_months,
+        trailing_3_raw=trailing(3, "net_raw"),
+        trailing_3_structural=trailing(3, "net_structural"),
+        trailing_6_raw=trailing(6, "net_raw"),
+        trailing_6_structural=trailing(6, "net_structural"),
     )

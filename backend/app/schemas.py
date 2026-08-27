@@ -441,3 +441,26 @@ class SavingsBalanceOut(BaseModel):
 class BalancePoint(BaseModel):
     date: date
     balance: float
+
+
+class SavingsCapacityMonth(BaseModel):
+    month: str
+    partial: bool
+    income: float
+    expenses_total: float
+    expenses_structural: float
+    incidental: float
+    fixed: float
+    flexible: float
+    uncategorized: float
+    net_raw: float
+    net_structural: float
+
+
+class SavingsCapacitySummary(BaseModel):
+    months: list[SavingsCapacityMonth]
+    trailing_3_raw: Optional[float]
+    trailing_3_structural: Optional[float]
+    trailing_6_raw: Optional[float]
+    trailing_6_structural: Optional[float]
+    current_month_projection: Optional[float] = None

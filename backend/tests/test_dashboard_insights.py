@@ -122,3 +122,77 @@ class TestBalanceHistory:
         ).json()
         assert len(points) == 1
         assert points[0]["date"] == "2025-02-10"
+
+
+class TestSavingsCapacity:
+    def _seed_month(self, db, year, month, *, income=3000.0, spend=2000.0, incidental=0.0):
+        from calendar import monthrange
+        make_transaction(db, bedrag=income, datum=date(year, month, 1))
+        make_transaction(db, bedrag=-spend, datum=date(year, month, 5))
+        if incidental:
+            make_transaction(db, bedrag=-incidental, datum=date(year, month, 6), is_incidental=True)
+        # Anchor the month edges so completeness detection sees full coverage.
+        make_transaction(db, bedrag=-1.0, datum=date(year, month, monthrange(year, month)[1]))
+
+    def test_monthly_series_and_structural_net(self, client, db: Session):
+        self._seed_month(db, 2025, 1, income=3000.0, spend=2000.0, incidental=500.0)
+        db.commit()
+
+        body = client.get("/api/dashboard/savings-capacity").json()
+        jan = next(m for m in body["months"] if m["month"] == "2025-01")
+        assert jan["income"] == 3000.0
+        assert jan["expenses_total"] == 2501.0
+        assert jan["incidental"] == 500.0
+        assert jan["expenses_structural"] == 2001.0
+        assert jan["net_raw"] == 499.0
+        assert jan["net_structural"] == 999.0
+        assert jan["partial"] is False
+
+    def test_excludes_internal_transfers(self, client, db: Session):
+        setup_savings(db)
+        self._seed_month(db, 2025, 1)
+        make_transaction(db, bedrag=-500.0, tegenrekening=SAVINGS_IBAN, datum=date(2025, 1, 20))
+        backfill_internal_transfers(db)
+        db.commit()
+
+        jan = next(m for m in client.get("/api/dashboard/savings-capacity").json()["months"]
+                   if m["month"] == "2025-01")
+        assert jan["expenses_total"] == 2001.0
+
+    def test_partial_month_flagged_and_excluded_from_averages(self, client, db: Session):
+        for m in (1, 2, 3):
+            self._seed_month(db, 2025, m)
+        # April only has data up to the 10th: partial.
+        make_transaction(db, bedrag=-100.0, datum=date(2025, 4, 10))
+        db.commit()
+
+        body = client.get("/api/dashboard/savings-capacity").json()
+        apr = next(m for m in body["months"] if m["month"] == "2025-04")
+        assert apr["partial"] is True
+        # Averages over the 3 complete months: each has net_raw 999.0.
+        assert body["trailing_3_raw"] == 999.0
+        assert body["trailing_6_raw"] is None  # only 3 complete months exist
+
+    def test_fixed_flexible_uncategorized_split(self, client, db: Session):
+        from .conftest import make_category
+        from app.models import Category
+        fixed_cat = Category(name="Huur", is_fixed=True, category_type="expense")
+        flex_cat = Category(name="Boodschappen", is_fixed=False, category_type="expense")
+        db.add_all([fixed_cat, flex_cat])
+        db.flush()
+        make_transaction(db, bedrag=-1200.0, datum=date(2025, 1, 2), category_id=fixed_cat.id)
+        make_transaction(db, bedrag=-300.0, datum=date(2025, 1, 3), category_id=flex_cat.id)
+        make_transaction(db, bedrag=-50.0, datum=date(2025, 1, 4), category_id=None)
+        db.commit()
+
+        jan = next(m for m in client.get("/api/dashboard/savings-capacity").json()["months"]
+                   if m["month"] == "2025-01")
+        assert jan["fixed"] == 1200.0
+        assert jan["flexible"] == 300.0
+        assert jan["uncategorized"] == 50.0
+
+    def test_empty_database(self, client):
+        body = client.get("/api/dashboard/savings-capacity").json()
+        assert body["months"] == []
+        assert body["trailing_3_structural"] is None
+        assert body["current_month_projection"] is None
