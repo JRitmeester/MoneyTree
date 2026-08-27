@@ -200,10 +200,12 @@
 		</div>
 
 		<div class="flags">
-			<label>
-				<input type="checkbox" checked={tx.is_incidental} onchange={handleToggleIncidental} />
-				Incidental (one-off, excluded from structural savings capacity)
-			</label>
+			{#if tx.bedrag < 0}
+				<label>
+					<input type="checkbox" checked={tx.is_incidental} onchange={handleToggleIncidental} />
+					Incidental (one-off, excluded from structural savings capacity)
+				</label>
+			{/if}
 			<label>
 				<input type="checkbox" checked={tx.is_internal_transfer} onchange={handleToggleInternalTransfer} />
 				Internal transfer (between own accounts, excluded from income/expenses)
