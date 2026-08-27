@@ -71,6 +71,8 @@ class ImportResult(BaseModel):
     imported: int
     skipped_duplicates: int
     updated: int = 0
+    categorized: int = 0
+    uncategorized: int = 0
     matches: "MatchResult"
 
 

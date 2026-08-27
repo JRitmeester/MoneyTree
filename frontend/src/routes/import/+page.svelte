@@ -9,6 +9,18 @@
 	let pendingMatches: MatchCandidate[] = $state([]);
 	let confirmedCount = $state(0);
 
+	function extractErrorDetail(e: any): string {
+		const message = e?.message ?? String(e);
+		const jsonStart = message.indexOf('{');
+		if (jsonStart === -1) return message;
+		try {
+			const parsed = JSON.parse(message.slice(jsonStart));
+			return parsed.detail ?? message;
+		} catch {
+			return message;
+		}
+	}
+
 	async function handleImport() {
 		if (!file) return;
 		loading = true;
@@ -20,7 +32,7 @@
 			result = await importCsv(file, updateDuplicates);
 			pendingMatches = [...result.matches.pending_confirmation];
 		} catch (e: any) {
-			error = e.message;
+			error = extractErrorDetail(e);
 		} finally {
 			loading = false;
 		}
@@ -58,7 +70,7 @@
 			pendingMatches = pendingMatches.filter(m => m.receipt_id !== match.receipt_id);
 			confirmedCount++;
 		} catch (e: any) {
-			error = e.message;
+			error = extractErrorDetail(e);
 		}
 	}
 
@@ -131,7 +143,21 @@
 				<span class="value">{result.matches.auto_linked + confirmedCount}</span>
 				<span class="label">Matched receipts</span>
 			</div>
+			<div class="stat">
+				<span class="value">{result.categorized}</span>
+				<span class="label">Categorized</span>
+			</div>
+			<div class="stat">
+				<span class="value">{result.uncategorized}</span>
+				<span class="label">Uncategorized</span>
+			</div>
 		</div>
+
+		{#if result.uncategorized > 0}
+			<a href="/uncategorized" class="link categorize-link">
+				Categorize {result.uncategorized} transaction{result.uncategorized === 1 ? '' : 's'} &rarr;
+			</a>
+		{/if}
 
 		{#if pendingMatches.length > 0}
 			<h3>Confirm Matches</h3>
@@ -410,7 +436,19 @@
 	.link {
 		display: inline-block;
 		margin-top: 1rem;
+		margin-right: 1rem;
 		color: #2d6a4f;
+		font-weight: 600;
+	}
+	.categorize-link {
+		display: inline-block;
+		margin-top: 1rem;
+		margin-right: 1rem;
+		padding: 0.6rem 1.2rem;
+		background: #fef3c7;
+		color: #92400e;
+		border: 1px solid #f59e0b;
+		border-radius: 6px;
 		font-weight: 600;
 	}
 </style>

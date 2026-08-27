@@ -88,6 +88,8 @@ export interface ImportResult {
 	imported: number;
 	skipped_duplicates: number;
 	updated: number;
+	categorized: number;
+	uncategorized: number;
 	matches: {
 		auto_linked: number;
 		pending_confirmation: MatchCandidate[];

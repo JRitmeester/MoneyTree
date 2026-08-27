@@ -20,7 +20,7 @@ from ..schemas import (
     TransactionListResponse,
     TransactionOut,
 )
-from ..services.csv_parser import parse_asn_csv
+from ..services.csv_parser import CsvFormatError, parse_asn_csv
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"], dependencies=[Depends(require_auth)])
 
@@ -57,11 +57,20 @@ async def import_csv(
 ):
     """Import an ASN Bank CSV export."""
     content = await file.read()
-    parsed = parse_asn_csv(content)
+    try:
+        parsed = parse_asn_csv(content)
+    except CsvFormatError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        raise HTTPException(
+            status_code=400, detail="This does not look like an ASN Bank CSV export"
+        )
 
     imported = 0
     skipped = 0
     updated = 0
+    categorized = 0
+    uncategorized = 0
     ibans = own_ibans(db)
 
     for tx_data in parsed:
@@ -91,6 +100,10 @@ async def import_csv(
             tx.is_internal_transfer = is_internal(tx, ibans)
             db.add(tx)
             imported += 1
+            if tx.category_id is not None:
+                categorized += 1
+            else:
+                uncategorized += 1
 
     db.commit()
 
@@ -137,6 +150,8 @@ async def import_csv(
         imported=imported,
         skipped_duplicates=skipped,
         updated=updated,
+        categorized=categorized,
+        uncategorized=uncategorized,
         matches=MatchResult(
             auto_linked=auto_linked,
             pending_confirmation=pending,

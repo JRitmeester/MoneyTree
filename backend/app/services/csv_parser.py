@@ -6,6 +6,10 @@ from io import StringIO
 from .merchant import extract_merchant
 
 
+class CsvFormatError(ValueError):
+    """Raised when an ASN Bank CSV export cannot be parsed."""
+
+
 def parse_euro(value: str) -> float:
     """Parse European number format: '1.096,41' -> 1096.41, '-21,04' -> -21.04."""
     if not value:
@@ -33,37 +37,58 @@ def parse_asn_csv(file_content: bytes) -> list[dict]:
         text = file_content.decode("latin-1")
 
     reader = csv.reader(StringIO(text), delimiter=";", quotechar='"')
-    header = next(reader)  # Skip header row
+    try:
+        header = next(reader)  # Skip header row
+    except StopIteration:
+        raise CsvFormatError(
+            "This does not look like an ASN Bank CSV export: the file is empty"
+        )
+
+    min_columns = 19
+    if len(header) < min_columns:
+        raise CsvFormatError(
+            "This does not look like an ASN Bank CSV export: "
+            f"expected at least {min_columns} semicolon-separated columns, found {len(header)}"
+        )
 
     transactions = []
-    for row in reader:
+    for row_num, row in enumerate(reader, start=1):
         if not row or not row[0].strip():
             continue
 
-        naam = row[3].strip() or None
+        if len(row) < min_columns:
+            raise CsvFormatError(
+                f"Row {row_num}: expected at least {min_columns} columns, found {len(row)}"
+            )
 
-        tx = {
-            "datum": parse_date(row[0]),
-            "rekening": row[1].strip(),
-            "tegenrekening": row[2].strip() or None,
-            "naam": naam,
-            "adres": row[4].strip() or None,
-            "postcode": row[5].strip() or None,
-            "woonplaats": row[6].strip() or None,
-            "valuta_saldo": row[7].strip(),
-            "saldo_voor_boeking": parse_euro(row[8]),
-            "valuta": row[9].strip(),
-            "bedrag": parse_euro(row[10]),
-            "verwerkingsdatum": parse_date(row[11]),
-            "valutadatum": parse_date(row[12]),
-            "code": row[13].strip(),
-            "type": row[14].strip(),
-            "volgnummer": row[15].strip(),
-            "betalingskenmerk": row[16].strip() or None,
-            "omschrijving": row[17].strip(),
-            "afschriftnummer": row[18].strip(),
-            "categorie": row[19].strip() if len(row) > 19 else "Overig",
-        }
+        try:
+            naam = row[3].strip() or None
+
+            tx = {
+                "datum": parse_date(row[0]),
+                "rekening": row[1].strip(),
+                "tegenrekening": row[2].strip() or None,
+                "naam": naam,
+                "adres": row[4].strip() or None,
+                "postcode": row[5].strip() or None,
+                "woonplaats": row[6].strip() or None,
+                "valuta_saldo": row[7].strip(),
+                "saldo_voor_boeking": parse_euro(row[8]),
+                "valuta": row[9].strip(),
+                "bedrag": parse_euro(row[10]),
+                "verwerkingsdatum": parse_date(row[11]),
+                "valutadatum": parse_date(row[12]),
+                "code": row[13].strip(),
+                "type": row[14].strip(),
+                "volgnummer": row[15].strip(),
+                "betalingskenmerk": row[16].strip() or None,
+                "omschrijving": row[17].strip(),
+                "afschriftnummer": row[18].strip(),
+                "categorie": row[19].strip() if len(row) > 19 else "Overig",
+            }
+        except ValueError as e:
+            raise CsvFormatError(f"Row {row_num}: {e}") from e
+
         tx["merchant_name"] = extract_merchant(tx["omschrijving"], tx["type"], tx["naam"])
         tx["import_hash"] = compute_hash(tx)
         transactions.append(tx)
