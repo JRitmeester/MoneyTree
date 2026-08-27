@@ -48,6 +48,85 @@
 		}
 	}
 
+	// Add root category
+	let addingRoot = $state(false);
+	let newRootName = $state('');
+	let newRootType = $state('expense');
+
+	function startAddRoot() {
+		addingRoot = true;
+		newRootName = '';
+		newRootType = 'expense';
+	}
+
+	function cancelAddRoot() {
+		addingRoot = false;
+		newRootName = '';
+	}
+
+	async function handleAddRoot() {
+		const name = newRootName.trim();
+		if (!name) return;
+		try {
+			await createCategory(name, undefined, newRootType);
+			addingRoot = false;
+			newRootName = '';
+			await load();
+		} catch (e: any) {
+			error = extractErrorDetail(e);
+		}
+	}
+
+	function handleRootKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') handleAddRoot();
+		if (e.key === 'Escape') cancelAddRoot();
+	}
+
+	// Move to... (re-parent)
+	let movingId: number | null = $state(null);
+	let moveError: string | null = $state(null);
+
+	function startMove(id: number) {
+		movingId = id;
+		moveError = null;
+	}
+
+	function cancelMove() {
+		movingId = null;
+		moveError = null;
+	}
+
+	function collectDescendantIds(cat: Category): Set<number> {
+		const ids = new Set<number>();
+		function walk(c: Category) {
+			for (const child of c.children) {
+				ids.add(child.id);
+				walk(child);
+			}
+		}
+		walk(cat);
+		return ids;
+	}
+
+	async function handleMoveTargetChosen(cat: Category, targetId: number | null) {
+		if (targetId === cat.id) {
+			moveError = 'A category cannot be moved under itself.';
+			return;
+		}
+		if (targetId != null && collectDescendantIds(cat).has(targetId)) {
+			moveError = 'A category cannot be moved under one of its own subcategories.';
+			return;
+		}
+		try {
+			await updateCategory(cat.id, { parent_id: targetId });
+			movingId = null;
+			moveError = null;
+			await load();
+		} catch (e: any) {
+			moveError = extractErrorDetail(e);
+		}
+	}
+
 	async function handleDelete(id: number) {
 		if (!confirm('Delete this category?')) return;
 		try {
@@ -205,8 +284,32 @@
 	let userCategories = $derived(flatList(categories));
 </script>
 
-<h1>Categories</h1>
-<p>Manage spending categories. Bank categories are auto-imported from CSV exports.</p>
+<div class="page-header">
+	<div>
+		<h1>Categories</h1>
+		<p>Manage spending categories. Bank categories are auto-imported from CSV exports.</p>
+	</div>
+	<div class="header-actions">
+		{#if addingRoot}
+			<input
+				class="rename-input root-name-input"
+				type="text"
+				bind:value={newRootName}
+				placeholder="Category name..."
+				onkeydown={handleRootKeydown}
+				use:focusOnMount
+			/>
+			<select bind:value={newRootType}>
+				<option value="expense">Expense</option>
+				<option value="income">Income</option>
+			</select>
+			<button class="add-root-btn" onclick={handleAddRoot}>Save</button>
+			<button class="cancel-sub-btn" onclick={cancelAddRoot} title="Cancel">&times;</button>
+		{:else}
+			<button class="add-root-btn" onclick={startAddRoot}>+ New category</button>
+		{/if}
+	</div>
+</div>
 
 {#if error}
 	<div class="error">{error}</div>
@@ -254,6 +357,7 @@
 							</button>
 						</span>
 						<button class="merge-btn" onclick={() => startMerge(cat.id)}>Merge into...</button>
+						<button class="move-btn" onclick={() => startMove(cat.id)}>Move to...</button>
 						<span class="col-delete">
 							{#if !cat.children.length}
 								<button class="del-btn" onclick={() => handleDelete(cat.id)}>Delete</button>
@@ -272,6 +376,23 @@
 							</div>
 							<button class="cancel-sub-btn" onclick={cancelMerge} title="Cancel">&times;</button>
 						</div>
+					{/if}
+					{#if movingId === cat.id}
+						<div class="move-inline">
+							<span class="move-label">Move "{cat.name}" to:</span>
+							<div class="move-picker">
+								<CategoryInput
+									value={null}
+									onchange={(targetId) => handleMoveTargetChosen(cat, targetId)}
+									placeholder="Select new parent..."
+								/>
+							</div>
+							<button class="root-btn" onclick={() => handleMoveTargetChosen(cat, null)}>Make root category</button>
+							<button class="cancel-sub-btn" onclick={cancelMove} title="Cancel">&times;</button>
+						</div>
+						{#if moveError}
+							<div class="move-error">{moveError}</div>
+						{/if}
 					{/if}
 					{#if cat.children.length > 0}
 						{#each cat.children as child}
@@ -354,6 +475,40 @@
 
 <style>
 	h1 { color: #1a1a1a; }
+	.page-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+	.header-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		flex-shrink: 0;
+	}
+	.header-actions select {
+		padding: 0.35rem 0.5rem;
+		border: 1px solid #ddd;
+		border-radius: 4px;
+		font-size: 0.85rem;
+	}
+	.root-name-input {
+		min-width: 180px;
+	}
+	.add-root-btn {
+		padding: 0.4rem 0.9rem;
+		background: #2d6a4f;
+		color: white;
+		border: none;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 0.85rem;
+		font-weight: 500;
+		white-space: nowrap;
+	}
+	.add-root-btn:hover { background: #1b4332; }
 	.error {
 		padding: 1rem;
 		background: #fef2f2;
@@ -519,6 +674,49 @@
 	.merge-picker {
 		flex: 1;
 		max-width: 320px;
+	}
+	.move-btn {
+		padding: 0.2rem 0.6rem;
+		background: white;
+		border: 1px solid #2563eb;
+		color: #2563eb;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 0.75rem;
+		flex-shrink: 0;
+	}
+	.move-inline {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.3rem 0.5rem 0.5rem 0.75rem;
+		margin-left: 1.5rem;
+		border-left: 2px solid #e5e7eb;
+	}
+	.move-label {
+		font-size: 0.85rem;
+		color: #666;
+		white-space: nowrap;
+	}
+	.move-picker {
+		flex: 1;
+		max-width: 320px;
+	}
+	.root-btn {
+		padding: 0.2rem 0.6rem;
+		background: white;
+		border: 1px solid #999;
+		color: #444;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 0.75rem;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+	.move-error {
+		margin: 0 0.5rem 0.5rem 2.25rem;
+		font-size: 0.8rem;
+		color: #dc2626;
 	}
 
 	/* Mappings section */
