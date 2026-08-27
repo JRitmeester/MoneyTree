@@ -6,11 +6,11 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
-from ..models import Category, CategoryMapping, LineItem, Receipt, Transaction, TransactionOffset
+from ..models import Category, CategoryMapping, IncidentalLabel, LineItem, Receipt, Transaction, TransactionOffset
 from ..services.remaining import recalculate_remaining
 from ..services.transfers import is_internal, own_ibans
 from ..schemas import (
-    BulkIncidentalRequest,
+    BulkFlagsRequest,
     ImportResult,
     LineItemCreate,
     LineItemOut,
@@ -224,14 +224,31 @@ def list_transactions(
     )
 
 
-@router.post("/bulk-incidental")
-def bulk_set_incidental(payload: BulkIncidentalRequest, db: Session = Depends(get_db)):
-    """Set the incidental flag on many transactions at once."""
+@router.post("/bulk-flags")
+def bulk_set_flags(payload: BulkFlagsRequest, db: Session = Depends(get_db)):
+    """Set incidental/transfer flags on many transactions at once.
+
+    Assigning a label implies incidental; clearing incidental clears the label.
+    Setting the transfer flag marks the rows as manual so backfills skip them."""
+    if payload.incidental_label_id is not None:
+        if not db.get(IncidentalLabel, payload.incidental_label_id):
+            raise HTTPException(status_code=404, detail="Label not found")
+
     txs = db.execute(
         select(Transaction).where(Transaction.id.in_(payload.transaction_ids))
     ).scalars().all()
     for tx in txs:
-        tx.is_incidental = payload.is_incidental
+        if payload.is_internal_transfer is not None:
+            tx.is_internal_transfer = payload.is_internal_transfer
+            tx.is_internal_transfer_manual = True
+        if payload.is_incidental is False:
+            tx.is_incidental = False
+            tx.incidental_label_id = None
+        elif payload.incidental_label_id is not None:
+            tx.is_incidental = True
+            tx.incidental_label_id = payload.incidental_label_id
+        elif payload.is_incidental is True:
+            tx.is_incidental = True
     db.commit()
     return {"updated": len(txs)}
 
@@ -331,6 +348,16 @@ def update_transaction(transaction_id: int, data: dict, db: Session = Depends(ge
 
     if "is_incidental" in data:
         tx.is_incidental = bool(data["is_incidental"])
+        if not tx.is_incidental:
+            tx.incidental_label_id = None
+
+    if "incidental_label_id" in data:
+        label_id = data["incidental_label_id"]
+        if label_id is not None:
+            if not db.get(IncidentalLabel, label_id):
+                raise HTTPException(status_code=404, detail="Label not found")
+            tx.is_incidental = True
+        tx.incidental_label_id = label_id
 
     if "is_internal_transfer" in data:
         tx.is_internal_transfer = bool(data["is_internal_transfer"])

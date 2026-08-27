@@ -47,6 +47,9 @@ class Transaction(Base):
     is_internal_transfer: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_internal_transfer_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_incidental: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    incidental_label_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("incidental_labels.id")
+    )
 
     receipt: Mapped["Receipt | None"] = relationship(back_populates="transaction")
     category: Mapped["Category | None"] = relationship(foreign_keys=[category_id])
@@ -263,4 +266,14 @@ class OwnAccount(Base):
     account_type: Mapped[str] = mapped_column(String(10), nullable=False)  # "checking" | "savings"
     starting_balance: Mapped[float | None] = mapped_column(Float)
     starting_balance_date: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class IncidentalLabel(Base):
+    """Groups related one-off transactions across categories, e.g. a holiday
+    or a house move, so incidental spending can be explained per event."""
+    __tablename__ = "incidental_labels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

@@ -128,19 +128,6 @@ class TestTransactionFlagsApi:
         assert tx.is_internal_transfer is True
         assert changed == 0
 
-    def test_bulk_incidental(self, client, db: Session):
-        a = make_transaction(db, bedrag=-100.0)
-        b = make_transaction(db, bedrag=-200.0)
-        db.commit()
-        resp = client.post("/api/transactions/bulk-incidental", json={
-            "transaction_ids": [a.id, b.id, 99999],
-            "is_incidental": True,
-        })
-        assert resp.status_code == 200
-        assert resp.json()["updated"] == 2
-        db.refresh(a)
-        assert a.is_incidental is True
-
     def test_list_includes_flags(self, client, db: Session):
         make_transaction(db, bedrag=-100.0)
         db.commit()

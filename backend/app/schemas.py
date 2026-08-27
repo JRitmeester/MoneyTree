@@ -29,6 +29,7 @@ class TransactionOut(BaseModel):
     has_receipt: bool = False
     is_internal_transfer: bool = False
     is_incidental: bool = False
+    incidental_label_id: Optional[int] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -427,9 +428,52 @@ class OwnAccountOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class BulkIncidentalRequest(BaseModel):
+class BulkFlagsRequest(BaseModel):
     transaction_ids: list[int] = Field(min_length=1)
-    is_incidental: bool
+    is_incidental: Optional[bool] = None
+    is_internal_transfer: Optional[bool] = None
+    incidental_label_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _require_at_least_one_flag(self):
+        if (
+            self.is_incidental is None
+            and self.is_internal_transfer is None
+            and self.incidental_label_id is None
+        ):
+            raise ValueError("At least one of is_incidental, is_internal_transfer, incidental_label_id is required")
+        return self
+
+
+# --- Incidental labels ---
+
+
+class IncidentalLabelCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def _strip_and_check(self):
+        stripped = self.name.strip()
+        if not stripped:
+            raise ValueError("Label name must not be blank")
+        self.name = stripped
+        return self
+
+
+class IncidentalLabelOut(BaseModel):
+    id: int
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class IncidentalLabelSummary(BaseModel):
+    id: int
+    name: str
+    total: float
+    count: int
+    date_from: Optional[DateType] = None
+    date_to: Optional[DateType] = None
 
 
 class SavingsBalanceOut(BaseModel):
