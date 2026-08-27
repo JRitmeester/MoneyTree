@@ -248,6 +248,7 @@ def list_transactions(
 
     # Check which have receipts
     tx_ids = [tx.id for tx in results]
+    tx_ids_set = set(tx_ids)
     receipt_tx_ids_set = set()
     if tx_ids:
         rows = db.execute(
@@ -257,10 +258,36 @@ def list_transactions(
         ).scalars().all()
         receipt_tx_ids_set = set(rows)
 
+    # Batch-fetch offsets touching any transaction on this page: one query,
+    # no N+1. A row's expense side contributes to that expense's offset_total;
+    # its income side marks that income transaction as offset-linked.
+    offset_totals: dict[int, float] = {}
+    offset_income_ids: set[int] = set()
+    if tx_ids:
+        offset_rows = db.execute(
+            select(
+                TransactionOffset.expense_transaction_id,
+                TransactionOffset.income_transaction_id,
+                Transaction.bedrag,
+            )
+            .join(Transaction, Transaction.id == TransactionOffset.income_transaction_id)
+            .where(
+                TransactionOffset.expense_transaction_id.in_(tx_ids)
+                | TransactionOffset.income_transaction_id.in_(tx_ids)
+            )
+        ).all()
+        for expense_id, income_id, income_bedrag in offset_rows:
+            if expense_id in tx_ids_set:
+                offset_totals[expense_id] = offset_totals.get(expense_id, 0.0) + abs(income_bedrag)
+            if income_id in tx_ids_set:
+                offset_income_ids.add(income_id)
+
     items = []
     for tx in results:
         out = TransactionOut.model_validate(tx)
         out.has_receipt = tx.id in receipt_tx_ids_set
+        out.offset_total = round(offset_totals.get(tx.id, 0.0), 2)
+        out.is_offset_income = tx.id in offset_income_ids
         items.append(out)
 
     return TransactionListResponse(

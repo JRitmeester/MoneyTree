@@ -31,6 +31,8 @@ class TransactionOut(BaseModel):
     is_incidental: bool = False
     incidental_label_id: Optional[int] = None
     created_at: datetime
+    offset_total: float = 0.0
+    is_offset_income: bool = False
 
     model_config = {"from_attributes": True}
 

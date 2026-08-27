@@ -281,6 +281,16 @@
 									{labelName(tx.incidental_label_id) ?? 'incidental'}
 								</span>
 							{/if}
+							{#if tx.bedrag < 0 && tx.offset_total > 0}
+								<span class="badge offset" title={`Net after offsets: ${formatEuro(tx.bedrag + tx.offset_total)}`}>
+									offset
+								</span>
+							{/if}
+							{#if tx.bedrag > 0 && tx.is_offset_income}
+								<span class="badge offset" title="Net after offsets: 0.00">
+									offset
+								</span>
+							{/if}
 							{#if tx.bedrag < 0 && !tx.is_internal_transfer}
 								<button
 									class="flag-toggle"
@@ -476,6 +486,14 @@
 	.badge.incidental {
 		background: #fefce8;
 		color: #a16207;
+		font-size: 0.65rem;
+		border-radius: 4px;
+		padding: 0.05rem 0.35rem;
+		margin-left: 0.35rem;
+	}
+	.badge.offset {
+		background: #ecfeff;
+		color: #0e7490;
 		font-size: 0.65rem;
 		border-radius: 4px;
 		padding: 0.05rem 0.35rem;

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
-from ..models import Budget, BudgetLine, Category as CategoryModel, LineItem, Receipt, Transaction
+from ..models import Budget, BudgetLine, Category as CategoryModel, LineItem, Receipt, Transaction, TransactionOffset
 from ..schemas import (
     BalancePoint,
     BreadcrumbItem,
@@ -119,11 +119,57 @@ class ExpenseItem:
     li: Opt["LineItem"]    # None for direct (receipt-less) transactions
 
 
+def _offset_totals(db: Session) -> tuple[dict[int, float], set[int]]:
+    """One query, reused by every analytics endpoint: no N+1.
+
+    Returns:
+    - expense_id -> total linked-offset amount (sum of abs(bedrag) of every
+      income transaction linked to that expense).
+    - the set of income transaction ids that are linked as an offset to some
+      expense (these are excluded from income everywhere).
+
+    Offsets aren't themselves date-scoped: a link is a permanent property of
+    the two transactions, so this is not filtered by date_from/date_to. Each
+    endpoint applies the date filter to which transactions it looks at, not
+    to which offsets exist.
+    """
+    rows = db.execute(
+        select(
+            TransactionOffset.expense_transaction_id,
+            TransactionOffset.income_transaction_id,
+            Transaction.bedrag,
+        ).join(Transaction, Transaction.id == TransactionOffset.income_transaction_id)
+    ).all()
+
+    expense_offsets: dict[int, float] = {}
+    offset_income_ids: set[int] = set()
+    for expense_id, income_id, income_bedrag in rows:
+        expense_offsets[expense_id] = expense_offsets.get(expense_id, 0.0) + abs(income_bedrag)
+        offset_income_ids.add(income_id)
+    return expense_offsets, offset_income_ids
+
+
 def _iter_expense_items(db: Session, date_from: date | None, date_to: date | None):
     """Yield ExpenseItem for every expense, covering two paths:
     1. Transactions with receipts → one entry per line item.
     2. Transactions without any receipt → one entry for the full bedrag.
+
+    Offset double-subtract invariant: when an income transaction is linked as
+    an offset to a receipted expense, `link_offset` immediately calls
+    `recalculate_remaining` (services/remaining.py), which subtracts the
+    offset total from the receipt's "remaining" line item on the spot. So by
+    the time we get here, path 1's line items (explicit items + remaining)
+    already sum to `abs(bedrag) - offset_total`. Subtracting the offset again
+    here would double-count it. Path 2 (no receipt at all) has no line items
+    to carry that adjustment, so it is the only path that subtracts the
+    offset directly, floored at 0 so an offset can't flip an expense to
+    "negative spend". This is also why transaction-level aggregations
+    elsewhere in this module (summary, monthly-trend, savings-capacity, which
+    never see line items) always subtract the offset from raw `bedrag`: they
+    have no equivalent of the already-adjusted remaining line item to lean on.
     """
+    expense_offsets, _ = _offset_totals(db)
+
     def _date_filter(q):
         if date_from:
             q = q.where(Transaction.datum >= date_from)
@@ -131,7 +177,7 @@ def _iter_expense_items(db: Session, date_from: date | None, date_to: date | Non
             q = q.where(Transaction.datum <= date_to)
         return q
 
-    # Path 1: line items
+    # Path 1: line items — already net of any linked offset, do NOT subtract again.
     li_query = _date_filter(
         select(Transaction, LineItem)
         .join(Receipt, Receipt.transaction_id == Transaction.id)
@@ -142,7 +188,8 @@ def _iter_expense_items(db: Session, date_from: date | None, date_to: date | Non
     for tx, li in db.execute(li_query).all():
         yield ExpenseItem(tx=tx, amount=li.amount * li.quantity, category_id=li.category_id, li=li)
 
-    # Path 2: transactions with no receipt at all
+    # Path 2: transactions with no receipt at all — subtract the offset here,
+    # floored at 0.
     no_receipt_query = _date_filter(
         select(Transaction)
         .where(Transaction.bedrag < 0)
@@ -154,7 +201,8 @@ def _iter_expense_items(db: Session, date_from: date | None, date_to: date | Non
         )
     )
     for tx in db.execute(no_receipt_query).scalars().all():
-        yield ExpenseItem(tx=tx, amount=abs(tx.bedrag), category_id=tx.category_id, li=None)
+        amount = max(0.0, abs(tx.bedrag) - expense_offsets.get(tx.id, 0.0))
+        yield ExpenseItem(tx=tx, amount=amount, category_id=tx.category_id, li=None)
 
 
 # ---------------------------------------------------------------------------
@@ -179,9 +227,16 @@ def get_summary(
     external = [tx for tx in transactions if not tx.is_internal_transfer]
     internal = [tx for tx in transactions if tx.is_internal_transfer]
 
-    total_income = sum(tx.bedrag for tx in external if tx.bedrag > 0)
-    total_expenses = sum(tx.bedrag for tx in external if tx.bedrag < 0)
-    net = total_income + total_expenses
+    expense_offsets, offset_income_ids = _offset_totals(db)
+
+    total_income = sum(
+        tx.bedrag for tx in external if tx.bedrag > 0 and tx.id not in offset_income_ids
+    )
+    total_expenses = sum(
+        max(0.0, abs(tx.bedrag) - expense_offsets.get(tx.id, 0.0))
+        for tx in external if tx.bedrag < 0
+    )
+    net = total_income - total_expenses
 
     transfers_out = sum(-tx.bedrag for tx in internal if tx.bedrag < 0)
     transfers_in = sum(tx.bedrag for tx in internal if tx.bedrag > 0)
@@ -199,7 +254,7 @@ def get_summary(
 
     return DashboardSummary(
         total_income=total_income,
-        total_expenses=abs(total_expenses),
+        total_expenses=total_expenses,
         net=net,
         transaction_count=len(external),
         receipts_attached=receipts_attached,
@@ -471,6 +526,8 @@ def get_monthly_trend(
         select(Transaction).order_by(Transaction.datum)
     ).scalars().all()
 
+    expense_offsets, offset_income_ids = _offset_totals(db)
+
     monthly: dict[str, dict] = {}
     for tx in transactions:
         if tx.is_internal_transfer:
@@ -479,9 +536,11 @@ def get_monthly_trend(
         if key not in monthly:
             monthly[key] = {"income": 0.0, "expenses": 0.0}
         if tx.bedrag > 0:
+            if tx.id in offset_income_ids:
+                continue
             monthly[key]["income"] += tx.bedrag
         else:
-            monthly[key]["expenses"] += abs(tx.bedrag)
+            monthly[key]["expenses"] += max(0.0, abs(tx.bedrag) - expense_offsets.get(tx.id, 0.0))
 
     sorted_months = sorted(monthly.keys())[-months:]
 
@@ -513,6 +572,8 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
     unmapped_expenses = 0.0
     unmapped_income = 0.0
 
+    _, offset_income_ids = _offset_totals(db)
+
     for item in _iter_expense_items(db, first_day, last_day):
         is_income = item.tx.bedrag > 0
         if item.category_id is None:
@@ -533,6 +594,8 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
         .where(Transaction.is_internal_transfer.is_(False))
     )
     for tx, li in db.execute(income_query).all():
+        if tx.id in offset_income_ids:
+            continue
         if li.category_id is None:
             unmapped_income += li.amount * li.quantity
         else:
@@ -547,6 +610,8 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
         .where(~select(Receipt.id).where(Receipt.transaction_id == Transaction.id).exists())
     )
     for tx in db.execute(direct_income_query).scalars().all():
+        if tx.id in offset_income_ids:
+            continue
         if tx.category_id is None:
             unmapped_income += tx.bedrag
         else:
@@ -660,6 +725,8 @@ def get_savings_capacity(
     min_datum = min(tx.datum for tx in txs)
     max_datum = max(tx.datum for tx in txs)
 
+    expense_offsets, offset_income_ids = _offset_totals(db)
+
     buckets: dict[str, dict[str, float]] = {}
     for tx in txs:
         key = tx.datum.strftime("%Y-%m")
@@ -668,9 +735,11 @@ def get_savings_capacity(
             "expenses_structural": 0.0, "incidental": 0.0,
         })
         if tx.bedrag > 0:
+            if tx.id in offset_income_ids:
+                continue
             b["income"] += tx.bedrag
         else:
-            amount = abs(tx.bedrag)
+            amount = max(0.0, abs(tx.bedrag) - expense_offsets.get(tx.id, 0.0))
             b["expenses_total"] += amount
             if tx.is_incidental:
                 b["incidental"] += amount

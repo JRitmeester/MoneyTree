@@ -2,12 +2,18 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from app.models import OwnAccount
+from app.models import LineItem, OwnAccount, Receipt
 from app.services.transfers import backfill_internal_transfers
 
 from .conftest import make_category, make_transaction
 
 SAVINGS_IBAN = "NL00ASNB0000000002"
+
+
+def link_offset(client, expense_id: int, income_id: int):
+    resp = client.post(f"/api/transactions/{expense_id}/offsets/{income_id}")
+    assert resp.status_code == 200, resp.text
+    return resp
 
 
 def setup_savings(db, **kwargs):
@@ -275,3 +281,103 @@ class TestCategoryLineItemGroups:
         body = client.get(f"/api/dashboard/category/{grandchild.id}/line-items").json()
         assert body["groups"] == []
         assert [li["amount"] for li in body["line_items"]] == [40.0]
+
+
+class TestOffsetsNetOutOfAnalytics:
+    """Linked offsets: the income side is excluded from income everywhere,
+    and the expense side counts at max(0, abs(bedrag) - offset_total)."""
+
+    def test_summary_nets_receiptless_expense_and_excludes_income(self, client, db: Session):
+        cat = make_category(db, name="Boodschappen")
+        expense = make_transaction(db, bedrag=-100.0, category_id=cat.id, datum=date(2025, 3, 1))
+        income = make_transaction(db, bedrag=30.0, categorie="Terugbetaling", datum=date(2025, 3, 2))
+        db.commit()
+
+        link_offset(client, expense.id, income.id)
+
+        body = client.get("/api/dashboard/summary").json()
+        assert body["total_expenses"] == 70.0
+        assert body["total_income"] == 0.0
+        assert body["net"] == -70.0
+
+    def test_offset_never_pushes_expense_below_zero(self, client, db: Session):
+        expense = make_transaction(db, bedrag=-20.0, datum=date(2025, 3, 1))
+        income = make_transaction(db, bedrag=50.0, datum=date(2025, 3, 2))
+        db.commit()
+
+        link_offset(client, expense.id, income.id)
+
+        body = client.get("/api/dashboard/summary").json()
+        assert body["total_expenses"] == 0.0
+
+    def test_by_category_shows_net_amount_for_receiptless_expense(self, client, db: Session):
+        cat = make_category(db, name="Boodschappen")
+        expense = make_transaction(db, bedrag=-100.0, category_id=cat.id, datum=date(2025, 3, 1))
+        income = make_transaction(db, bedrag=30.0, datum=date(2025, 3, 2))
+        db.commit()
+
+        link_offset(client, expense.id, income.id)
+
+        result = client.get("/api/dashboard/by-category").json()
+        assert len(result) == 1
+        assert result[0]["category_id"] == cat.id
+        assert result[0]["total"] == 70.0
+
+    def test_receipt_split_expense_not_double_subtracted(self, client, db: Session):
+        """The 'remaining' line item is already reduced by the offset when the
+        link is created (services/remaining.py). _iter_expense_items must sum
+        the line items as-is, not subtract offset_total a second time."""
+        cat = make_category(db, name="Boodschappen")
+        sub_cat = make_category(db, name="Snacks")
+        expense = make_transaction(db, bedrag=-100.0, category_id=cat.id, datum=date(2025, 3, 1))
+        receipt = Receipt(transaction_id=expense.id, total_amount=100.0)
+        db.add(receipt)
+        db.flush()
+        db.add(LineItem(
+            receipt_id=receipt.id, description="Chips", amount=15.0, quantity=1,
+            category_id=sub_cat.id, sort_order=0,
+        ))
+        db.commit()
+
+        income = make_transaction(db, bedrag=30.0, datum=date(2025, 3, 2))
+        db.commit()
+        link_offset(client, expense.id, income.id)
+
+        # explicit item 15.0 + remaining (100 - 30 - 15 = 55.0) = 70.0 total,
+        # matching the receipt-less case above. No double subtraction.
+        result = client.get("/api/dashboard/by-category").json()
+        total = sum(r["total"] for r in result)
+        assert total == 70.0
+
+        detail = client.get(f"/api/dashboard/category/{cat.id}/line-items").json()
+        assert detail["total"] == 55.0
+        sub_detail = client.get(f"/api/dashboard/category/{sub_cat.id}/line-items").json()
+        assert sub_detail["total"] == 15.0
+
+    def test_monthly_trend_consistent_with_summary(self, client, db: Session):
+        expense = make_transaction(db, bedrag=-100.0, datum=date(2025, 3, 1))
+        income = make_transaction(db, bedrag=30.0, datum=date(2025, 3, 2))
+        db.commit()
+
+        link_offset(client, expense.id, income.id)
+
+        months = client.get("/api/dashboard/monthly-trend").json()
+        mar = next(m for m in months if m["month"] == "2025-03")
+        assert mar["expenses"] == 70.0
+        assert mar["income"] == 0.0
+
+    def test_savings_capacity_nets_offsets(self, client, db: Session):
+        from calendar import monthrange
+        expense = make_transaction(db, bedrag=-100.0, datum=date(2025, 3, 5))
+        income = make_transaction(db, bedrag=30.0, datum=date(2025, 3, 6))
+        # Anchor month edges so completeness detection sees full coverage.
+        make_transaction(db, bedrag=-1.0, datum=date(2025, 3, 1))
+        make_transaction(db, bedrag=-1.0, datum=date(2025, 3, monthrange(2025, 3)[1]))
+        db.commit()
+
+        link_offset(client, expense.id, income.id)
+
+        months = client.get("/api/dashboard/savings-capacity").json()["months"]
+        mar = next(m for m in months if m["month"] == "2025-03")
+        assert mar["expenses_total"] == 72.0
+        assert mar["income"] == 0.0

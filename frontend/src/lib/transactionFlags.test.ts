@@ -23,6 +23,8 @@ function tx(id: number, overrides: Partial<Transaction> = {}): Transaction {
 		is_internal_transfer: false,
 		is_incidental: false,
 		incidental_label_id: null,
+		offset_total: 0,
+		is_offset_income: false,
 		...overrides
 	};
 }

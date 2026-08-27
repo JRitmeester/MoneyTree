@@ -37,6 +37,8 @@ export interface Transaction {
 	is_incidental: boolean;
 	incidental_label_id: number | null;
 	created_at: string;
+	offset_total: number;
+	is_offset_income: boolean;
 }
 
 export interface TransactionDetail extends Transaction {
