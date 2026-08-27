@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from ..config import UPLOADS_DIR
 from ..models import (
     Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping,
-    ImportedExport, LineItem, Receipt, SyncEvent, Transaction, TransactionOffset,
+    ImportedExport, IncidentalLabel, LineItem, OwnAccount, Receipt, SyncEvent,
+    Transaction, TransactionOffset,
 )
 from ..sync_schemas import (
     ExportFile, ExportReceipt, ExportSyncEvent, ImportConflict, ImportPreview,
@@ -28,6 +29,13 @@ def _budget_index(db: Session) -> dict[str, Budget]:
 
 def _tx_hashes(db: Session) -> set[str]:
     return set(db.execute(select(Transaction.import_hash)).scalars().all())
+
+
+def _incidental_label_index(db: Session) -> dict[str, IncidentalLabel]:
+    return {
+        l.name: l
+        for l in db.execute(select(IncidentalLabel)).scalars().all()
+    }
 
 
 def _budget_overlaps(db: Session, start, end, exclude_start=None) -> Budget | None:
@@ -130,6 +138,24 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
                 message=f"BudgetTemplate for '{et.category_name}' exists; NAS amount kept.",
             ))
 
+    label_idx = _incidental_label_index(db)
+    label_name_by_id = {l.id: l.name for l in label_idx.values()}
+    for name in export.incidental_labels:
+        if name not in label_idx:
+            preview.will_add_incidental_labels += 1
+
+    existing_account_ibans = {
+        a.iban for a in db.execute(select(OwnAccount)).scalars().all()
+    }
+    for ea in export.own_accounts:
+        if ea.iban not in existing_account_ibans:
+            preview.will_add_own_accounts += 1
+        else:
+            preview.soft_conflicts.append(ImportConflict(
+                code="own_account_conflict", severity="soft",
+                message=f"Own account with IBAN '{ea.iban}' exists; destination values kept.",
+            ))
+
     existing_tx_by_hash = {
         t.import_hash: t
         for t in db.execute(select(Transaction)).scalars().all()
@@ -157,6 +183,30 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
                         old_merchant_name=existing.merchant_name,
                         new_merchant_name=et.merchant_name,
                     ))
+            existing_flags_default = (
+                not existing.is_internal_transfer
+                and not existing.is_internal_transfer_manual
+                and not existing.is_incidental
+                and existing.incidental_label_id is None
+            )
+            existing_label_name = (
+                label_name_by_id.get(existing.incidental_label_id)
+                if existing.incidental_label_id else None
+            )
+            flags_differ = (
+                existing.is_internal_transfer != et.is_internal_transfer
+                or existing.is_internal_transfer_manual != et.is_internal_transfer_manual
+                or existing.is_incidental != et.is_incidental
+                or existing_label_name != et.incidental_label
+            )
+            if not existing_flags_default and flags_differ:
+                preview.soft_conflicts.append(ImportConflict(
+                    code="transaction_flags_conflict", severity="soft",
+                    message=(
+                        f"Transaction {et.import_hash} has curated flags on destination; "
+                        "imported flags not applied."
+                    ),
+                ))
         else:
             preview.will_add_transactions += 1
             if len(preview.add_transactions) < PREVIEW_SAMPLE_LIMIT:
@@ -442,17 +492,61 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
             continue
         db.add(BudgetTemplate(category_id=cat.id, amount=et.amount))
 
+    # 5b. Incidental labels -- insert missing by name
+    label_idx = _incidental_label_index(db)
+    label_names_needed = set(export.incidental_labels) | {
+        et.incidental_label for et in export.transactions if et.incidental_label
+    }
+    for name in label_names_needed:
+        if name in label_idx:
+            continue
+        new_label = IncidentalLabel(name=name)
+        db.add(new_label)
+        db.flush()
+        label_idx[name] = new_label
+
+    # 5c. Own accounts -- insert missing by IBAN; existing IBAN is left untouched
+    existing_accounts_by_iban = {
+        a.iban: a for a in db.execute(select(OwnAccount)).scalars().all()
+    }
+    for ea in export.own_accounts:
+        if ea.iban in existing_accounts_by_iban:
+            continue
+        new_account = OwnAccount(
+            iban=ea.iban, name=ea.name, account_type=ea.account_type,
+            starting_balance=ea.starting_balance,
+            starting_balance_date=ea.starting_balance_date,
+        )
+        db.add(new_account)
+        existing_accounts_by_iban[ea.iban] = new_account
+
     # 6. Transactions
     existing_tx = {
         t.import_hash: t
         for t in db.execute(select(Transaction)).scalars().all()
     }
     for et in export.transactions:
+        label_id = (
+            label_idx[et.incidental_label].id
+            if et.incidental_label and et.incidental_label in label_idx
+            else None
+        )
         if et.import_hash in existing_tx:
+            tx = existing_tx[et.import_hash]
             if update_duplicates:
-                tx = existing_tx[et.import_hash]
                 tx.merchant_name = et.merchant_name
                 tx.category_id = cat_idx[et.category_name].id if et.category_name and et.category_name in cat_idx else None
+            existing_flags_default = (
+                not tx.is_internal_transfer
+                and not tx.is_internal_transfer_manual
+                and not tx.is_incidental
+                and tx.incidental_label_id is None
+            )
+            if existing_flags_default:
+                tx.is_internal_transfer = et.is_internal_transfer
+                tx.is_internal_transfer_manual = et.is_internal_transfer_manual
+                tx.is_incidental = et.is_incidental
+                tx.incidental_label_id = label_id
             continue
         category_id = (
             cat_idx[et.category_name].id
@@ -469,6 +563,10 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
             omschrijving=et.omschrijving, afschriftnummer=et.afschriftnummer,
             categorie=et.categorie, merchant_name=et.merchant_name,
             import_hash=et.import_hash, created_at=et.created_at, category_id=category_id,
+            is_internal_transfer=et.is_internal_transfer,
+            is_internal_transfer_manual=et.is_internal_transfer_manual,
+            is_incidental=et.is_incidental,
+            incidental_label_id=label_id,
         )
         db.add(new_tx)
         db.flush()

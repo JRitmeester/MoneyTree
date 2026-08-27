@@ -12,12 +12,13 @@ from pathlib import Path
 from ..config import UPLOADS_DIR
 from ..models import (
     Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping,
-    LineItem, Receipt, SyncEvent, Transaction, TransactionOffset,
+    IncidentalLabel, LineItem, OwnAccount, Receipt, SyncEvent, Transaction,
+    TransactionOffset,
 )
 from ..sync_schemas import (
     ExportBudget, ExportBudgetLine, ExportBudgetTemplate, ExportCategory,
-    ExportCategoryMapping, ExportFile, ExportLineItem, ExportReceipt,
-    ExportSyncEvent, ExportTransaction, ExportTransactionOffset,
+    ExportCategoryMapping, ExportFile, ExportLineItem, ExportOwnAccount,
+    ExportReceipt, ExportSyncEvent, ExportTransaction, ExportTransactionOffset,
 )
 
 
@@ -77,6 +78,11 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
         tx_query = tx_query.where(Transaction.updated_at >= cutoff)
     txs = db.execute(tx_query).scalars().all()
     tx_by_id = {t.id: t for t in txs}
+
+    labels = db.execute(select(IncidentalLabel)).scalars().all()
+    label_by_id = {l.id: l for l in labels}
+    export_incidental_labels = [l.name for l in labels]
+
     export_txs = [
         ExportTransaction(
             import_hash=t.import_hash,
@@ -103,8 +109,27 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
             merchant_name=t.merchant_name,
             category_name=cat_by_id[t.category_id].name if t.category_id else None,
             created_at=t.created_at,
+            is_internal_transfer=t.is_internal_transfer,
+            is_internal_transfer_manual=t.is_internal_transfer_manual,
+            is_incidental=t.is_incidental,
+            incidental_label=(
+                label_by_id[t.incidental_label_id].name
+                if t.incidental_label_id else None
+            ),
         )
         for t in txs
+    ]
+
+    own_accounts = db.execute(select(OwnAccount)).scalars().all()
+    export_own_accounts = [
+        ExportOwnAccount(
+            iban=a.iban,
+            name=a.name,
+            account_type=a.account_type,
+            starting_balance=a.starting_balance,
+            starting_balance_date=a.starting_balance_date,
+        )
+        for a in own_accounts
     ]
 
     tx_ids = set(tx_by_id.keys())
@@ -191,4 +216,6 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
         transaction_offsets=export_offsets,
         receipts=export_receipts,
         sync_events=export_events,
+        incidental_labels=export_incidental_labels,
+        own_accounts=export_own_accounts,
     )

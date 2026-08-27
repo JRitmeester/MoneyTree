@@ -7,10 +7,11 @@ from sqlalchemy.pool import StaticPool
 
 from app.models import (
     Base, Budget, BudgetLine, BudgetTemplate, Category,
-    CategoryMapping, Transaction, TransactionOffset,
+    CategoryMapping, IncidentalLabel, OwnAccount, Transaction, TransactionOffset,
 )
 from app.services.sync_export import build_export
 from app.services.sync_import import commit_import, preview_import
+from app.sync_schemas import ExportFile
 from tests.conftest import make_category, make_transaction
 
 
@@ -95,3 +96,109 @@ def test_commit_aborts_on_hard_conflict(db):
     budgets = db.execute(select(Budget)).scalars().all()
     assert len(budgets) == 1
     assert budgets[0].start_date == date(2026, 4, 1)
+
+
+def test_commit_imports_flags_labels_and_own_accounts_into_empty_db(db):
+    cat = make_category(db, name="Groceries")
+    label = IncidentalLabel(name="Summer Holiday")
+    db.add(label); db.flush()
+    tx = make_transaction(db, category_id=cat.id)
+    tx.is_internal_transfer = True
+    tx.is_incidental = True
+    tx.incidental_label_id = label.id
+    db.add(OwnAccount(iban="NL00BANK0000000001", name="Checking", account_type="checking"))
+    db.commit()
+
+    export = build_export(db, since=None)
+    dest = _fresh_session()
+    commit_import(dest, export, update_duplicates=False)
+
+    dest_tx = dest.execute(select(Transaction)).scalars().one()
+    assert dest_tx.is_internal_transfer is True
+    assert dest_tx.is_incidental is True
+    dest_label = dest.execute(select(IncidentalLabel)).scalars().one()
+    assert dest_label.name == "Summer Holiday"
+    assert dest_tx.incidental_label_id == dest_label.id
+    dest_account = dest.execute(select(OwnAccount)).scalars().one()
+    assert dest_account.iban == "NL00BANK0000000001"
+
+
+def test_commit_import_creates_missing_own_account_but_keeps_existing_iban(db):
+    make_category(db, name="Groceries")
+    db.add(OwnAccount(iban="NL00BANK0000000001", name="Source Checking", account_type="checking"))
+    db.commit()
+    export = build_export(db, since=None)
+
+    dest = _fresh_session()
+    dest.add(OwnAccount(iban="NL00BANK0000000001", name="Dest Checking", account_type="checking"))
+    dest.commit()
+
+    preview = commit_import(dest, export, update_duplicates=False)
+
+    accounts = dest.execute(select(OwnAccount)).scalars().all()
+    assert len(accounts) == 1
+    assert accounts[0].name == "Dest Checking"
+    assert any(c.code == "own_account_conflict" for c in preview.soft_conflicts)
+
+
+def test_commit_imports_legacy_export_without_new_fields(db):
+    """Export files predating the flags/labels/own-accounts fields must still import cleanly."""
+    cat = make_category(db, name="Groceries")
+    make_transaction(db, category_id=cat.id)
+    db.commit()
+    export = build_export(db, since=None)
+
+    payload = export.model_dump()
+    for et in payload["transactions"]:
+        del et["is_internal_transfer"]
+        del et["is_internal_transfer_manual"]
+        del et["is_incidental"]
+        del et["incidental_label"]
+    del payload["incidental_labels"]
+    del payload["own_accounts"]
+    legacy_export = ExportFile.model_validate(payload)
+
+    dest = _fresh_session()
+    commit_import(dest, legacy_export, update_duplicates=False)
+
+    dest_tx = dest.execute(select(Transaction)).scalars().one()
+    assert dest_tx.is_internal_transfer is False
+    assert dest_tx.is_internal_transfer_manual is False
+    assert dest_tx.is_incidental is False
+    assert dest_tx.incidental_label_id is None
+
+
+def test_commit_does_not_overwrite_existing_transaction_curated_flags(db):
+    cat = make_category(db, name="Groceries")
+    tx = make_transaction(db, category_id=cat.id)
+    db.commit()
+    export = build_export(db, since=None)
+    et = next(e for e in export.transactions if e.import_hash == tx.import_hash)
+    et.is_internal_transfer = True
+
+    # Destination already curated this transaction locally (non-default flags)
+    tx.is_incidental = True
+    db.commit()
+
+    preview = commit_import(db, export, update_duplicates=True)
+    db.refresh(tx)
+
+    assert tx.is_internal_transfer is False
+    assert tx.is_incidental is True
+    assert any(c.code == "transaction_flags_conflict" for c in preview.soft_conflicts)
+
+
+def test_commit_applies_flags_to_existing_transaction_with_default_flags(db):
+    cat = make_category(db, name="Groceries")
+    tx = make_transaction(db, category_id=cat.id)
+    db.commit()
+    export = build_export(db, since=None)
+    et = next(e for e in export.transactions if e.import_hash == tx.import_hash)
+    et.is_internal_transfer = True
+    et.is_incidental = True
+
+    commit_import(db, export, update_duplicates=False)
+    db.refresh(tx)
+
+    assert tx.is_internal_transfer is True
+    assert tx.is_incidental is True

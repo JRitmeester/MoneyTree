@@ -65,6 +65,18 @@ class ExportTransaction(BaseModel):
     merchant_name: Optional[str] = None
     category_name: Optional[str] = None
     created_at: datetime
+    is_internal_transfer: bool = False
+    is_internal_transfer_manual: bool = False
+    is_incidental: bool = False
+    incidental_label: Optional[str] = None
+
+
+class ExportOwnAccount(BaseModel):
+    iban: str
+    name: str
+    account_type: str
+    starting_balance: Optional[float] = None
+    starting_balance_date: Optional[DateType] = None
 
 
 class ExportLineItem(BaseModel):
@@ -77,12 +89,14 @@ class ExportLineItem(BaseModel):
 
 
 class ExportReceipt(BaseModel):
-    """A receipt linked to a transaction by import_hash.
+    """A receipt, optionally linked to a transaction by import_hash.
 
-    Standalone receipts (without an attached transaction) are excluded from
-    the sync export — they remain local-only.
+    Standalone receipts (without an attached transaction) are included with
+    `transaction_import_hash=None`; on import, a standalone receipt is
+    skipped as a duplicate only if an existing receipt matches exactly on
+    (date, total_amount, merchant_name, ocr_raw_text).
     """
-    transaction_import_hash: str
+    transaction_import_hash: Optional[str] = None
     date: Optional[DateType] = None
     total_amount: Optional[float] = None
     merchant_name: Optional[str] = None
@@ -120,6 +134,8 @@ class ExportFile(BaseModel):
     transaction_offsets: list[ExportTransactionOffset]
     receipts: list[ExportReceipt] = Field(default_factory=list)
     sync_events: list[ExportSyncEvent] = Field(default_factory=list)
+    incidental_labels: list[str] = Field(default_factory=list)
+    own_accounts: list[ExportOwnAccount] = Field(default_factory=list)
 
 
 class ImportConflict(BaseModel):
@@ -168,6 +184,8 @@ class ImportPreview(BaseModel):
     will_skip_sync_events: int = 0
     will_add_receipts: int = 0
     will_skip_receipts: int = 0
+    will_add_incidental_labels: int = 0
+    will_add_own_accounts: int = 0
     add_categories: list[str] = Field(default_factory=list)
     add_transactions: list[TransactionPreview] = Field(default_factory=list)
     skip_transactions: list[TransactionPreview] = Field(default_factory=list)
