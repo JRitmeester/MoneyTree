@@ -7,6 +7,7 @@
 	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import BalanceChart from '$lib/components/BalanceChart.svelte';
+	import SavingsCapacityPanel from '$lib/components/SavingsCapacityPanel.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
 	import { get } from 'svelte/store';
 
@@ -257,7 +258,10 @@
 			</div>
 		</div>
 
-		<BalanceChart {dateFrom} {dateTo} />
+		<div class="sections">
+			<BalanceChart {dateFrom} {dateTo} />
+			<SavingsCapacityPanel />
+		</div>
 
 	{/if}
 </div>
