@@ -149,10 +149,20 @@ def _offset_totals(db: Session) -> tuple[dict[int, float], set[int]]:
     return expense_offsets, offset_income_ids
 
 
-def _iter_expense_items(db: Session, date_from: date | None, date_to: date | None):
+def _iter_expense_items(
+    db: Session,
+    date_from: date | None,
+    date_to: date | None,
+    expense_offsets: dict[int, float] | None = None,
+):
     """Yield ExpenseItem for every expense, covering two paths:
     1. Transactions with receipts → one entry per line item.
     2. Transactions without any receipt → one entry for the full bedrag.
+
+    `expense_offsets` lets a caller that already fetched `_offset_totals`
+    (e.g. because it also needs `offset_income_ids`) pass the dict through
+    instead of triggering a second identical query. When omitted, it is
+    computed here.
 
     Offset double-subtract invariant: when an income transaction is linked as
     an offset to a receipted expense, `link_offset` immediately calls
@@ -168,7 +178,8 @@ def _iter_expense_items(db: Session, date_from: date | None, date_to: date | Non
     never see line items) always subtract the offset from raw `bedrag`: they
     have no equivalent of the already-adjusted remaining line item to lean on.
     """
-    expense_offsets, _ = _offset_totals(db)
+    if expense_offsets is None:
+        expense_offsets, _ = _offset_totals(db)
 
     def _date_filter(q):
         if date_from:
@@ -177,7 +188,7 @@ def _iter_expense_items(db: Session, date_from: date | None, date_to: date | Non
             q = q.where(Transaction.datum <= date_to)
         return q
 
-    # Path 1: line items — already net of any linked offset, do NOT subtract again.
+    # Path 1: line items, already net of any linked offset, do NOT subtract again.
     li_query = _date_filter(
         select(Transaction, LineItem)
         .join(Receipt, Receipt.transaction_id == Transaction.id)
@@ -188,7 +199,7 @@ def _iter_expense_items(db: Session, date_from: date | None, date_to: date | Non
     for tx, li in db.execute(li_query).all():
         yield ExpenseItem(tx=tx, amount=li.amount * li.quantity, category_id=li.category_id, li=li)
 
-    # Path 2: transactions with no receipt at all — subtract the offset here,
+    # Path 2: transactions with no receipt at all: subtract the offset here,
     # floored at 0.
     no_receipt_query = _date_filter(
         select(Transaction)
@@ -201,6 +212,11 @@ def _iter_expense_items(db: Session, date_from: date | None, date_to: date | Non
         )
     )
     for tx in db.execute(no_receipt_query).scalars().all():
+        # Floored at 0: if the offset exceeds the expense, the surplus is
+        # dropped from net rather than counted as extra income. The income
+        # side is already fully excluded from income totals elsewhere, so
+        # this surplus simply disappears from analytics rather than being
+        # double-counted.
         amount = max(0.0, abs(tx.bedrag) - expense_offsets.get(tx.id, 0.0))
         yield ExpenseItem(tx=tx, amount=amount, category_id=tx.category_id, li=None)
 
@@ -572,9 +588,9 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
     unmapped_expenses = 0.0
     unmapped_income = 0.0
 
-    _, offset_income_ids = _offset_totals(db)
+    expense_offsets, offset_income_ids = _offset_totals(db)
 
-    for item in _iter_expense_items(db, first_day, last_day):
+    for item in _iter_expense_items(db, first_day, last_day, expense_offsets):
         is_income = item.tx.bedrag > 0
         if item.category_id is None:
             if is_income:
@@ -749,7 +765,7 @@ def get_savings_capacity(
     # Fixed/flexible/uncategorized split, line-item aware, incidentals excluded.
     cat_id_to_cat, _ = _build_hierarchy(db)
     splits: dict[str, dict[str, float]] = {}
-    for item in _iter_expense_items(db, None, None):
+    for item in _iter_expense_items(db, None, None, expense_offsets):
         if item.tx.is_incidental:
             continue
         s = splits.setdefault(item.tx.datum.strftime("%Y-%m"),

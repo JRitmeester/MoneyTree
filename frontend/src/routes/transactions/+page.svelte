@@ -287,7 +287,7 @@
 								</span>
 							{/if}
 							{#if tx.bedrag > 0 && tx.is_offset_income}
-								<span class="badge offset" title="Net after offsets: 0.00">
+								<span class="badge offset" title="Linked as offset, excluded from income">
 									offset
 								</span>
 							{/if}
