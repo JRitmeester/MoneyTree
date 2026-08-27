@@ -53,6 +53,16 @@ def update_own_account(account_id: int, data: OwnAccountUpdate, db: Session = De
     if "iban" in updates and updates["iban"] is not None:
         updates["iban"] = normalize_iban(updates["iban"])
         iban_changed = updates["iban"] != account.iban
+        if iban_changed:
+            existing = db.execute(
+                select(OwnAccount).where(
+                    OwnAccount.iban == updates["iban"], OwnAccount.id != account_id
+                )
+            ).scalar_one_or_none()
+            if existing:
+                raise HTTPException(
+                    status_code=409, detail="An account with this IBAN already exists"
+                )
     for key, value in updates.items():
         setattr(account, key, value)
 

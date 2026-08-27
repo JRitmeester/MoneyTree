@@ -103,3 +103,28 @@ class TestOwnAccountsApi:
 
     def test_patch_unknown_id_404(self, client):
         assert client.patch("/api/own-accounts/999", json={"name": "X"}).status_code == 404
+
+    def test_patch_rejects_duplicate_iban(self, client):
+        first = client.post("/api/own-accounts", json={
+            "iban": "NL26ASNB8831527878", "name": "A", "account_type": "checking",
+        }).json()
+        second = client.post("/api/own-accounts", json={
+            "iban": "NL00ASNB0000000002", "name": "B", "account_type": "savings",
+        }).json()
+        resp = client.patch(f"/api/own-accounts/{second['id']}", json={
+            "iban": first["iban"],
+        })
+        assert resp.status_code == 409
+
+    def test_patch_iban_triggers_backfill(self, client, db: Session):
+        tx = make_transaction(db, bedrag=-500.0, tegenrekening="NL00ASNB0000000002")
+        db.commit()
+        created = client.post("/api/own-accounts", json={
+            "iban": "NL11ASNB0000000003", "name": "S", "account_type": "savings",
+        }).json()
+        resp = client.patch(f"/api/own-accounts/{created['id']}", json={
+            "iban": "NL00ASNB0000000002",
+        })
+        assert resp.status_code == 200
+        db.refresh(tx)
+        assert tx.is_internal_transfer is True
