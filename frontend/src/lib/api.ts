@@ -1057,6 +1057,16 @@ export async function getRecurringNotices(): Promise<RecurringNotice[]> {
 	return request('/api/recurring/notices');
 }
 
+export interface CashflowPeriod {
+	start_date: string;
+	end_date: string;
+	label: string;
+}
+
+export async function getCashflowPeriods(count = 6): Promise<CashflowPeriod[]> {
+	return request(`/api/cashflow/periods?count=${count}`);
+}
+
 export async function rescanRecurring(): Promise<RescanResult> {
 	return request('/api/recurring/rescan', { method: 'POST' });
 }

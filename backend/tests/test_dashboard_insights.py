@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -232,6 +232,50 @@ class TestSavingsCapacity:
         assert body["months"] == []
         assert body["trailing_3_structural"] is None
         assert body["current_month_projection"] is None
+
+    def test_current_month_projection_subtracts_upcoming_confirmed_expenses(
+        self, client, db: Session
+    ):
+        from calendar import monthrange
+
+        from app.models import RecurringPayment
+
+        today = date.today()
+        month_end = date(today.year, today.month, monthrange(today.year, today.month)[1])
+        # Actuals so far this month.
+        make_transaction(db, bedrag=3000.0, datum=today.replace(day=1))
+        make_transaction(db, bedrag=-500.0, datum=today.replace(day=1))
+
+        # Confirmed expense due before month-end (after today): reduces the projection.
+        due_day = min(today.day + 1, month_end.day)
+        due_before_end = RecurringPayment(
+            merchant_pattern="Rent",
+            name="Rent",
+            expected_amount=-800.0,
+            cadence="monthly",
+            expected_day=due_day,
+            anchor_date=today.replace(day=1) - timedelta(days=1),
+            status="confirmed",
+            is_income=False,
+        )
+        db.add(due_before_end)
+
+        # Confirmed expense due next year: should NOT affect this month's projection.
+        far_out = RecurringPayment(
+            merchant_pattern="Insurance",
+            name="Insurance",
+            expected_amount=-50.0,
+            cadence="yearly",
+            expected_day=15,
+            anchor_date=today.replace(day=1) - timedelta(days=1),
+            status="confirmed",
+            is_income=False,
+        )
+        db.add(far_out)
+        db.commit()
+
+        body = client.get("/api/dashboard/savings-capacity").json()
+        assert body["current_month_projection"] == 3000.0 - 500.0 - 800.0
 
 
 class TestCategoryLineItemGroups:

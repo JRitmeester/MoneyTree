@@ -575,6 +575,12 @@ class BalancePoint(BaseModel):
     balance: float
 
 
+class CashflowPeriodOut(BaseModel):
+    start_date: date
+    end_date: date
+    label: str
+
+
 class SavingsCapacityMonth(BaseModel):
     month: str
     partial: bool

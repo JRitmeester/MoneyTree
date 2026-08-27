@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { getCashflowPeriods, type CashflowPeriod } from '$lib/api';
 
 const STORAGE_KEY = 'moneytree-date-range';
 
@@ -50,3 +51,18 @@ function createDateRangeStore() {
 }
 
 export const dateRange = createDateRangeStore();
+
+// Pay periods are fetched once per app session and memoized: several pages
+// share DateRangeFilter, and the periods rarely change within a session.
+let payPeriodsPromise: Promise<CashflowPeriod[]> | null = null;
+
+export function getPayPeriods(): Promise<CashflowPeriod[]> {
+	if (!payPeriodsPromise) {
+		payPeriodsPromise = getCashflowPeriods().catch((err) => {
+			// Allow a retry on the next call instead of caching a failure.
+			payPeriodsPromise = null;
+			throw err;
+		});
+	}
+	return payPeriodsPromise;
+}

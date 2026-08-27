@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { dateRange } from '$lib/stores/dateRange';
+	import { dateRange, getPayPeriods } from '$lib/stores/dateRange';
+	import type { CashflowPeriod } from '$lib/api';
 
 	interface Props {
 		dateFrom: string;
@@ -22,6 +24,25 @@
 	] as const;
 
 	const PERIOD_PRESETS = [1, 2, 3, 6, 12] as const;
+
+	// Pay periods (salary-anchored). getCashflowPeriods returns newest first,
+	// so index 0 is the current (open) period.
+	const PAY_PERIOD_PRESETS = [
+		{ label: 'This', index: 0 },
+		{ label: 'Last', index: 1 },
+		{ label: '-2', index: 2 },
+		{ label: '-3', index: 3 },
+	] as const;
+
+	let payPeriods: CashflowPeriod[] = $state([]);
+
+	onMount(async () => {
+		try {
+			payPeriods = await getPayPeriods();
+		} catch {
+			payPeriods = [];
+		}
+	});
 
 	let activePreset: string | null = $state(get(dateRange).activePreset);
 
@@ -55,6 +76,16 @@
 		dateFrom = periods[lastIdx].start_date;
 		dateTo = periods[0].end_date;
 		activePreset = `${count}P`;
+		saveToStore();
+		onchange(dateFrom, dateTo);
+	}
+
+	function applyPayPeriodPreset(index: number) {
+		const period = payPeriods[index];
+		if (!period) return;
+		dateFrom = period.start_date;
+		dateTo = period.end_date;
+		activePreset = `PP${index}`;
 		saveToStore();
 		onchange(dateFrom, dateTo);
 	}
@@ -94,6 +125,18 @@
 					onclick={() => applyPeriodPreset(count)}
 					disabled={periods.length === 0}
 				>{count}P</button>
+			{/each}
+		</div>
+	{/if}
+	{#if payPeriods.length > 0}
+		<div class="presets">
+			{#each PAY_PERIOD_PRESETS as preset}
+				<button
+					class="preset-btn"
+					class:active={activePreset === `PP${preset.index}`}
+					onclick={() => applyPayPeriodPreset(preset.index)}
+					disabled={payPeriods.length <= preset.index}
+				>{preset.label}</button>
 			{/each}
 		</div>
 	{/if}

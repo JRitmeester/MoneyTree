@@ -7,7 +7,16 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
-from ..models import Budget, BudgetLine, Category as CategoryModel, LineItem, Receipt, Transaction, TransactionOffset
+from ..models import (
+    Budget,
+    BudgetLine,
+    Category as CategoryModel,
+    LineItem,
+    Receipt,
+    RecurringPayment,
+    Transaction,
+    TransactionOffset,
+)
 from ..schemas import (
     BalancePoint,
     BreadcrumbItem,
@@ -24,6 +33,7 @@ from ..schemas import (
     SpendingLineItem,
     SubcategorySpending,
 )
+from ..services.recurring_detector import next_expected_date
 from ..services.transfers import savings_balance as compute_savings_balance
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_auth)])
@@ -813,10 +823,45 @@ def get_savings_capacity(
         tail = complete_months[-window:]
         return round(sum(getattr(m, attr) for m in tail) / window, 2)
 
+    current_month_projection = _current_month_projection(db, buckets)
+
     return SavingsCapacitySummary(
         months=result_months,
         trailing_3_raw=trailing(3, "net_raw"),
         trailing_3_structural=trailing(3, "net_structural"),
         trailing_6_raw=trailing(6, "net_raw"),
         trailing_6_structural=trailing(6, "net_structural"),
+        current_month_projection=current_month_projection,
     )
+
+
+def _current_month_projection(
+    db: Session, buckets: dict[str, dict[str, float]]
+) -> float | None:
+    """Actuals-to-date for the current calendar month, minus confirmed
+    recurring expense payments still expected before month-end.
+
+    Structural (excl. incidental) to stay consistent with the existing
+    month bucketing; transfers are already excluded upstream. None when the
+    current month has no data yet."""
+    today = date.today()
+    month_key = today.strftime("%Y-%m")
+    bucket = buckets.get(month_key)
+    if bucket is None:
+        return None
+
+    month_end = date(today.year, today.month, monthrange(today.year, today.month)[1])
+    confirmed_expenses = db.execute(
+        select(RecurringPayment).where(
+            RecurringPayment.status == "confirmed",
+            RecurringPayment.is_income.is_(False),
+        )
+    ).scalars().all()
+
+    upcoming_total = 0.0
+    for payment in confirmed_expenses:
+        expected = next_expected_date(payment)
+        if expected is not None and today < expected <= month_end:
+            upcoming_total += abs(payment.expected_amount)
+
+    return round(bucket["income"] - bucket["expenses_structural"] - upcoming_total, 2)

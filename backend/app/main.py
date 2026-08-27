@@ -18,6 +18,7 @@ from .routers import (
     auth,
     budget,
     budget_template,
+    cashflow,
     categories,
     category_mappings,
     dashboard,
@@ -102,6 +103,7 @@ app.include_router(settings.router)
 app.include_router(sync.router)
 app.include_router(own_accounts.router)
 app.include_router(recurring.router)
+app.include_router(cashflow.router)
 
 if os.getenv("ENABLE_DEBUG_ROUTES", "").lower() == "true":
     app.include_router(debug.router)
