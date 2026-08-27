@@ -146,6 +146,15 @@
 			<span>Sync (export / import)</span>
 			<span class="chevron">&rsaquo;</span>
 		</a>
+
+		<a
+			href="/settings/accounts"
+			class="settings-link"
+			title="Define your own IBANs so transfers between them are excluded from spending"
+		>
+			<span>Own Accounts</span>
+			<span class="chevron">&rsaquo;</span>
+		</a>
 	</section>
 
 	<section class="card">
