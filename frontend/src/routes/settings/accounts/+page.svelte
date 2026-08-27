@@ -147,17 +147,32 @@
 		<div class="add-form">
 			<h2>Add account</h2>
 			<div class="form-row">
-				<input placeholder="IBAN" bind:value={newIban} />
-				<input placeholder="Name (e.g. Spaarrekening)" bind:value={newName} />
-				<select bind:value={newType}>
-					<option value="checking">Checking</option>
-					<option value="savings">Savings</option>
-				</select>
+				<label>
+					IBAN
+					<input placeholder="IBAN" bind:value={newIban} />
+				</label>
+				<label>
+					Name
+					<input placeholder="Name (e.g. Spaarrekening)" bind:value={newName} />
+				</label>
+				<label>
+					Type
+					<select bind:value={newType}>
+						<option value="checking">Checking</option>
+						<option value="savings">Savings</option>
+					</select>
+				</label>
 			</div>
 			{#if newType === 'savings'}
 				<div class="form-row">
-					<input type="number" step="0.01" placeholder="Starting balance (optional)" bind:value={newStartingBalance} />
-					<input type="date" bind:value={newStartingDate} />
+					<label>
+						Starting balance
+						<input type="number" step="0.01" placeholder="Starting balance (optional)" bind:value={newStartingBalance} />
+					</label>
+					<label>
+						as of
+						<input type="date" bind:value={newStartingDate} />
+					</label>
 				</div>
 			{/if}
 			<button class="primary" onclick={addAccount}>Add account</button>
@@ -190,7 +205,8 @@
 	.hint { font-size: 0.75rem; color: #999; }
 	.add-form { background: white; border-radius: 8px; padding: 1.25rem; }
 	.form-row { display: flex; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
-	.form-row input, .form-row select { padding: 0.45rem 0.6rem; border: 1px solid #ddd; border-radius: 6px; flex: 1; min-width: 140px; }
+	.form-row label { display: flex; flex-direction: column; font-size: 0.75rem; color: #666; gap: 0.2rem; flex: 1; min-width: 140px; }
+	.form-row input, .form-row select { padding: 0.45rem 0.6rem; border: 1px solid #ddd; border-radius: 6px; }
 	button.primary { background: #2d6a4f; color: white; border: none; border-radius: 6px; padding: 0.5rem 1rem; cursor: pointer; }
 	button.danger { background: none; border: 1px solid #dc2626; color: #dc2626; border-radius: 6px; padding: 0.3rem 0.7rem; cursor: pointer; font-size: 0.8rem; }
 </style>
