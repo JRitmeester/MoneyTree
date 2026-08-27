@@ -120,9 +120,112 @@ def test_preview_counts_receipts(db):
     assert preview.will_skip_receipts == 0
 
 
-def test_export_skips_standalone_receipts_without_transaction(db):
-    """Receipts not linked to a transaction are excluded from sync export."""
-    db.add(Receipt(transaction_id=None, merchant_name="standalone", image_path=None))
+def test_export_includes_standalone_receipts_without_transaction(db):
+    """Receipts not linked to a transaction are exported too, with a null hash."""
+    db.add(Receipt(
+        transaction_id=None, date=date(2026, 4, 1), total_amount=12.5,
+        merchant_name="Standalone Shop", ocr_raw_text="raw text",
+    ))
     db.commit()
     export = build_export(db, since=None)
-    assert export.receipts == []
+    assert len(export.receipts) == 1
+    er = export.receipts[0]
+    assert er.transaction_import_hash is None
+    assert er.merchant_name == "Standalone Shop"
+
+
+def test_export_standalone_receipt_includes_image_and_line_items(db):
+    relative = _write_image("standalone-receipt.jpg", b"STANDALONE-BYTES")
+    receipt = Receipt(
+        transaction_id=None, date=date(2026, 4, 1), total_amount=8.0,
+        merchant_name="Standalone Shop", image_path=relative,
+    )
+    db.add(receipt); db.flush()
+    db.add(LineItem(receipt_id=receipt.id, description="milk", amount=1.5, quantity=1, sort_order=0))
+    db.commit()
+
+    export = build_export(db, since=None)
+    er = export.receipts[0]
+    assert er.transaction_import_hash is None
+    assert base64.b64decode(er.image_base64) == b"STANDALONE-BYTES"
+    assert len(er.line_items) == 1
+    assert er.line_items[0].description == "milk"
+
+
+def test_import_creates_standalone_receipt_with_image(db):
+    relative = _write_image("standalone-import.jpg", b"IMG-STANDALONE")
+    receipt = Receipt(
+        transaction_id=None, date=date(2026, 4, 1), total_amount=12.5,
+        merchant_name="Standalone Shop", image_path=relative, ocr_raw_text="raw",
+    )
+    db.add(receipt); db.flush()
+    db.add(LineItem(receipt_id=receipt.id, description="bread", amount=2.5, quantity=1, sort_order=0))
+    db.commit()
+    export = build_export(db, since=None)
+
+    dest = _fresh()
+    commit_import(dest, export, update_duplicates=False)
+
+    receipts = dest.execute(select(Receipt)).scalars().all()
+    assert len(receipts) == 1
+    r = receipts[0]
+    assert r.transaction_id is None
+    assert r.merchant_name == "Standalone Shop"
+    full = Path(UPLOADS_DIR) / r.image_path
+    assert full.is_file()
+    assert full.read_bytes() == b"IMG-STANDALONE"
+    line_items = dest.execute(select(LineItem)).scalars().all()
+    assert len(line_items) == 1
+
+
+def test_import_standalone_receipt_twice_does_not_duplicate(db):
+    """Importing the same export twice must not duplicate a standalone receipt."""
+    db.add(Receipt(
+        transaction_id=None, date=date(2026, 4, 1), total_amount=12.5,
+        merchant_name="Standalone Shop", ocr_raw_text="raw",
+    ))
+    db.commit()
+    export = build_export(db, since=None)
+
+    dest = _fresh()
+    commit_import(dest, export, update_duplicates=False)
+    commit_import(dest, export, update_duplicates=False)
+
+    receipts = dest.execute(select(Receipt)).scalars().all()
+    assert len(receipts) == 1
+
+
+def test_import_skips_standalone_receipt_matching_existing_on_dest(db):
+    """A standalone receipt matching an existing one exactly on
+    (date, total_amount, merchant_name, ocr_raw_text) is skipped as a duplicate."""
+    db.add(Receipt(
+        transaction_id=None, date=date(2026, 4, 1), total_amount=12.5,
+        merchant_name="Standalone Shop", ocr_raw_text="raw",
+    ))
+    db.commit()
+    export = build_export(db, since=None)
+
+    dest = _fresh()
+    dest.add(Receipt(
+        transaction_id=None, date=date(2026, 4, 1), total_amount=12.5,
+        merchant_name="Standalone Shop", ocr_raw_text="raw",
+    ))
+    dest.commit()
+
+    commit_import(dest, export, update_duplicates=False)
+    receipts = dest.execute(select(Receipt)).scalars().all()
+    assert len(receipts) == 1
+
+
+def test_preview_counts_standalone_receipts(db):
+    db.add(Receipt(
+        transaction_id=None, date=date(2026, 4, 1), total_amount=12.5,
+        merchant_name="Standalone Shop", ocr_raw_text="raw",
+    ))
+    db.commit()
+    export = build_export(db, since=None)
+
+    dest = _fresh()
+    preview = preview_import(dest, export)
+    assert preview.will_add_receipts == 1
+    assert preview.will_skip_receipts == 0

@@ -143,48 +143,51 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
         if o.expense_transaction_id in tx_ids and o.income_transaction_id in tx_ids
     ]
 
-    # Receipts: only those linked to a transaction we're exporting
+    # Receipts: those linked to a transaction we're exporting, plus standalone
+    # receipts (no transaction_id), which travel with a null transaction hash.
     export_receipts = []
-    if tx_by_id:
-        receipts = db.execute(
-            select(Receipt).where(Receipt.transaction_id.in_(tx_by_id.keys()))
-        ).scalars().all()
-        for r in receipts:
+    receipts = db.execute(select(Receipt)).scalars().all()
+    for r in receipts:
+        if r.transaction_id is not None:
             tx = tx_by_id.get(r.transaction_id)
             if tx is None:
                 continue
-            image_b64 = None
-            image_filename = None
-            if r.image_path:
-                full_path = Path(UPLOADS_DIR) / r.image_path
-                if full_path.is_file():
-                    image_filename = Path(r.image_path).name
-                    image_b64 = base64.b64encode(full_path.read_bytes()).decode("ascii")
-            li_rows = db.execute(
-                select(LineItem).where(LineItem.receipt_id == r.id).order_by(LineItem.sort_order)
-            ).scalars().all()
-            export_line_items = [
-                ExportLineItem(
-                    description=li.description,
-                    amount=li.amount,
-                    quantity=li.quantity,
-                    category_name=cat_by_id[li.category_id].name if li.category_id else None,
-                    sort_order=li.sort_order,
-                    is_remaining=li.is_remaining,
-                )
-                for li in li_rows
-            ]
-            export_receipts.append(ExportReceipt(
-                transaction_import_hash=tx.import_hash,
-                date=r.date,
-                total_amount=r.total_amount,
-                merchant_name=r.merchant_name,
-                image_filename=image_filename,
-                image_base64=image_b64,
-                ocr_raw_text=r.ocr_raw_text,
-                match_confidence=r.match_confidence,
-                created_at=r.created_at,
-                line_items=export_line_items,
+            import_hash = tx.import_hash
+        else:
+            import_hash = None
+
+        image_b64 = None
+        image_filename = None
+        if r.image_path:
+            full_path = Path(UPLOADS_DIR) / r.image_path
+            if full_path.is_file():
+                image_filename = Path(r.image_path).name
+                image_b64 = base64.b64encode(full_path.read_bytes()).decode("ascii")
+        li_rows = db.execute(
+            select(LineItem).where(LineItem.receipt_id == r.id).order_by(LineItem.sort_order)
+        ).scalars().all()
+        export_line_items = [
+            ExportLineItem(
+                description=li.description,
+                amount=li.amount,
+                quantity=li.quantity,
+                category_name=cat_by_id[li.category_id].name if li.category_id else None,
+                sort_order=li.sort_order,
+                is_remaining=li.is_remaining,
+            )
+            for li in li_rows
+        ]
+        export_receipts.append(ExportReceipt(
+            transaction_import_hash=import_hash,
+            date=r.date,
+            total_amount=r.total_amount,
+            merchant_name=r.merchant_name,
+            image_filename=image_filename,
+            image_base64=image_b64,
+            ocr_raw_text=r.ocr_raw_text,
+            match_confidence=r.match_confidence,
+            created_at=r.created_at,
+            line_items=export_line_items,
             ))
 
     event_query = select(SyncEvent).order_by(SyncEvent.created_at)

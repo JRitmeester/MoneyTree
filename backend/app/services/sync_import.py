@@ -244,20 +244,39 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
                 preview.will_apply_sync_events += 1
 
     if export.receipts:
-        # A receipt will be skipped if the destination's matching transaction
-        # already has a receipt, or if the transaction doesn't exist yet.
+        # A linked receipt is skipped if the destination's matching transaction
+        # already has a receipt, or if the transaction doesn't exist yet. A
+        # standalone receipt (no transaction) is skipped only if an existing
+        # standalone receipt matches it exactly.
         dest_tx_with_receipt = set(db.execute(
             select(Transaction.import_hash).where(
                 select(Receipt.id).where(Receipt.transaction_id == Transaction.id).exists()
             )
         ).scalars().all())
+        existing_standalone_keys = {
+            _standalone_receipt_key(r)
+            for r in db.execute(
+                select(Receipt).where(Receipt.transaction_id.is_(None))
+            ).scalars().all()
+        }
         for er in export.receipts:
-            if er.transaction_import_hash in dest_tx_with_receipt:
+            if er.transaction_import_hash is None:
+                if _standalone_receipt_key(er) in existing_standalone_keys:
+                    preview.will_skip_receipts += 1
+                else:
+                    preview.will_add_receipts += 1
+            elif er.transaction_import_hash in dest_tx_with_receipt:
                 preview.will_skip_receipts += 1
             else:
                 preview.will_add_receipts += 1
 
     return preview
+
+
+def _standalone_receipt_key(receipt) -> tuple:
+    """Identity key for deduplicating standalone receipts (no transaction_id)
+    on (date, total_amount, merchant_name, ocr_raw_text)."""
+    return (receipt.date, receipt.total_amount, receipt.merchant_name, receipt.ocr_raw_text)
 
 
 def _apply_receipts(
@@ -267,16 +286,33 @@ def _apply_receipts(
     cat_idx: dict[str, Category],
 ) -> None:
     """Insert receipts (with their line items + image files) for transactions
-    that don't yet have one on the destination. NAS-wins on existing receipts."""
+    that don't yet have one on the destination. NAS-wins on existing receipts.
+
+    Standalone receipts (transaction_import_hash is None) are inserted unless
+    an existing standalone receipt matches exactly on
+    (date, total_amount, merchant_name, ocr_raw_text)."""
+    existing_standalone_keys = {
+        _standalone_receipt_key(r)
+        for r in db.execute(
+            select(Receipt).where(Receipt.transaction_id.is_(None))
+        ).scalars().all()
+    }
     for er in receipts:
-        tx = tx_by_hash.get(er.transaction_import_hash)
-        if tx is None:
-            continue
-        existing = db.execute(
-            select(Receipt).where(Receipt.transaction_id == tx.id)
-        ).scalar_one_or_none()
-        if existing is not None:
-            continue
+        tx_id = None
+        if er.transaction_import_hash is None:
+            key = _standalone_receipt_key(er)
+            if key in existing_standalone_keys:
+                continue
+        else:
+            tx = tx_by_hash.get(er.transaction_import_hash)
+            if tx is None:
+                continue
+            existing = db.execute(
+                select(Receipt).where(Receipt.transaction_id == tx.id)
+            ).scalar_one_or_none()
+            if existing is not None:
+                continue
+            tx_id = tx.id
 
         relative_path = None
         if er.image_base64 and er.image_filename:
@@ -297,7 +333,7 @@ def _apply_receipts(
             relative_path = str(target.relative_to(UPLOADS_DIR))
 
         receipt = Receipt(
-            transaction_id=tx.id,
+            transaction_id=tx_id,
             date=er.date,
             total_amount=er.total_amount,
             merchant_name=er.merchant_name,
@@ -308,6 +344,9 @@ def _apply_receipts(
         )
         db.add(receipt)
         db.flush()
+
+        if er.transaction_import_hash is None:
+            existing_standalone_keys.add(_standalone_receipt_key(er))
 
         for eli in er.line_items:
             cat = cat_idx.get(eli.category_name) if eli.category_name else None
