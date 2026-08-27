@@ -93,3 +93,32 @@ class TestSavingsBalanceEndpoint:
         assert body["balance"] == 1500.0
         assert body["is_net_only"] is False
         assert body["account_name"] == "Spaar"
+
+
+class TestBalanceHistory:
+    def test_daily_end_of_day_balance(self, client, db: Session):
+        # Two transactions on the same day: the later volgnummer wins.
+        make_transaction(db, datum=date(2025, 1, 10), saldo_voor_boeking=1000.0,
+                         bedrag=-100.0, volgnummer="001")
+        make_transaction(db, datum=date(2025, 1, 10), saldo_voor_boeking=900.0,
+                         bedrag=-50.0, volgnummer="002")
+        make_transaction(db, datum=date(2025, 1, 12), saldo_voor_boeking=850.0,
+                         bedrag=200.0, volgnummer="003")
+        db.commit()
+
+        points = client.get("/api/dashboard/balance-history").json()
+        assert points == [
+            {"date": "2025-01-10", "balance": 850.0},
+            {"date": "2025-01-12", "balance": 1050.0},
+        ]
+
+    def test_date_range_filter(self, client, db: Session):
+        make_transaction(db, datum=date(2025, 1, 10), saldo_voor_boeking=1000.0, bedrag=-100.0)
+        make_transaction(db, datum=date(2025, 2, 10), saldo_voor_boeking=900.0, bedrag=-100.0)
+        db.commit()
+
+        points = client.get(
+            "/api/dashboard/balance-history?date_from=2025-02-01"
+        ).json()
+        assert len(points) == 1
+        assert points[0]["date"] == "2025-02-10"

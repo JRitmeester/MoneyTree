@@ -436,3 +436,8 @@ class SavingsBalanceOut(BaseModel):
     balance: float
     is_net_only: bool
     account_name: str
+
+
+class BalancePoint(BaseModel):
+    date: date
+    balance: float

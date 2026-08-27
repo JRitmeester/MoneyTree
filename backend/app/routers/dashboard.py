@@ -8,6 +8,7 @@ from ..auth import require_auth
 from ..database import get_db
 from ..models import Budget, BudgetLine, Category as CategoryModel, LineItem, Receipt, Transaction
 from ..schemas import (
+    BalancePoint,
     BreadcrumbItem,
     BudgetVsActualLine,
     BudgetVsActualSummary,
@@ -218,6 +219,37 @@ def get_savings_balance(db: Session = Depends(get_db)):
         is_net_only=result.is_net_only,
         account_name=result.account_name,
     )
+
+
+@router.get("/balance-history", response_model=list[BalancePoint])
+def get_balance_history(
+    date_from: date | None = None,
+    date_to: date | None = None,
+    db: Session = Depends(get_db),
+):
+    """End-of-day checking balance per day, derived from saldo_voor_boeking.
+
+    All transactions are loaded (not just the range) because a day's balance
+    only exists on days with activity; the range filter applies afterwards."""
+    txs = db.execute(select(Transaction)).scalars().all()
+
+    def sort_key(tx: Transaction):
+        try:
+            vol = int(tx.volgnummer)
+        except (TypeError, ValueError):
+            vol = 0
+        return (tx.datum, vol, tx.id)
+
+    daily: dict[date, float] = {}
+    for tx in sorted(txs, key=sort_key):
+        daily[tx.datum] = round(tx.saldo_voor_boeking + tx.bedrag, 2)
+
+    points = [BalancePoint(date=d, balance=b) for d, b in sorted(daily.items())]
+    if date_from:
+        points = [p for p in points if p.date >= date_from]
+    if date_to:
+        points = [p for p in points if p.date <= date_to]
+    return points
 
 
 @router.get("/by-category", response_model=list[CategorySpending])
