@@ -183,30 +183,34 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
                         old_merchant_name=existing.merchant_name,
                         new_merchant_name=et.merchant_name,
                     ))
-            existing_flags_default = (
-                not existing.is_internal_transfer
-                and not existing.is_internal_transfer_manual
-                and not existing.is_incidental
-                and existing.incidental_label_id is None
-            )
-            existing_label_name = (
-                label_name_by_id.get(existing.incidental_label_id)
-                if existing.incidental_label_id else None
-            )
-            flags_differ = (
-                existing.is_internal_transfer != et.is_internal_transfer
-                or existing.is_internal_transfer_manual != et.is_internal_transfer_manual
-                or existing.is_incidental != et.is_incidental
-                or existing_label_name != et.incidental_label
-            )
-            if not existing_flags_default and flags_differ:
-                preview.soft_conflicts.append(ImportConflict(
-                    code="transaction_flags_conflict", severity="soft",
-                    message=(
-                        f"Transaction {et.import_hash} has curated flags on destination; "
-                        "imported flags not applied."
-                    ),
-                ))
+            # format_version 1 files predate flags entirely; their absent
+            # fields default to False/None, which must never be treated as
+            # an incoming change or flagged as a conflict against curated data.
+            if export.format_version != 1:
+                existing_flags_default = (
+                    not existing.is_internal_transfer
+                    and not existing.is_internal_transfer_manual
+                    and not existing.is_incidental
+                    and existing.incidental_label_id is None
+                )
+                existing_label_name = (
+                    label_name_by_id.get(existing.incidental_label_id)
+                    if existing.incidental_label_id else None
+                )
+                flags_differ = (
+                    existing.is_internal_transfer != et.is_internal_transfer
+                    or existing.is_internal_transfer_manual != et.is_internal_transfer_manual
+                    or existing.is_incidental != et.is_incidental
+                    or existing_label_name != et.incidental_label
+                )
+                if not existing_flags_default and flags_differ:
+                    preview.soft_conflicts.append(ImportConflict(
+                        code="transaction_flags_conflict", severity="soft",
+                        message=(
+                            f"Transaction {et.import_hash} has curated flags on destination; "
+                            "imported flags not applied."
+                        ),
+                    ))
         else:
             preview.will_add_transactions += 1
             if len(preview.add_transactions) < PREVIEW_SAMPLE_LIMIT:
@@ -575,17 +579,21 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
             if update_duplicates:
                 tx.merchant_name = et.merchant_name
                 tx.category_id = cat_idx[et.category_name].id if et.category_name and et.category_name in cat_idx else None
-            existing_flags_default = (
-                not tx.is_internal_transfer
-                and not tx.is_internal_transfer_manual
-                and not tx.is_incidental
-                and tx.incidental_label_id is None
-            )
-            if existing_flags_default:
-                tx.is_internal_transfer = et.is_internal_transfer
-                tx.is_internal_transfer_manual = et.is_internal_transfer_manual
-                tx.is_incidental = et.is_incidental
-                tx.incidental_label_id = label_id
+            # format_version 1 files carry no real flag information (absent
+            # fields default to False/None); never let them touch an
+            # existing transaction's flags, curated or not.
+            if export.format_version != 1:
+                existing_flags_default = (
+                    not tx.is_internal_transfer
+                    and not tx.is_internal_transfer_manual
+                    and not tx.is_incidental
+                    and tx.incidental_label_id is None
+                )
+                if existing_flags_default:
+                    tx.is_internal_transfer = et.is_internal_transfer
+                    tx.is_internal_transfer_manual = et.is_internal_transfer_manual
+                    tx.is_incidental = et.is_incidental
+                    tx.incidental_label_id = label_id
             continue
         category_id = (
             cat_idx[et.category_name].id

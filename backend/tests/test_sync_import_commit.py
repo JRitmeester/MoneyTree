@@ -149,6 +149,7 @@ def test_commit_imports_legacy_export_without_new_fields(db):
     export = build_export(db, since=None)
 
     payload = export.model_dump()
+    payload["format_version"] = 1
     for et in payload["transactions"]:
         del et["is_internal_transfer"]
         del et["is_internal_transfer_manual"]
@@ -166,6 +167,38 @@ def test_commit_imports_legacy_export_without_new_fields(db):
     assert dest_tx.is_internal_transfer_manual is False
     assert dest_tx.is_incidental is False
     assert dest_tx.incidental_label_id is None
+
+
+def test_legacy_v1_import_does_not_flood_transaction_flags_conflicts(db):
+    """A format_version=1 export must never apply flags or count
+    transaction_flags_conflict entries, even when the destination row is
+    already curated with non-default flags."""
+    cat = make_category(db, name="Groceries")
+    tx = make_transaction(db, category_id=cat.id)
+    db.commit()
+    export = build_export(db, since=None)
+
+    payload = export.model_dump()
+    payload["format_version"] = 1
+    for et in payload["transactions"]:
+        del et["is_internal_transfer"]
+        del et["is_internal_transfer_manual"]
+        del et["is_incidental"]
+        del et["incidental_label"]
+    del payload["incidental_labels"]
+    del payload["own_accounts"]
+    legacy_export = ExportFile.model_validate(payload)
+
+    # Destination already curated this transaction locally (non-default flags)
+    tx.is_incidental = True
+    db.commit()
+
+    preview = commit_import(db, legacy_export, update_duplicates=False)
+    db.refresh(tx)
+
+    assert tx.is_incidental is True
+    assert tx.is_internal_transfer is False
+    assert not any(c.code == "transaction_flags_conflict" for c in preview.soft_conflicts)
 
 
 def test_commit_does_not_overwrite_existing_transaction_curated_flags(db):

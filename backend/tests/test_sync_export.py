@@ -27,7 +27,7 @@ def test_build_export_includes_all_in_scope_tables(db):
 
     export = build_export(db, since=None)
 
-    assert export.format_version == 1
+    assert export.format_version == 2
     assert {c.name for c in export.categories} == {"Living", "Groceries"}
     grocery = next(c for c in export.categories if c.name == "Groceries")
     assert grocery.parent_name == "Living"
@@ -122,3 +122,10 @@ def test_build_export_includes_own_accounts(db):
     assert acct.account_type == "checking"
     assert acct.starting_balance == 100.0
     assert acct.starting_balance_date == date(2026, 1, 1)
+
+
+def test_build_export_writes_format_version_2(db):
+    """The exporter now writes format_version 2 (flags/labels/own-accounts);
+    format_version 1 remains readable for backward compatibility on import."""
+    export = build_export(db, since=None)
+    assert export.format_version == 2

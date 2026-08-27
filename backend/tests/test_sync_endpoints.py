@@ -13,7 +13,7 @@ def test_export_endpoint_returns_json(client, db):
     resp = client.get("/api/sync/export")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["format_version"] == 1
+    assert body["format_version"] == 2
     assert any(c["name"] == "Groceries" for c in body["categories"])
     assert len(body["transactions"]) == 1
 

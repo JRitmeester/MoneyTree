@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 DateType = date
 
 
-SUPPORTED_FORMAT_VERSIONS = {1}
+SUPPORTED_FORMAT_VERSIONS = {1, 2}
 
 
 class ExportCategory(BaseModel):
@@ -121,7 +121,7 @@ class ExportSyncEvent(BaseModel):
 
 
 class ExportFile(BaseModel):
-    format_version: Literal[1]
+    format_version: Literal[1, 2]
     export_id: Optional[str] = None
     exported_at: datetime
     since: Optional[date] = None
