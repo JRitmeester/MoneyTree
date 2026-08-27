@@ -23,10 +23,70 @@ from .category_paths import (
 )
 
 
+def _category_name_counts(db: Session) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for name in db.execute(select(Category.name)).scalars().all():
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
 def _category_index(db: Session) -> dict[str, Category]:
     """Name-keyed index, used to resolve category references in
-    format_version 1/2 files (globally-unique names, by construction)."""
-    return {c.name: c for c in db.execute(select(Category)).scalars().all()}
+    format_version 1/2 files. Names were guaranteed globally unique when
+    those files were written, but the destination may since have gained
+    per-parent duplicates (e.g. via format_version 3 imports or direct
+    creation); a name shared by more than one category on this device is
+    excluded here rather than arbitrarily binding to one of them -- see
+    _ambiguous_category_names / _resolve_v1v2_ref for the caller-side
+    soft-conflict reporting."""
+    counts = _category_name_counts(db)
+    return {c.name: c for c in db.execute(select(Category)).scalars().all() if counts[c.name] == 1}
+
+
+def _ambiguous_category_names(db: Session) -> set[str]:
+    """Names shared by more than one category on this device -- a v1/v2
+    bare-name reference to one of these cannot be resolved unambiguously."""
+    return {name for name, count in _category_name_counts(db).items() if count > 1}
+
+
+def _find_category_by_name_safe(
+    db: Session, name: str, conflicts: list[ImportConflict], context: str,
+) -> Category | None:
+    """Look up a category by bare name for sync-event fallback resolution
+    (v1/v2 replay data, or a v3 event missing its path fields). Never
+    raises: zero matches is a normal no-op (return None, caller skips);
+    more than one match -- now possible since names are only unique
+    per-parent -- also skips, but records a soft conflict naming the
+    ambiguous category instead of silently guessing one."""
+    matches = db.execute(select(Category).where(Category.name == name)).scalars().all()
+    if len(matches) > 1:
+        conflicts.append(ImportConflict(
+            code="category_name_ambiguous", severity="soft",
+            message=f"Category name '{name}' is ambiguous on this device; {context} skipped",
+        ))
+        return None
+    return matches[0] if matches else None
+
+
+def _resolve_v1v2_ref(
+    ref: str | None,
+    cat_idx: dict[str, Category],
+    ambiguous_names: set[str],
+    conflicts: list[ImportConflict],
+) -> Category | None:
+    """Resolve a bare-name category reference from a v1/v2 file. `cat_idx`
+    already excludes ambiguous names (see _category_index), so this mainly
+    exists to record a soft conflict distinguishing "ambiguous" misses from
+    genuinely-absent ones."""
+    if not ref:
+        return None
+    if ref in ambiguous_names:
+        conflicts.append(ImportConflict(
+            code="category_name_ambiguous", severity="soft",
+            message=f"Category name '{ref}' is ambiguous on this device; reference skipped",
+        ))
+        return None
+    return cat_idx.get(ref)
 
 
 def _category_path_index(db: Session) -> dict[str, Category]:
@@ -35,14 +95,6 @@ def _category_path_index(db: Session) -> dict[str, Category]:
     cats = db.execute(select(Category)).scalars().all()
     cat_by_id = {c.id: c for c in cats}
     return {full_category_path(c.id, cat_by_id): c for c in cats}
-
-
-def _category_ref_index(db: Session, format_version: int) -> dict[str, Category]:
-    """The index appropriate for resolving `category_name`-style reference
-    fields on export rows, given the file's format_version: name-keyed for
-    v1/v2 (bare names, guaranteed globally unique in that era of data),
-    path-keyed for v3."""
-    return _category_path_index(db) if format_version == 3 else _category_index(db)
 
 
 def _lookup_category_ref(
@@ -105,6 +157,7 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
 
     is_v3 = export.format_version == 3
     cat_idx = _category_index(db)
+    ambiguous_names = set() if is_v3 else _ambiguous_category_names(db)
     ref_idx = _category_path_index(db) if is_v3 else cat_idx
     for ec in export.categories:
         effective_path = ec.path or ec.name
@@ -170,7 +223,10 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
     line_keys = {(l.budget_id, l.category_id) for l in db.execute(select(BudgetLine)).scalars().all()}
     for el in export.budget_lines:
         budget = bud_idx.get(el.budget_start_date.isoformat())
-        category = ref_idx.get(el.category_name) if is_v3 else cat_idx.get(el.category_name)
+        if is_v3:
+            category = ref_idx.get(el.category_name)
+        else:
+            category = _resolve_v1v2_ref(el.category_name, cat_idx, ambiguous_names, preview.soft_conflicts)
         if budget is None or category is None:
             preview.will_add_budget_lines += 1
             continue
@@ -181,7 +237,10 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
 
     tmpl_cat_ids = {t.category_id for t in db.execute(select(BudgetTemplate)).scalars().all()}
     for et in export.budget_templates:
-        cat = ref_idx.get(et.category_name) if is_v3 else cat_idx.get(et.category_name)
+        if is_v3:
+            cat = ref_idx.get(et.category_name)
+        else:
+            cat = _resolve_v1v2_ref(et.category_name, cat_idx, ambiguous_names, preview.soft_conflicts)
         if cat is None or cat.id not in tmpl_cat_ids:
             preview.will_add_budget_templates += 1
         else:
@@ -425,14 +484,18 @@ def _apply_receipts(
             ))
 
 
-def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
+def _apply_sync_event(db: Session, ev: ExportSyncEvent, conflicts: list[ImportConflict]) -> None:
     """Apply a single sync event to the destination DB. Missing entities are no-ops.
 
-    Rename/delete/merge events carry both name and path fields (format v3
-    writes both; v1/v2 replays only ever have names). Path fields are
-    preferred when present -- they unambiguously identify a category even
-    when its bare name collides with a same-named category under a
-    different parent -- falling back to the bare-name lookup otherwise.
+    Rename/delete/merge/update events carry both name and path fields
+    (format v3 writes both; v1/v2 replays only ever have names). Path
+    fields are preferred when present -- they unambiguously identify a
+    category even when its bare name collides with a same-named category
+    under a different parent -- falling back to the bare-name lookup
+    otherwise. Every bare-name lookup goes through
+    `_find_category_by_name_safe`, which never raises: zero matches is a
+    normal no-op, and multiple matches (now possible with per-parent
+    names) is skipped with a soft conflict rather than guessing.
     """
     payload = ev.payload
     if ev.event_type == "category.rename":
@@ -441,9 +504,7 @@ def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
         if old_path:
             cat = _category_path_index(db).get(old_path)
         else:
-            cat = db.execute(
-                select(Category).where(Category.name == payload["old_name"])
-            ).scalar_one_or_none()
+            cat = _find_category_by_name_safe(db, payload["old_name"], conflicts, "category rename")
         if cat is None:
             return
         if new_path:
@@ -451,9 +512,7 @@ def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
             clash = _category_path_index(db).get(new_path)
         else:
             new_name = payload["new_name"]
-            clash = db.execute(
-                select(Category).where(Category.name == new_name)
-            ).scalar_one_or_none()
+            clash = _find_category_by_name_safe(db, new_name, conflicts, "category rename")
         # If a category already at the target identity exists, skip the rename
         if clash is not None and clash.id != cat.id:
             return
@@ -463,9 +522,7 @@ def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
         if path:
             cat = _category_path_index(db).get(path)
         else:
-            cat = db.execute(
-                select(Category).where(Category.name == payload["name"])
-            ).scalar_one_or_none()
+            cat = _find_category_by_name_safe(db, payload["name"], conflicts, "category delete")
         if cat is None:
             return
         # Mirror settings.py delete_all_categories cleanup for FK safety
@@ -478,22 +535,31 @@ def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
         db.execute(sa_update(Category).where(Category.parent_id == cat.id).values(parent_id=None))
         db.delete(cat)
     elif ev.event_type == "category.update":
-        cat = db.execute(
-            select(Category).where(Category.name == payload["name"])
-        ).scalar_one_or_none()
+        path = payload.get("path")
+        if path:
+            cat = _category_path_index(db).get(path)
+        else:
+            cat = _find_category_by_name_safe(db, payload["name"], conflicts, "category update")
         if cat is None:
             return
         cat.is_fixed = payload.get("is_fixed", cat.is_fixed)
         cat.category_type = payload.get("category_type", cat.category_type)
-        parent_name = payload.get("parent_name")
-        if parent_name is None:
-            cat.parent_id = None
+        if "parent_path" in payload:
+            parent_path = payload["parent_path"]
+            if parent_path is None:
+                cat.parent_id = None
+            else:
+                parent = _category_path_index(db).get(parent_path)
+                if parent is not None:
+                    cat.parent_id = parent.id
         else:
-            parent = db.execute(
-                select(Category).where(Category.name == parent_name)
-            ).scalar_one_or_none()
-            if parent is not None:
-                cat.parent_id = parent.id
+            parent_name = payload.get("parent_name")
+            if parent_name is None:
+                cat.parent_id = None
+            else:
+                parent = _find_category_by_name_safe(db, parent_name, conflicts, "category update parent")
+                if parent is not None:
+                    cat.parent_id = parent.id
     elif ev.event_type == "category.merge":
         source_path = payload.get("source_path")
         target_path = payload.get("target_path")
@@ -502,12 +568,8 @@ def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
             source = path_idx.get(source_path) if source_path else None
             target = path_idx.get(target_path) if target_path else None
         else:
-            source = db.execute(
-                select(Category).where(Category.name == payload["source_name"])
-            ).scalar_one_or_none()
-            target = db.execute(
-                select(Category).where(Category.name == payload["target_name"])
-            ).scalar_one_or_none()
+            source = _find_category_by_name_safe(db, payload["source_name"], conflicts, "category merge")
+            target = _find_category_by_name_safe(db, payload["target_name"], conflicts, "category merge")
         if source is None or target is None:
             return
         apply_category_merge(db, source, target)
@@ -547,7 +609,7 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
         for ev in ordered_events:
             if ev.event_id in applied_event_ids:
                 continue
-            _apply_sync_event(db, ev)
+            _apply_sync_event(db, ev, preview.soft_conflicts)
             db.add(SyncEvent(
                 event_id=ev.event_id,
                 event_type=ev.event_type,

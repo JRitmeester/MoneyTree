@@ -423,6 +423,23 @@ def test_move_rejects_collision_with_sibling_under_new_parent(client: TestClient
     assert resp.json()["detail"] == 'A category named "Shared" already exists under "ParentB"'
 
 
+def test_create_rejects_name_with_separator(client: TestClient, db: Session):
+    resp = client.post("/api/categories", json={"name": "Parent > Child"})
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == 'Category names cannot contain " > "'
+
+
+def test_rename_rejects_name_with_separator(client: TestClient, db: Session):
+    cat = make_category(db, name="Plain")
+    db.commit()
+
+    resp = client.patch(f"/api/categories/{cat.id}", json={"name": "A > B"})
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == 'Category names cannot contain " > "'
+
+
 def test_rename_unchanged_name_does_not_self_collide(client: TestClient, db: Session):
     parent = make_category(db, name="Parent")
     db.commit()

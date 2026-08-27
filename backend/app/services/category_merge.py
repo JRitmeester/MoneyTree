@@ -49,6 +49,15 @@ def apply_category_merge(db: Session, source: Category, target: Category) -> Non
     """
     source_id, target_id = source.id, target.id
 
+    # Defensive: if `source.children` was already loaded by earlier code in
+    # this session (e.g. a caller checking for a sibling-name clash before
+    # merging), expire it now. SQLAlchemy's default one-to-many delete
+    # behavior nulls out the FK of any *loaded* children collection when the
+    # parent is deleted below; the raw bulk UPDATE further down already
+    # reparents them correctly, so a stale cached collection must not be
+    # allowed to clobber that with a redundant (and wrong) null-out.
+    db.expire(source, ["children"])
+
     db.execute(
         Transaction.__table__.update()
         .where(Transaction.category_id == source_id)

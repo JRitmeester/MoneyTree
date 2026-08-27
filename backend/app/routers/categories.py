@@ -9,7 +9,7 @@ from ..models import (
 )
 from ..schemas import CategoryCreate, CategoryMergeCounts, CategoryOut, CategoryUpdate
 from ..services.category_merge import apply_category_merge, count_category_references, is_descendant
-from ..services.category_paths import full_category_path
+from ..services.category_paths import PATH_SEPARATOR, full_category_path
 from ..services.sync_events import (
     EVENT_CATEGORY_DELETE, EVENT_CATEGORY_MERGE, EVENT_CATEGORY_RENAME, EVENT_CATEGORY_UPDATE,
     record_event,
@@ -24,6 +24,14 @@ def _sibling_conflict_message(name: str, parent_id: int | None, db: Session) -> 
     parent = db.get(Category, parent_id)
     parent_label = parent.name if parent else "Unknown"
     return f'A category named "{name}" already exists under "{parent_label}"'
+
+
+def _validate_name(name: str) -> None:
+    """Reject category names containing the path separator: it would make
+    the name indistinguishable from a multi-segment path in sync export/
+    import (format v3) and the dashboard/budget hierarchical display."""
+    if PATH_SEPARATOR in name:
+        raise HTTPException(status_code=422, detail='Category names cannot contain " > "')
 
 
 def _find_sibling(db: Session, name: str, parent_id: int | None, exclude_id: int | None = None) -> Category | None:
@@ -57,6 +65,8 @@ def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
     Names are unique per parent, not globally: two categories can share a
     name as long as they have different parents.
     """
+    _validate_name(data.name)
+
     if _find_sibling(db, data.name, data.parent_id) is not None:
         raise HTTPException(
             status_code=409,
@@ -92,6 +102,9 @@ def update_category(category_id: int, data: CategoryUpdate, db: Session = Depend
         raise HTTPException(status_code=404, detail="Category not found")
 
     fields = data.model_dump(exclude_unset=True)
+
+    if "name" in fields:
+        _validate_name(fields["name"])
 
     old_name = cat.name
     new_parent_id = fields.get("parent_id", cat.parent_id)
@@ -137,9 +150,15 @@ def update_category(category_id: int, data: CategoryUpdate, db: Session = Depend
 
     if attr_changed:
         new_parent = db.get(Category, cat.parent_id) if cat.parent_id else None
+        # `path` is the category's own identity at event time (i.e. after
+        # this update), `parent_path` the new parent's path; both travel
+        # alongside the legacy name fields for v1/v2 replay compat.
+        cat_by_id_post = {c.id: c for c in db.execute(select(Category)).scalars().all()}
         record_event(db, EVENT_CATEGORY_UPDATE, {
             "name": cat.name,
             "parent_name": new_parent.name if new_parent else None,
+            "path": full_category_path(cat.id, cat_by_id_post),
+            "parent_path": full_category_path(cat.parent_id, cat_by_id_post) if cat.parent_id else None,
             "is_fixed": cat.is_fixed,
             "category_type": cat.category_type,
         })
