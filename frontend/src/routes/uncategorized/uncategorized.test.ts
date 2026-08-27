@@ -613,6 +613,45 @@ describe('Bank category mapping', () => {
 		const link = screen.getByRole('link', { name: /back to dashboard/i });
 		expect(link).toHaveAttribute('href', '/');
 	});
+
+	it('uses categorize-selected (not bulk-categorize) when a filter hides part of the group', async () => {
+		// Boodschappen has 2 transactions; filter to "AH" so only Albert Heijn is visible,
+		// hiding the Jumbo transaction. Selecting all VISIBLE rows of the group must not be
+		// treated as a whole-group selection, since bulk-categorize would recategorize the
+		// hidden Jumbo transaction (and every other transaction sharing this bank category)
+		// that the user never saw or selected.
+		(getUncategorized as Mock).mockResolvedValue(mockGroups);
+		(categorizeSelected as Mock).mockResolvedValue({ updated: 1 });
+		render(UncategorizedPage);
+
+		await screen.findByText('Albert Heijn');
+		const descriptionInput = screen.getByPlaceholderText('Filter by description...');
+		await fireEvent.input(descriptionInput, { target: { value: 'AH' } });
+
+		expect(screen.queryByText('Jumbo')).not.toBeInTheDocument();
+
+		// Select all visible rows of the (now partially hidden) Boodschappen group.
+		const checkboxes = screen.getAllByRole('checkbox');
+		await fireEvent.click(checkboxes[0]); // group checkbox for the filtered Boodschappen group
+
+		expect(
+			screen.queryByLabelText(/Also map .* to this category for future imports/)
+		).not.toBeInTheDocument();
+
+		const assignInput = screen.getByPlaceholderText('Assign category...');
+		await selectCategory(assignInput, 'Eten');
+
+		const applyBtn = screen.getByRole('button', { name: 'Apply' });
+		await fireEvent.click(applyBtn);
+
+		await waitFor(() => {
+			expect(categorizeSelected).toHaveBeenCalledWith({
+				transaction_ids: [1],
+				category_id: 10,
+			});
+		});
+		expect(bulkCategorize).not.toHaveBeenCalled();
+	});
 });
 
 describe('categorizeSelected API function', () => {

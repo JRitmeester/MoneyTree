@@ -77,17 +77,11 @@
 					category_id: selectedCategoryId,
 				});
 			}
-			const removedIds = new Set(selectedIds);
-			groups = groups
-				.map(g => ({
-					...g,
-					transactions: g.transactions.filter(tx => !removedIds.has(tx.id)),
-					count: g.transactions.filter(tx => !removedIds.has(tx.id)).length,
-					total: round(g.transactions.filter(tx => !removedIds.has(tx.id)).reduce((s, tx) => s + Math.abs(tx.bedrag), 0)),
-				}))
-				.filter(g => g.transactions.length > 0);
-			selectedIds = new Set();
-			selectedCategoryId = null;
+			// Refetch from the server rather than optimistically stripping the applied
+			// transactions locally: a bulk-categorize apply can affect transactions beyond
+			// the ones selected here (every transaction with that bank category), and it
+			// can flip has_mapping on other groups, so only the server's view is accurate.
+			await load();
 			saveMapping = true;
 		} finally {
 			applying = false;
@@ -164,9 +158,16 @@
 	let totalCount = $derived(filteredGroups.reduce((s, g) => s + g.count, 0));
 	let selectedCount = $derived(selectedIds.size);
 
+	// Computed against the UNFILTERED `groups` data, not `filteredGroups`. A user's
+	// active date/name/description filter can hide some transactions of a group; if we
+	// checked against the filtered view, selecting all currently-visible rows would look
+	// like "whole group selected" while the server's bulk-categorize endpoint recategorizes
+	// (and maps) every uncategorized transaction with that bank category, including ones
+	// the user never saw. So the mapping offer and bulkCategorize path only apply when the
+	// selection equals the entire true group.
 	let fullySelectedGroup: UncategorizedGroup | null = $derived.by(() => {
 		if (selectedIds.size === 0) return null;
-		const candidates = filteredGroups.filter(g => {
+		const candidates = groups.filter(g => {
 			const groupIds = g.transactions.map(tx => tx.id);
 			return groupIds.length > 0 && groupIds.every(id => selectedIds.has(id));
 		});
