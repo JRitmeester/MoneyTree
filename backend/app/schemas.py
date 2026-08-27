@@ -27,6 +27,8 @@ class TransactionOut(BaseModel):
     type: str
     code: str
     has_receipt: bool = False
+    is_internal_transfer: bool = False
+    is_incidental: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -420,3 +422,8 @@ class OwnAccountOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class BulkIncidentalRequest(BaseModel):
+    transaction_ids: list[int] = Field(min_length=1)
+    is_incidental: bool

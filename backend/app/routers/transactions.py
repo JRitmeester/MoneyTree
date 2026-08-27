@@ -8,7 +8,9 @@ from ..auth import require_auth
 from ..database import get_db
 from ..models import Category, CategoryMapping, LineItem, Receipt, Transaction, TransactionOffset
 from ..services.remaining import recalculate_remaining
+from ..services.transfers import is_internal, own_ibans
 from ..schemas import (
+    BulkIncidentalRequest,
     ImportResult,
     LineItemCreate,
     LineItemOut,
@@ -60,6 +62,7 @@ async def import_csv(
     imported = 0
     skipped = 0
     updated = 0
+    ibans = own_ibans(db)
 
     for tx_data in parsed:
         # Check for duplicate
@@ -74,6 +77,8 @@ async def import_csv(
                         setattr(existing, key, value)
                 # Re-resolve category_id in case mapping changed
                 existing.category_id = _category_id_for_categorie(existing.categorie, db)
+                if not existing.is_internal_transfer_manual:
+                    existing.is_internal_transfer = is_internal(existing, ibans)
                 updated += 1
             else:
                 skipped += 1
@@ -83,6 +88,7 @@ async def import_csv(
             tx = Transaction(**tx_data)
             # Set user category from mapping
             tx.category_id = _category_id_for_categorie(tx_data["categorie"], db)
+            tx.is_internal_transfer = is_internal(tx, ibans)
             db.add(tx)
             imported += 1
 
@@ -218,6 +224,18 @@ def list_transactions(
     )
 
 
+@router.post("/bulk-incidental")
+def bulk_set_incidental(payload: BulkIncidentalRequest, db: Session = Depends(get_db)):
+    """Set the incidental flag on many transactions at once."""
+    txs = db.execute(
+        select(Transaction).where(Transaction.id.in_(payload.transaction_ids))
+    ).scalars().all()
+    for tx in txs:
+        tx.is_incidental = payload.is_incidental
+    db.commit()
+    return {"updated": len(txs)}
+
+
 @router.get("/{transaction_id}", response_model=TransactionDetail)
 def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
     """Get a single transaction with its receipt and offsets."""
@@ -310,6 +328,13 @@ def update_transaction(transaction_id: int, data: dict, db: Session = Depends(ge
                 if li.is_remaining:
                     li.category_id = cat_id
                     break
+
+    if "is_incidental" in data:
+        tx.is_incidental = bool(data["is_incidental"])
+
+    if "is_internal_transfer" in data:
+        tx.is_internal_transfer = bool(data["is_internal_transfer"])
+        tx.is_internal_transfer_manual = True
 
     db.commit()
     db.refresh(tx)
