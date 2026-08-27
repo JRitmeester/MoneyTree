@@ -27,13 +27,14 @@ def test_build_export_includes_all_in_scope_tables(db):
 
     export = build_export(db, since=None)
 
-    assert export.format_version == 2
+    assert export.format_version == 3
     assert {c.name for c in export.categories} == {"Living", "Groceries"}
     grocery = next(c for c in export.categories if c.name == "Groceries")
     assert grocery.parent_name == "Living"
-    assert export.category_mappings[0].category_name == "Groceries"
+    assert grocery.path == "Living > Groceries"
+    assert export.category_mappings[0].category_name == "Living > Groceries"
     assert export.budgets[0].start_date == date(2026, 4, 1)
-    assert export.budget_lines[0].category_name == "Groceries"
+    assert export.budget_lines[0].category_name == "Living > Groceries"
     assert export.budget_templates[0].amount == 400.0
     assert len(export.transactions) == 2
     assert export.transaction_offsets[0].expense_import_hash == expense.import_hash
@@ -124,8 +125,9 @@ def test_build_export_includes_own_accounts(db):
     assert acct.starting_balance_date == date(2026, 1, 1)
 
 
-def test_build_export_writes_format_version_2(db):
-    """The exporter now writes format_version 2 (flags/labels/own-accounts);
-    format_version 1 remains readable for backward compatibility on import."""
+def test_build_export_writes_format_version_3(db):
+    """The exporter now writes format_version 3 (path-keyed categories and
+    category references); format_version 1/2 remain readable for backward
+    compatibility on import."""
     export = build_export(db, since=None)
-    assert export.format_version == 2
+    assert export.format_version == 3

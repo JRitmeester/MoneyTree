@@ -18,10 +18,48 @@ from ..sync_schemas import (
     PREVIEW_SAMPLE_LIMIT, TransactionPreview, TransactionUpdatePreview,
 )
 from .category_merge import apply_category_merge
+from .category_paths import (
+    PATH_SEPARATOR, full_category_path, resolve_or_create_category_path, split_category_path,
+)
 
 
 def _category_index(db: Session) -> dict[str, Category]:
+    """Name-keyed index, used to resolve category references in
+    format_version 1/2 files (globally-unique names, by construction)."""
     return {c.name: c for c in db.execute(select(Category)).scalars().all()}
+
+
+def _category_path_index(db: Session) -> dict[str, Category]:
+    """Path-keyed index, used to resolve category references in
+    format_version 3 files (names unique per-parent only)."""
+    cats = db.execute(select(Category)).scalars().all()
+    cat_by_id = {c.id: c for c in cats}
+    return {full_category_path(c.id, cat_by_id): c for c in cats}
+
+
+def _category_ref_index(db: Session, format_version: int) -> dict[str, Category]:
+    """The index appropriate for resolving `category_name`-style reference
+    fields on export rows, given the file's format_version: name-keyed for
+    v1/v2 (bare names, guaranteed globally unique in that era of data),
+    path-keyed for v3."""
+    return _category_path_index(db) if format_version == 3 else _category_index(db)
+
+
+def _lookup_category_ref(
+    ref: str | None,
+    format_version: int,
+    ref_idx: dict[str, Category],
+    db: Session,
+) -> Category | None:
+    """Resolve a category_name-style reference (bare name for v1/v2, path
+    for v3) against `ref_idx`. v3 creates missing ancestors (and the leaf,
+    if missing) with sensible defaults; v1/v2 never creates -- a miss is
+    simply skipped, matching pre-v3 behavior."""
+    if not ref:
+        return None
+    if format_version == 3:
+        return resolve_or_create_category_path(db, ref, ref_idx)
+    return ref_idx.get(ref)
 
 
 def _budget_index(db: Session) -> dict[str, Budget]:
@@ -65,33 +103,46 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
                 ),
             ))
 
+    is_v3 = export.format_version == 3
     cat_idx = _category_index(db)
+    ref_idx = _category_path_index(db) if is_v3 else cat_idx
     for ec in export.categories:
-        existing = cat_idx.get(ec.name)
+        effective_path = ec.path or ec.name
+        existing = ref_idx.get(effective_path) if is_v3 else cat_idx.get(ec.name)
         if existing is None:
             preview.will_add_categories += 1
             if len(preview.add_categories) < PREVIEW_SAMPLE_LIMIT:
                 preview.add_categories.append(ec.name)
         else:
-            attr_diff = (
-                existing.is_fixed != ec.is_fixed
-                or existing.category_type != ec.category_type
-                or (existing.parent.name if existing.parent else None) != ec.parent_name
-            )
+            if is_v3:
+                # Existing was matched by exact path, so its parent chain
+                # already matches ec's implied hierarchy by construction.
+                attr_diff = (
+                    existing.is_fixed != ec.is_fixed
+                    or existing.category_type != ec.category_type
+                )
+            else:
+                attr_diff = (
+                    existing.is_fixed != ec.is_fixed
+                    or existing.category_type != ec.category_type
+                    or (existing.parent.name if existing.parent else None) != ec.parent_name
+                )
             if attr_diff:
                 preview.soft_conflicts.append(ImportConflict(
                     code="category_attr_diff", severity="soft",
                     message=f"Category '{ec.name}' exists on destination with different attributes; NAS values kept.",
                 ))
 
-    # Validate parent_name resolves
-    export_names = {c.name for c in export.categories}
-    for ec in export.categories:
-        if ec.parent_name and ec.parent_name not in export_names and ec.parent_name not in cat_idx:
-            preview.hard_conflicts.append(ImportConflict(
-                code="parent_name_unresolved", severity="hard",
-                message=f"Category '{ec.name}' has parent_name '{ec.parent_name}' that does not exist on destination or in export.",
-            ))
+    if not is_v3:
+        # Validate parent_name resolves. v3 never hard-conflicts here: a
+        # missing ancestor is simply created (see resolve_or_create_category_path).
+        export_names = {c.name for c in export.categories}
+        for ec in export.categories:
+            if ec.parent_name and ec.parent_name not in export_names and ec.parent_name not in cat_idx:
+                preview.hard_conflicts.append(ImportConflict(
+                    code="parent_name_unresolved", severity="hard",
+                    message=f"Category '{ec.name}' has parent_name '{ec.parent_name}' that does not exist on destination or in export.",
+                ))
 
     mapping_keys = {m.bank_category for m in db.execute(select(CategoryMapping)).scalars().all()}
     for em in export.category_mappings:
@@ -119,7 +170,7 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
     line_keys = {(l.budget_id, l.category_id) for l in db.execute(select(BudgetLine)).scalars().all()}
     for el in export.budget_lines:
         budget = bud_idx.get(el.budget_start_date.isoformat())
-        category = cat_idx.get(el.category_name)
+        category = ref_idx.get(el.category_name) if is_v3 else cat_idx.get(el.category_name)
         if budget is None or category is None:
             preview.will_add_budget_lines += 1
             continue
@@ -130,7 +181,7 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
 
     tmpl_cat_ids = {t.category_id for t in db.execute(select(BudgetTemplate)).scalars().all()}
     for et in export.budget_templates:
-        cat = cat_idx.get(et.category_name)
+        cat = ref_idx.get(et.category_name) if is_v3 else cat_idx.get(et.category_name)
         if cat is None or cat.id not in tmpl_cat_ids:
             preview.will_add_budget_templates += 1
         else:
@@ -161,6 +212,7 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
         t.import_hash: t
         for t in db.execute(select(Transaction)).scalars().all()
     }
+    cat_by_id_all = {c.id: c for c in db.execute(select(Category)).scalars().all()} if is_v3 else {}
     for et in export.transactions:
         existing = existing_tx_by_hash.get(et.import_hash)
         if existing is not None:
@@ -170,7 +222,13 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
                     import_hash=et.import_hash, datum=et.datum, bedrag=et.bedrag,
                     merchant_name=et.merchant_name, omschrijving=et.omschrijving,
                 ))
-            existing_cat_name = existing.category.name if existing.category else None
+            if is_v3:
+                existing_cat_name = (
+                    full_category_path(existing.category_id, cat_by_id_all)
+                    if existing.category_id else None
+                )
+            else:
+                existing_cat_name = existing.category.name if existing.category else None
             cat_diff = (existing_cat_name or None) != (et.category_name or None)
             merchant_diff = (existing.merchant_name or None) != (et.merchant_name or None)
             if cat_diff or merchant_diff:
@@ -289,6 +347,7 @@ def _apply_receipts(
     receipts: list[ExportReceipt],
     tx_by_hash: dict[str, Transaction],
     cat_idx: dict[str, Category],
+    format_version: int,
 ) -> None:
     """Insert receipts (with their line items + image files) for transactions
     that don't yet have one on the destination. NAS-wins on existing receipts.
@@ -354,7 +413,7 @@ def _apply_receipts(
             existing_standalone_keys.add(_standalone_receipt_key(er))
 
         for eli in er.line_items:
-            cat = cat_idx.get(eli.category_name) if eli.category_name else None
+            cat = _lookup_category_ref(eli.category_name, format_version, cat_idx, db)
             db.add(LineItem(
                 receipt_id=receipt.id,
                 description=eli.description,
@@ -367,25 +426,46 @@ def _apply_receipts(
 
 
 def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
-    """Apply a single sync event to the destination DB. Missing entities are no-ops."""
+    """Apply a single sync event to the destination DB. Missing entities are no-ops.
+
+    Rename/delete/merge events carry both name and path fields (format v3
+    writes both; v1/v2 replays only ever have names). Path fields are
+    preferred when present -- they unambiguously identify a category even
+    when its bare name collides with a same-named category under a
+    different parent -- falling back to the bare-name lookup otherwise.
+    """
     payload = ev.payload
     if ev.event_type == "category.rename":
-        cat = db.execute(
-            select(Category).where(Category.name == payload["old_name"])
-        ).scalar_one_or_none()
+        old_path = payload.get("old_path")
+        new_path = payload.get("new_path")
+        if old_path:
+            cat = _category_path_index(db).get(old_path)
+        else:
+            cat = db.execute(
+                select(Category).where(Category.name == payload["old_name"])
+            ).scalar_one_or_none()
         if cat is None:
             return
-        # If a category with the new name already exists, skip the rename
-        clash = db.execute(
-            select(Category).where(Category.name == payload["new_name"])
-        ).scalar_one_or_none()
+        if new_path:
+            new_name = split_category_path(new_path)[-1]
+            clash = _category_path_index(db).get(new_path)
+        else:
+            new_name = payload["new_name"]
+            clash = db.execute(
+                select(Category).where(Category.name == new_name)
+            ).scalar_one_or_none()
+        # If a category already at the target identity exists, skip the rename
         if clash is not None and clash.id != cat.id:
             return
-        cat.name = payload["new_name"]
+        cat.name = new_name
     elif ev.event_type == "category.delete":
-        cat = db.execute(
-            select(Category).where(Category.name == payload["name"])
-        ).scalar_one_or_none()
+        path = payload.get("path")
+        if path:
+            cat = _category_path_index(db).get(path)
+        else:
+            cat = db.execute(
+                select(Category).where(Category.name == payload["name"])
+            ).scalar_one_or_none()
         if cat is None:
             return
         # Mirror settings.py delete_all_categories cleanup for FK safety
@@ -415,15 +495,20 @@ def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
             if parent is not None:
                 cat.parent_id = parent.id
     elif ev.event_type == "category.merge":
-        source = db.execute(
-            select(Category).where(Category.name == payload["source_name"])
-        ).scalar_one_or_none()
-        if source is None:
-            return
-        target = db.execute(
-            select(Category).where(Category.name == payload["target_name"])
-        ).scalar_one_or_none()
-        if target is None:
+        source_path = payload.get("source_path")
+        target_path = payload.get("target_path")
+        if source_path or target_path:
+            path_idx = _category_path_index(db)
+            source = path_idx.get(source_path) if source_path else None
+            target = path_idx.get(target_path) if target_path else None
+        else:
+            source = db.execute(
+                select(Category).where(Category.name == payload["source_name"])
+            ).scalar_one_or_none()
+            target = db.execute(
+                select(Category).where(Category.name == payload["target_name"])
+            ).scalar_one_or_none()
+        if source is None or target is None:
             return
         apply_category_merge(db, source, target)
     elif ev.event_type == "category_mapping.delete":
@@ -471,42 +556,71 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
             ))
         db.flush()
 
-    # 1. Categories -- insert missing, in two passes (parents first via topological sort)
-    cat_idx = _category_index(db)
-    by_name = {c.name: c for c in export.categories}
-    inserted_round = True
-    pending = list(export.categories)
-    while pending and inserted_round:
-        inserted_round = False
-        remaining = []
-        for ec in pending:
-            if ec.name in cat_idx:
+    # 1. Categories -- insert missing.
+    is_v3 = export.format_version == 3
+    if is_v3:
+        # Path-keyed: process shallowest paths first so a category's own
+        # export entry always creates it with its *real* attributes before
+        # any deeper path could reference it as an (otherwise default-typed)
+        # missing ancestor.
+        cat_idx = _category_path_index(db)
+        sorted_cats = sorted(
+            export.categories, key=lambda c: len(split_category_path(c.path or c.name))
+        )
+        for ec in sorted_cats:
+            effective_path = ec.path or ec.name
+            if effective_path in cat_idx:
                 continue
-            parent_id = None
-            if ec.parent_name is not None:
-                parent = cat_idx.get(ec.parent_name)
+            segments = split_category_path(effective_path)
+            parent = None
+            if len(segments) > 1:
+                parent_path = PATH_SEPARATOR.join(segments[:-1])
+                parent = cat_idx.get(parent_path)
                 if parent is None:
-                    remaining.append(ec)
-                    continue
-                parent_id = parent.id
+                    parent = resolve_or_create_category_path(db, parent_path, cat_idx)
             new_cat = Category(
-                name=ec.name, parent_id=parent_id,
+                name=segments[-1], parent_id=parent.id if parent else None,
                 is_fixed=ec.is_fixed, category_type=ec.category_type,
             )
             db.add(new_cat)
             db.flush()
-            cat_idx[ec.name] = new_cat
-            inserted_round = True
-        pending = remaining
-    if pending:
-        raise ValueError(f"Could not resolve parents for: {[c.name for c in pending]}")
+            cat_idx[effective_path] = new_cat
+    else:
+        # Name-keyed, two passes (parents first via topological sort).
+        cat_idx = _category_index(db)
+        inserted_round = True
+        pending = list(export.categories)
+        while pending and inserted_round:
+            inserted_round = False
+            remaining = []
+            for ec in pending:
+                if ec.name in cat_idx:
+                    continue
+                parent_id = None
+                if ec.parent_name is not None:
+                    parent = cat_idx.get(ec.parent_name)
+                    if parent is None:
+                        remaining.append(ec)
+                        continue
+                    parent_id = parent.id
+                new_cat = Category(
+                    name=ec.name, parent_id=parent_id,
+                    is_fixed=ec.is_fixed, category_type=ec.category_type,
+                )
+                db.add(new_cat)
+                db.flush()
+                cat_idx[ec.name] = new_cat
+                inserted_round = True
+            pending = remaining
+        if pending:
+            raise ValueError(f"Could not resolve parents for: {[c.name for c in pending]}")
 
     # 2. Category mappings -- insert missing only (NAS-wins on existing)
     existing_mappings = {m.bank_category for m in db.execute(select(CategoryMapping)).scalars().all()}
     for em in export.category_mappings:
         if em.bank_category in existing_mappings:
             continue
-        cat = cat_idx.get(em.category_name)
+        cat = _lookup_category_ref(em.category_name, export.format_version, cat_idx, db)
         if cat is None:
             continue
         db.add(CategoryMapping(bank_category=em.bank_category, category_id=cat.id))
@@ -529,7 +643,7 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
     }
     for el in export.budget_lines:
         budget = bud_idx.get(el.budget_start_date.isoformat())
-        cat = cat_idx.get(el.category_name)
+        cat = _lookup_category_ref(el.category_name, export.format_version, cat_idx, db)
         if budget is None or cat is None:
             continue
         existing = existing_lines.get((budget.id, cat.id))
@@ -543,7 +657,7 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
         t.category_id for t in db.execute(select(BudgetTemplate)).scalars().all()
     }
     for et in export.budget_templates:
-        cat = cat_idx.get(et.category_name)
+        cat = _lookup_category_ref(et.category_name, export.format_version, cat_idx, db)
         if cat is None or cat.id in existing_template_cat_ids:
             continue
         db.add(BudgetTemplate(category_id=cat.id, amount=et.amount))
@@ -591,7 +705,8 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
             tx = existing_tx[et.import_hash]
             if update_duplicates:
                 tx.merchant_name = et.merchant_name
-                tx.category_id = cat_idx[et.category_name].id if et.category_name and et.category_name in cat_idx else None
+                ref_cat = _lookup_category_ref(et.category_name, export.format_version, cat_idx, db)
+                tx.category_id = ref_cat.id if ref_cat else None
             # format_version 1 files carry no real flag information (absent
             # fields default to False/None); never let them touch an
             # existing transaction's flags, curated or not.
@@ -608,11 +723,8 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
                     tx.is_incidental = et.is_incidental
                     tx.incidental_label_id = label_id
             continue
-        category_id = (
-            cat_idx[et.category_name].id
-            if et.category_name and et.category_name in cat_idx
-            else None
-        )
+        ref_cat = _lookup_category_ref(et.category_name, export.format_version, cat_idx, db)
+        category_id = ref_cat.id if ref_cat else None
         new_tx = Transaction(
             datum=et.datum, rekening=et.rekening, tegenrekening=et.tegenrekening,
             naam=et.naam, adres=et.adres, postcode=et.postcode, woonplaats=et.woonplaats,
@@ -650,7 +762,7 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
 
     # 7b. Receipts -- create only if the transaction has no receipt yet (NAS-wins)
     if export.receipts:
-        _apply_receipts(db, export.receipts, existing_tx, cat_idx)
+        _apply_receipts(db, export.receipts, existing_tx, cat_idx, export.format_version)
 
     # 8. Record this export as imported (idempotency audit)
     if export.export_id:

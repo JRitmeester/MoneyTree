@@ -126,7 +126,7 @@ class Category(Base):
     __tablename__ = "categories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     parent_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
     is_fixed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     category_type: Mapped[str] = mapped_column(String(10), default="expense", nullable=False)
@@ -134,6 +134,16 @@ class Category(Base):
     children: Mapped[list["Category"]] = relationship(back_populates="parent")
     parent: Mapped["Category | None"] = relationship(
         back_populates="children", remote_side=[id]
+    )
+
+    # Names are unique per parent, not globally (two categories named "Overig"
+    # under different parents are allowed). NOTE: SQLite treats NULL as
+    # distinct from every other value in a unique constraint, so root-level
+    # categories (parent_id IS NULL) are NOT constrained by the DB here; root
+    # sibling uniqueness is enforced in the application layer (see
+    # routers/categories.py create/update, and services/category_merge.py).
+    __table_args__ = (
+        UniqueConstraint("parent_id", "name", name="uq_category_parent_name"),
     )
 
 

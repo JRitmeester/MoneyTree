@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 DateType = date
 
 
-SUPPORTED_FORMAT_VERSIONS = {1, 2}
+SUPPORTED_FORMAT_VERSIONS = {1, 2, 3}
 
 
 class ExportCategory(BaseModel):
@@ -17,6 +17,11 @@ class ExportCategory(BaseModel):
     parent_name: Optional[str] = None
     is_fixed: bool = False
     category_type: str = "expense"
+    # Authoritative in format_version 3: the full "Parent > Child" path,
+    # using the same " > " separator as the dashboard/budget hierarchical
+    # display. `name` is kept for backward tooling/display but is no longer
+    # a unique identifier once categories share names across parents.
+    path: Optional[str] = None
 
 
 class ExportCategoryMapping(BaseModel):
@@ -121,7 +126,7 @@ class ExportSyncEvent(BaseModel):
 
 
 class ExportFile(BaseModel):
-    format_version: Literal[1, 2]
+    format_version: Literal[1, 2, 3]
     export_id: Optional[str] = None
     exported_at: datetime
     since: Optional[date] = None

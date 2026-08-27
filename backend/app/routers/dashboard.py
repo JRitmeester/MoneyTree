@@ -44,19 +44,14 @@ def _build_hierarchy(db: Session) -> tuple[dict, dict]:
 
 
 def _full_category_name(cat_id: int, cat_id_to_cat: dict) -> str:
-    """Build hierarchical name like 'Vervoer > Auto > Onderhoud'."""
-    parts = []
-    seen = set()
-    current = cat_id
-    while current in cat_id_to_cat:
-        if current in seen:
-            break
-        seen.add(current)
-        cat = cat_id_to_cat[current]
-        parts.append(cat.name)
-        current = cat.parent_id
-    parts.reverse()
-    return " > ".join(parts)
+    """Build hierarchical name like 'Vervoer > Auto > Onderhoud'.
+
+    Thin wrapper kept for call-site stability; the actual path-building
+    logic lives in services.category_paths so export/import and the
+    dashboard/budget views never duplicate it.
+    """
+    from ..services.category_paths import full_category_path
+    return full_category_path(cat_id, cat_id_to_cat)
 
 
 def _find_root(cat_id: int, cat_id_to_cat: dict) -> int:

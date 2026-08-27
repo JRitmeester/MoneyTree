@@ -333,4 +333,104 @@ def test_merge_records_sync_event(client: TestClient, db: Session):
     assert len(events) == 1
     assert events[0].event_type == "category.merge"
     payload = json.loads(events[0].payload_json)
-    assert payload == {"source_name": "EventSource", "target_name": "EventTarget"}
+    assert payload["source_name"] == "EventSource"
+    assert payload["target_name"] == "EventTarget"
+    assert payload["source_path"] == "EventSource"
+    assert payload["target_path"] == "EventTarget"
+
+
+# --- Task 2: per-parent category names ---
+
+
+def test_create_allows_same_name_under_different_parents(client: TestClient, db: Session):
+    parent_a = make_category(db, name="ParentA")
+    parent_b = make_category(db, name="ParentB")
+    db.commit()
+
+    resp_a = client.post("/api/categories", json={"name": "Overig", "parent_id": parent_a.id})
+    resp_b = client.post("/api/categories", json={"name": "Overig", "parent_id": parent_b.id})
+
+    assert resp_a.status_code == 200
+    assert resp_b.status_code == 200
+    assert resp_a.json()["id"] != resp_b.json()["id"]
+
+
+def test_create_rejects_duplicate_name_under_same_parent(client: TestClient, db: Session):
+    parent = make_category(db, name="Parent")
+    db.commit()
+    client.post("/api/categories", json={"name": "Child", "parent_id": parent.id})
+
+    resp = client.post("/api/categories", json={"name": "Child", "parent_id": parent.id})
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == 'A category named "Child" already exists under "Parent"'
+
+
+def test_create_rejects_duplicate_name_at_top_level(client: TestClient, db: Session):
+    make_category(db, name="Root")
+    db.commit()
+
+    resp = client.post("/api/categories", json={"name": "Root"})
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == 'A category named "Root" already exists at the top level'
+
+
+def test_rename_rejects_collision_with_sibling(client: TestClient, db: Session):
+    parent = make_category(db, name="Parent")
+    db.commit()
+    child_a = Category(name="Alpha", parent_id=parent.id)
+    child_b = Category(name="Beta", parent_id=parent.id)
+    db.add_all([child_a, child_b])
+    db.commit()
+    db.refresh(child_b)
+
+    resp = client.patch(f"/api/categories/{child_b.id}", json={"name": "Alpha"})
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == 'A category named "Alpha" already exists under "Parent"'
+
+
+def test_rename_allows_same_name_under_different_parents(client: TestClient, db: Session):
+    parent_a = make_category(db, name="ParentA")
+    parent_b = make_category(db, name="ParentB")
+    db.commit()
+    child_a = Category(name="Alpha", parent_id=parent_a.id)
+    child_b = Category(name="Beta", parent_id=parent_b.id)
+    db.add_all([child_a, child_b])
+    db.commit()
+    db.refresh(child_b)
+
+    resp = client.patch(f"/api/categories/{child_b.id}", json={"name": "Alpha"})
+
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "Alpha"
+
+
+def test_move_rejects_collision_with_sibling_under_new_parent(client: TestClient, db: Session):
+    parent_a = make_category(db, name="ParentA")
+    parent_b = make_category(db, name="ParentB")
+    db.commit()
+    existing = Category(name="Shared", parent_id=parent_b.id)
+    moving = Category(name="Shared", parent_id=parent_a.id)
+    db.add_all([existing, moving])
+    db.commit()
+    db.refresh(moving)
+
+    resp = client.patch(f"/api/categories/{moving.id}", json={"parent_id": parent_b.id})
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == 'A category named "Shared" already exists under "ParentB"'
+
+
+def test_rename_unchanged_name_does_not_self_collide(client: TestClient, db: Session):
+    parent = make_category(db, name="Parent")
+    db.commit()
+    child = Category(name="Alpha", parent_id=parent.id)
+    db.add(child)
+    db.commit()
+    db.refresh(child)
+
+    resp = client.patch(f"/api/categories/{child.id}", json={"is_fixed": True})
+
+    assert resp.status_code == 200

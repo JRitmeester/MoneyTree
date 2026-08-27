@@ -15,6 +15,7 @@ from ..models import (
     IncidentalLabel, LineItem, OwnAccount, Receipt, SyncEvent, Transaction,
     TransactionOffset,
 )
+from .category_paths import full_category_path
 from ..sync_schemas import (
     ExportBudget, ExportBudgetLine, ExportBudgetTemplate, ExportCategory,
     ExportCategoryMapping, ExportFile, ExportLineItem, ExportOwnAccount,
@@ -32,6 +33,7 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
             parent_name=cat_by_id[c.parent_id].name if c.parent_id else None,
             is_fixed=c.is_fixed,
             category_type=c.category_type,
+            path=full_category_path(c.id, cat_by_id),
         )
         for c in cats
     ]
@@ -40,7 +42,7 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
     export_mappings = [
         ExportCategoryMapping(
             bank_category=m.bank_category,
-            category_name=cat_by_id[m.category_id].name,
+            category_name=full_category_path(m.category_id, cat_by_id),
         )
         for m in mappings
     ]
@@ -55,7 +57,7 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
     export_lines = [
         ExportBudgetLine(
             budget_start_date=budget_by_id[l.budget_id].start_date,
-            category_name=cat_by_id[l.category_id].name,
+            category_name=full_category_path(l.category_id, cat_by_id),
             amount=l.amount,
         )
         for l in lines
@@ -64,7 +66,7 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
     templates = db.execute(select(BudgetTemplate)).scalars().all()
     export_templates = [
         ExportBudgetTemplate(
-            category_name=cat_by_id[t.category_id].name,
+            category_name=full_category_path(t.category_id, cat_by_id),
             amount=t.amount,
         )
         for t in templates
@@ -107,7 +109,7 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
             afschriftnummer=t.afschriftnummer,
             categorie=t.categorie,
             merchant_name=t.merchant_name,
-            category_name=cat_by_id[t.category_id].name if t.category_id else None,
+            category_name=full_category_path(t.category_id, cat_by_id) if t.category_id else None,
             created_at=t.created_at,
             is_internal_transfer=t.is_internal_transfer,
             is_internal_transfer_manual=t.is_internal_transfer_manual,
@@ -171,7 +173,7 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
                 description=li.description,
                 amount=li.amount,
                 quantity=li.quantity,
-                category_name=cat_by_id[li.category_id].name if li.category_id else None,
+                category_name=full_category_path(li.category_id, cat_by_id) if li.category_id else None,
                 sort_order=li.sort_order,
                 is_remaining=li.is_remaining,
             )
@@ -206,7 +208,7 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
     ]
 
     return ExportFile(
-        format_version=2,
+        format_version=3,
         export_id=str(uuid.uuid4()),
         exported_at=datetime.now(timezone.utc),
         since=since,
