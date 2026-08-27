@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.models import RecurringPayment, RecurringPaymentOccurrence, Transaction
 from app.services.recurring_detector import (
+    MATCH_WIDE_BAND,
     detect_recurring_payments,
+    match_new_transactions,
     next_expected_date,
     upsert_recurring_payments,
 )
@@ -296,6 +298,223 @@ class TestNotices:
         resp = client.get("/api/recurring/notices")
         notices = [n for n in resp.json() if n["recurring_payment_id"] == payment_id]
         assert notices == []
+
+
+def _seed_iban_monthly_group(
+    db: Session, iban: str, count: int = 4, amount: float = -1000.0, start: date = date(2025, 1, 1)
+) -> None:
+    for i in range(count):
+        d = _add_months_test_helper(start, i)
+        make_transaction(
+            db,
+            bedrag=amount,
+            naam="Landlord",
+            tegenrekening=iban,
+            datum=d,
+            volgnummer=f"iban{i + 1}",
+        )
+    db.commit()
+
+
+def _add_months_test_helper(base: date, months: int) -> date:
+    month_index = base.month - 1 + months
+    year = base.year + month_index // 12
+    month = month_index % 12 + 1
+    return date(year, month, base.day)
+
+
+class TestTwoBandMatching:
+    """Spec-owner ruling 2026-08-28: matching accepts a wide band (50%) of
+    expected_amount; within tolerance but outside the wide band it does not
+    match at all; inside the wide band but outside amount_tolerance it
+    matches and raises an amount_changed notice."""
+
+    def _confirmed_payment(self, client, db: Session, iban: str = "NL01BANK0123456789") -> int:
+        _seed_iban_monthly_group(db, iban)
+        client.post("/api/recurring/rescan")
+        payments = client.get("/api/recurring").json()
+        payment_id = next(p["id"] for p in payments if p["counterparty_iban"] == iban)
+        client.post(f"/api/recurring/{payment_id}/confirm", json={})
+        return payment_id
+
+    def test_far_outlier_does_not_match(self, client, db: Session):
+        iban = "NL01BANK0123456789"
+        payment_id = self._confirmed_payment(client, db, iban)
+        before = len(client.get(f"/api/recurring/{payment_id}/occurrences").json())
+
+        payment = db.get(RecurringPayment, payment_id)
+        expected_date = next_expected_date(payment)
+        far_tx = make_transaction(
+            db, bedrag=-3000.0, naam="Landlord", tegenrekening=iban, datum=expected_date, volgnummer="far"
+        )
+        db.commit()
+
+        matched = match_new_transactions(db, [far_tx])
+        db.commit()
+
+        assert matched == 0
+        after = len(client.get(f"/api/recurring/{payment_id}/occurrences").json())
+        assert after == before
+
+    def test_wide_band_deviation_matches_and_notices(self, client, db: Session):
+        iban = "NL01BANK0123456789"
+        payment_id = self._confirmed_payment(client, db, iban)
+        before = len(client.get(f"/api/recurring/{payment_id}/occurrences").json())
+
+        payment = db.get(RecurringPayment, payment_id)
+        expected_date = next_expected_date(payment)
+        deviated_tx = make_transaction(
+            db, bedrag=-1200.0, naam="Landlord", tegenrekening=iban, datum=expected_date, volgnummer="dev"
+        )
+        db.commit()
+
+        matched = match_new_transactions(db, [deviated_tx])
+        db.commit()
+
+        assert matched == 1
+        after = len(client.get(f"/api/recurring/{payment_id}/occurrences").json())
+        assert after == before + 1
+
+        notices = client.get("/api/recurring/notices").json()
+        assert any(n["type"] == "amount_changed" and n["recurring_payment_id"] == payment_id for n in notices)
+
+
+class TestDriftCannotMaskNotices:
+    """Spec-owner ruling 2026-08-28: drift only applies within
+    amount_tolerance; after CONSECUTIVE_SNAP_COUNT (3) consecutive
+    out-of-tolerance occurrences on the same side, expected_amount snaps to
+    their median, clearing the notice."""
+
+    def test_sustained_increase_notices_twice_then_snaps(self, client, db: Session):
+        iban = "NL02BANK0987654321"
+        _seed_iban_monthly_group(db, iban, count=4, amount=-1000.0, start=date(2025, 1, 1))
+        client.post("/api/recurring/rescan")
+        payments = client.get("/api/recurring").json()
+        payment_id = next(p["id"] for p in payments if p["counterparty_iban"] == iban)
+        client.post(f"/api/recurring/{payment_id}/confirm", json={})
+
+        raised_amount = -1160.0  # +16%, outside 15% tolerance, inside 50% wide band
+
+        for i in range(3):
+            payment = db.get(RecurringPayment, payment_id)
+            expected_date = next_expected_date(payment)
+            tx = make_transaction(
+                db,
+                bedrag=raised_amount,
+                naam="Landlord",
+                tegenrekening=iban,
+                datum=expected_date,
+                volgnummer=f"raise{i}",
+            )
+            db.commit()
+            matched = match_new_transactions(db, [tx])
+            db.commit()
+            assert matched == 1
+
+            payment = db.get(RecurringPayment, payment_id)
+            notices = [
+                n
+                for n in client.get("/api/recurring/notices").json()
+                if n["recurring_payment_id"] == payment_id and n["type"] == "amount_changed"
+            ]
+
+            if i < 2:
+                assert payment.expected_amount == -1000.0
+                assert notices, f"expected an amount_changed notice after occurrence {i + 1}"
+            else:
+                assert payment.expected_amount == -1160.0
+                assert notices == []
+
+
+class TestUpsertGroupKeyCollisionGuard:
+    def test_confirmed_key_reappearing_creates_no_duplicate_suggested_row(self, client, db: Session):
+        _seed_monthly_group(db, count=4)
+        client.post("/api/recurring/rescan")
+        payment_id = client.get("/api/recurring").json()[0]["id"]
+        client.post(f"/api/recurring/{payment_id}/confirm", json={})
+
+        # A further import of the same group should not create a new
+        # suggested row for a key already owned by a confirmed row.
+        _run_detector(db)
+
+        all_payments = client.get("/api/recurring").json()
+        assert len(all_payments) == 1
+        assert all_payments[0]["status"] == "confirmed"
+        suggested = client.get("/api/recurring", params={"status": "suggested"}).json()
+        assert suggested == []
+
+
+class TestNextExpectedDateClamping:
+    def test_day_31_clamps_to_february_28(self, db: Session):
+        payment = RecurringPayment(
+            merchant_pattern="rent",
+            name="Rent",
+            expected_amount=-1000.0,
+            cadence="monthly",
+            expected_day=31,
+            anchor_date=date(2025, 1, 31),
+            status="confirmed",
+        )
+        db.add(payment)
+        db.flush()
+        assert next_expected_date(payment) == date(2025, 2, 28)
+
+
+class TestPossiblyMissedBoundary:
+    def test_exactly_five_days_past_fires(self, db: Session):
+        today = date(2026, 1, 15)
+        anchor = today - timedelta(days=28 + 5)
+        payment = RecurringPayment(
+            merchant_pattern="x",
+            name="X",
+            expected_amount=-50.0,
+            cadence="four_weekly",
+            anchor_date=anchor,
+            status="confirmed",
+        )
+        db.add(payment)
+        db.flush()
+
+        from app.services.recurring_detector import compute_notices
+
+        notices = compute_notices(db, today=today)
+        assert any(n["type"] == "possibly_missed" and n["recurring_payment_id"] == payment.id for n in notices)
+
+    def test_four_days_past_does_not_fire(self, db: Session):
+        today = date(2026, 1, 15)
+        anchor = today - timedelta(days=28 + 4)
+        payment = RecurringPayment(
+            merchant_pattern="y",
+            name="Y",
+            expected_amount=-50.0,
+            cadence="four_weekly",
+            anchor_date=anchor,
+            status="confirmed",
+        )
+        db.add(payment)
+        db.flush()
+
+        from app.services.recurring_detector import compute_notices
+
+        notices = compute_notices(db, today=today)
+        assert not any(n["type"] == "possibly_missed" and n["recurring_payment_id"] == payment.id for n in notices)
+
+
+class TestDeleteEverythingWipesRecurringTables:
+    def test_delete_everything_clears_recurring_tables(self, client, db: Session):
+        _seed_monthly_group(db, count=4)
+        client.post("/api/recurring/rescan")
+        payment_id = client.get("/api/recurring").json()[0]["id"]
+        client.post(f"/api/recurring/{payment_id}/confirm", json={})
+
+        assert db.query(RecurringPayment).count() > 0
+        assert db.query(RecurringPaymentOccurrence).count() > 0
+
+        resp = client.delete("/api/settings/everything")
+        assert resp.status_code == 200
+
+        assert db.query(RecurringPayment).count() == 0
+        assert db.query(RecurringPaymentOccurrence).count() == 0
 
 
 def _build_asn_csv(rows: list[dict]) -> bytes:

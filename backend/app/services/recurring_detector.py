@@ -53,8 +53,23 @@ POSSIBLY_MISSED_GRACE_DAYS = 5
 # expected_amount drifts partially (not fully) toward each newly matched
 # occurrence's amount, so a genuinely changed amount still shows up as a
 # deviation from expected_amount on read (the "amount changed" notice),
-# rather than the tracked expectation snapping to match every payment.
+# rather than the tracked expectation snapping to match every payment. Drift
+# only applies to occurrences within amount_tolerance (see
+# match_new_transactions); out-of-tolerance occurrences never drift it.
 AMOUNT_DRIFT_ALPHA = 0.3
+# Two-band matching (spec-owner ruling, 2026-08-28): a same-group,
+# same-date-window transaction matches as an occurrence as long as it falls
+# within this wide band of expected_amount, even if it's outside
+# amount_tolerance (in which case it surfaces an amount_changed notice
+# instead of drifting expected_amount). Beyond the wide band it is not
+# treated as an occurrence at all (e.g. a one-off large fee to the same
+# IBAN is not "this recurring payment changed price").
+MATCH_WIDE_BAND = 0.5
+# After this many consecutive out-of-tolerance occurrences on the same side
+# (all above or all below expected_amount), expected_amount snaps to their
+# median instead of continuing to notice indefinitely (price-increase
+# acceptance).
+CONSECUTIVE_SNAP_COUNT = 3
 
 
 @dataclass(frozen=True)
@@ -360,13 +375,44 @@ def backfill_occurrences(db: Session, payment: RecurringPayment) -> None:
     db.flush()
 
 
+def _maybe_snap_expected_amount(db: Session, row: RecurringPayment) -> None:
+    """After CONSECUTIVE_SNAP_COUNT consecutive out-of-tolerance occurrences
+    on the same side (all above or all below expected_amount), snap
+    expected_amount to their median. Accepts a sustained price change
+    instead of raising an amount_changed notice indefinitely."""
+    recent = (
+        db.query(RecurringPaymentOccurrence)
+        .filter_by(recurring_payment_id=row.id)
+        .order_by(RecurringPaymentOccurrence.date.desc())
+        .limit(CONSECUTIVE_SNAP_COUNT)
+        .all()
+    )
+    if len(recent) < CONSECUTIVE_SNAP_COUNT:
+        return
+    if not all(amount_deviates(o.amount, row.expected_amount, row.amount_tolerance) for o in recent):
+        return
+
+    expected_median = abs(row.expected_amount)
+    sides = {1 if abs(o.amount) > expected_median else -1 for o in recent}
+    if len(sides) != 1:
+        return
+
+    row.expected_amount = statistics.median(o.amount for o in recent)
+
+
 def match_new_transactions(db: Session, transactions: Sequence[Transaction]) -> int:
     """Match newly-imported transactions against confirmed recurring
-    patterns (spec Lifecycle paragraph): same group key, date within
-    +/-DATE_MATCH_WINDOW_DAYS of the expected date. A match appends an
-    occurrence and drifts `anchor_date`/`expected_amount`; amount deviation
-    itself does not block the match, it surfaces later as an "amount
-    changed" notice on read. Returns the number of matches made."""
+    patterns (spec Lifecycle paragraph, two-band ruling 2026-08-28): same
+    group key, date within +/-DATE_MATCH_WINDOW_DAYS of the expected date,
+    amount within MATCH_WIDE_BAND of expected_amount. A match appends an
+    occurrence and updates `anchor_date`. Within amount_tolerance, it also
+    drifts `expected_amount` toward the new amount; outside tolerance (but
+    still inside the wide band) expected_amount is left alone so the
+    deviation surfaces as an "amount changed" notice on read, unless
+    CONSECUTIVE_SNAP_COUNT consecutive same-side deviations have
+    accumulated, in which case expected_amount snaps to their median.
+    Beyond the wide band, the transaction is not treated as an occurrence at
+    all. Returns the number of matches made."""
     confirmed = db.query(RecurringPayment).filter_by(status="confirmed").all()
     if not confirmed:
         return 0
@@ -391,6 +437,8 @@ def match_new_transactions(db: Session, transactions: Sequence[Transaction]) -> 
             continue
         if abs((tx.datum - expected_date).days) > DATE_MATCH_WINDOW_DAYS:
             continue
+        if amount_deviates(tx.bedrag, row.expected_amount, MATCH_WIDE_BAND):
+            continue
 
         db.add(
             RecurringPaymentOccurrence(
@@ -400,10 +448,16 @@ def match_new_transactions(db: Session, transactions: Sequence[Transaction]) -> 
                 date=tx.datum,
             )
         )
+        db.flush()
         row.anchor_date = tx.datum
-        row.expected_amount = row.expected_amount + AMOUNT_DRIFT_ALPHA * (
-            tx.bedrag - row.expected_amount
-        )
+
+        if amount_deviates(tx.bedrag, row.expected_amount, row.amount_tolerance):
+            _maybe_snap_expected_amount(db, row)
+        else:
+            row.expected_amount = row.expected_amount + AMOUNT_DRIFT_ALPHA * (
+                tx.bedrag - row.expected_amount
+            )
+
         already_linked.add(tx.id)
         matches += 1
 
