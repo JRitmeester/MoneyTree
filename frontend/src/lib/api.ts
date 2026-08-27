@@ -1023,6 +1023,8 @@ export interface RecurringPayment {
 	created_at: string;
 	updated_at: string;
 	next_expected: string | null;
+	occurrence_count: number;
+	last_seen: string | null;
 }
 
 export interface RecurringPaymentOccurrence {

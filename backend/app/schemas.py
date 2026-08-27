@@ -474,6 +474,8 @@ class RecurringPaymentOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     next_expected: Optional[date] = None
+    occurrence_count: int = 0
+    last_seen: Optional[date] = None
 
     model_config = {"from_attributes": True}
 

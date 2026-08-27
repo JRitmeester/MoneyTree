@@ -69,6 +69,29 @@ class TestListAndRescan:
         resp = client.get("/api/recurring")
         assert len(resp.json()) == 1
 
+    def test_list_carries_occurrence_count_and_last_seen(self, client, db: Session):
+        dates = _monthly_dates(date(2025, 1, 15), 4)
+        _seed_monthly_group(db, count=4)
+        client.post("/api/recurring/rescan")
+        payment_id = client.get("/api/recurring").json()[0]["id"]
+        client.post(f"/api/recurring/{payment_id}/confirm", json={})
+
+        resp = client.get("/api/recurring", params={"status": "confirmed"})
+        assert resp.status_code == 200
+        body = resp.json()[0]
+        assert body["occurrence_count"] == 4
+        assert body["last_seen"] == dates[-1].isoformat()
+
+    def test_list_suggested_rows_also_carry_occurrence_aggregates(self, client, db: Session):
+        dates = _monthly_dates(date(2025, 1, 15), 4)
+        _seed_monthly_group(db, count=4)
+        client.post("/api/recurring/rescan")
+
+        resp = client.get("/api/recurring", params={"status": "suggested"})
+        body = resp.json()[0]
+        assert body["occurrence_count"] == 4
+        assert body["last_seen"] == dates[-1].isoformat()
+
 
 class TestConfirmAndDismiss:
     def test_confirm_sets_status_and_backfills_occurrences(self, client, db: Session):

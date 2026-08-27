@@ -1,24 +1,25 @@
 <script lang="ts">
 	import {
-		getRecurringPayments, getRecurringNotices, getRecurringOccurrences, rescanRecurring,
+		getRecurringPayments, getRecurringNotices, rescanRecurring,
 		confirmRecurring, dismissRecurring, updateRecurring, formatEuro, formatDate,
-		type RecurringPayment, type RecurringNotice, type RecurringPaymentOccurrence
+		type RecurringPayment, type RecurringNotice
 	} from '$lib/api';
 	import { extractErrorDetail } from '$lib/errors';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 
-	interface Row {
-		payment: RecurringPayment;
-		occurrenceCount: number;
-		lastSeen: string | null;
-	}
-
-	let suggested: Row[] = $state([]);
-	let confirmed: Row[] = $state([]);
+	let suggested: RecurringPayment[] = $state([]);
+	let confirmed: RecurringPayment[] = $state([]);
+	let dismissed: RecurringPayment[] = $state([]);
 	let notices: RecurringNotice[] = $state([]);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let rescanning = $state(false);
+
+	// Dismissed section is collapsed by default; its list is fetched lazily
+	// the first time it's expanded.
+	let dismissedExpanded = $state(false);
+	let dismissedLoaded = $state(false);
+	let dismissedLoading = $state(false);
 
 	// Suggested rows currently expanded into the confirm form.
 	let confirmingId: number | null = $state(null);
@@ -31,19 +32,6 @@
 	let editCategoryId: number | null = $state(null);
 	let editExpectedAmount = $state('');
 
-	async function toRow(payment: RecurringPayment): Promise<Row> {
-		let occurrences: RecurringPaymentOccurrence[] = [];
-		try {
-			occurrences = await getRecurringOccurrences(payment.id);
-		} catch {
-			occurrences = [];
-		}
-		const lastSeen = occurrences.length > 0
-			? occurrences.reduce((latest, o) => (o.date > latest ? o.date : latest), occurrences[0].date)
-			: null;
-		return { payment, occurrenceCount: occurrences.length, lastSeen };
-	}
-
 	async function load() {
 		loading = true;
 		error = null;
@@ -53,13 +41,35 @@
 				getRecurringPayments('confirmed'),
 				getRecurringNotices()
 			]);
-			suggested = await Promise.all(suggestedPayments.map(toRow));
-			confirmed = await Promise.all(confirmedPayments.map(toRow));
+			suggested = suggestedPayments;
+			confirmed = confirmedPayments;
 			notices = noticesResult;
+			if (dismissedExpanded) {
+				await loadDismissed();
+			}
 		} catch (e) {
 			error = extractErrorDetail(e);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadDismissed() {
+		dismissedLoading = true;
+		try {
+			dismissed = await getRecurringPayments('dismissed');
+			dismissedLoaded = true;
+		} catch (e) {
+			error = extractErrorDetail(e);
+		} finally {
+			dismissedLoading = false;
+		}
+	}
+
+	async function toggleDismissed() {
+		dismissedExpanded = !dismissedExpanded;
+		if (dismissedExpanded && !dismissedLoaded) {
+			await loadDismissed();
 		}
 	}
 
@@ -89,15 +99,15 @@
 	// Simple client-side heuristic: the confirmed income row with the largest
 	// expected amount is treated as the likely salary and gets a hint.
 	let salaryPaymentId = $derived.by(() => {
-		const incomeRows = confirmed.filter(r => r.payment.is_income);
+		const incomeRows = confirmed.filter(p => p.is_income);
 		if (incomeRows.length === 0) return null;
-		return incomeRows.reduce((max, r) => (r.payment.expected_amount > max.payment.expected_amount ? r : max), incomeRows[0]).payment.id;
+		return incomeRows.reduce((max, p) => (p.expected_amount > max.expected_amount ? p : max), incomeRows[0]).id;
 	});
 
-	function startConfirm(row: Row) {
-		confirmingId = row.payment.id;
-		confirmName = row.payment.name;
-		confirmCategoryId = row.payment.category_id;
+	function startConfirm(payment: RecurringPayment) {
+		confirmingId = payment.id;
+		confirmName = payment.name;
+		confirmCategoryId = payment.category_id;
 	}
 
 	function cancelConfirm() {
@@ -115,7 +125,9 @@
 		}
 	}
 
-	async function dismiss(paymentId: number) {
+	// Suggested rows: dismissing a pattern that was never confirmed is a
+	// one-click, low-stakes action.
+	async function dismissSuggested(paymentId: number) {
 		error = null;
 		try {
 			await dismissRecurring(paymentId);
@@ -125,11 +137,38 @@
 		}
 	}
 
-	function startEdit(row: Row) {
-		editingId = row.payment.id;
-		editName = row.payment.name;
-		editCategoryId = row.payment.category_id;
-		editExpectedAmount = String(row.payment.expected_amount);
+	// Confirmed rows: dismissing an already-confirmed payment stops notices
+	// and future matching, so it's guarded behind a confirmation prompt.
+	async function stopTracking(payment: RecurringPayment) {
+		const ok = window.confirm(
+			`Stop tracking "${payment.name}"? Its history is kept but notices and matching stop.`
+		);
+		if (!ok) return;
+		error = null;
+		try {
+			await dismissRecurring(payment.id);
+			await load();
+		} catch (e) {
+			error = extractErrorDetail(e);
+		}
+	}
+
+	async function reconfirm(paymentId: number) {
+		error = null;
+		try {
+			await updateRecurring(paymentId, { status: 'confirmed' });
+			dismissedLoaded = false;
+			await load();
+		} catch (e) {
+			error = extractErrorDetail(e);
+		}
+	}
+
+	function startEdit(payment: RecurringPayment) {
+		editingId = payment.id;
+		editName = payment.name;
+		editCategoryId = payment.category_id;
+		editExpectedAmount = String(payment.expected_amount);
 	}
 
 	function cancelEdit() {
@@ -196,30 +235,30 @@
 				</div>
 			{:else}
 				<div class="row-list">
-					{#each suggested as row (row.payment.id)}
+					{#each suggested as payment (payment.id)}
 						<div class="row-card">
 							<div class="row-main">
 								<div class="row-info">
 									<span class="row-name">
-										{row.payment.name}
-										{#if row.payment.is_income}
+										{payment.name}
+										{#if payment.is_income}
 											<span class="badge income">income</span>
 										{/if}
 									</span>
 									<span class="row-detail">
-										{formatEuro(row.payment.expected_amount)} &middot; {cadenceLabel(row.payment)}
+										{formatEuro(payment.expected_amount)} &middot; {cadenceLabel(payment)}
 									</span>
 									<span class="row-detail muted">
-										Last seen {row.lastSeen ? formatDate(row.lastSeen) : 'unknown'} &middot; {row.occurrenceCount} occurrence{row.occurrenceCount === 1 ? '' : 's'}
+										Last seen {payment.last_seen ? formatDate(payment.last_seen) : 'unknown'} &middot; {payment.occurrence_count} occurrence{payment.occurrence_count === 1 ? '' : 's'}
 									</span>
 								</div>
 								<div class="row-actions">
-									<button class="confirm-button" onclick={() => startConfirm(row)}>Confirm</button>
-									<button class="dismiss-button" onclick={() => dismiss(row.payment.id)}>Dismiss</button>
+									<button class="confirm-button" onclick={() => startConfirm(payment)}>Confirm</button>
+									<button class="dismiss-button" onclick={() => dismissSuggested(payment.id)}>Dismiss</button>
 								</div>
 							</div>
 
-							{#if confirmingId === row.payment.id}
+							{#if confirmingId === payment.id}
 								<div class="inline-form">
 									<label>
 										Name
@@ -230,7 +269,7 @@
 										<CategoryInput value={confirmCategoryId} onchange={(id) => (confirmCategoryId = id)} />
 									</label>
 									<div class="inline-form-actions">
-										<button class="save-button" onclick={() => saveConfirm(row.payment.id)}>Save</button>
+										<button class="save-button" onclick={() => saveConfirm(payment.id)}>Save</button>
 										<button class="cancel-button" onclick={cancelConfirm}>Cancel</button>
 									</div>
 								</div>
@@ -247,27 +286,27 @@
 				<p class="muted">No confirmed recurring payments yet.</p>
 			{:else}
 				<div class="row-list">
-					{#each confirmed as row (row.payment.id)}
-						{@const rowNotices = noticesFor(row.payment.id)}
+					{#each confirmed as payment (payment.id)}
+						{@const rowNotices = noticesFor(payment.id)}
 						<div class="row-card">
 							<div class="row-main">
 								<div class="row-info">
 									<span class="row-name">
-										{row.payment.name}
-										{#if row.payment.is_income}
+										{payment.name}
+										{#if payment.is_income}
 											<span class="badge income">income</span>
 										{/if}
 									</span>
 									<span class="row-detail">
-										{formatEuro(row.payment.expected_amount)} &middot; {cadenceLabel(row.payment)}
+										{formatEuro(payment.expected_amount)} &middot; {cadenceLabel(payment)}
 									</span>
 									<span class="row-detail muted">
-										Last seen {row.lastSeen ? formatDate(row.lastSeen) : 'unknown'} &middot; {row.occurrenceCount} occurrence{row.occurrenceCount === 1 ? '' : 's'}
-										{#if row.payment.next_expected}
-											&middot; Next expected {formatDate(row.payment.next_expected)}
+										Last seen {payment.last_seen ? formatDate(payment.last_seen) : 'unknown'} &middot; {payment.occurrence_count} occurrence{payment.occurrence_count === 1 ? '' : 's'}
+										{#if payment.next_expected}
+											&middot; Next expected {formatDate(payment.next_expected)}
 										{/if}
 									</span>
-									{#if row.payment.id === salaryPaymentId}
+									{#if payment.id === salaryPaymentId}
 										<span class="row-detail hint">Looks like your salary</span>
 									{/if}
 									{#each rowNotices as notice}
@@ -277,12 +316,12 @@
 									{/each}
 								</div>
 								<div class="row-actions">
-									<button class="edit-button" onclick={() => startEdit(row)}>Edit</button>
-									<button class="dismiss-button" onclick={() => dismiss(row.payment.id)}>Dismiss</button>
+									<button class="edit-button" onclick={() => startEdit(payment)}>Edit</button>
+									<button class="dismiss-button" onclick={() => stopTracking(payment)}>Stop tracking</button>
 								</div>
 							</div>
 
-							{#if editingId === row.payment.id}
+							{#if editingId === payment.id}
 								<div class="inline-form">
 									<label>
 										Name
@@ -297,7 +336,7 @@
 										<input type="number" step="0.01" bind:value={editExpectedAmount} />
 									</label>
 									<div class="inline-form-actions">
-										<button class="save-button" onclick={() => saveEdit(row.payment.id)}>Save</button>
+										<button class="save-button" onclick={() => saveEdit(payment.id)}>Save</button>
 										<button class="cancel-button" onclick={cancelEdit}>Cancel</button>
 									</div>
 								</div>
@@ -305,6 +344,45 @@
 						</div>
 					{/each}
 				</div>
+			{/if}
+		</section>
+
+		<section class="section">
+			<button class="collapse-toggle" onclick={toggleDismissed}>
+				<h2>Dismissed {dismissedExpanded ? '▾' : '▸'}</h2>
+			</button>
+			{#if dismissedExpanded}
+				{#if dismissedLoading}
+					<p class="muted">Loading...</p>
+				{:else if dismissed.length === 0}
+					<p class="muted">Nothing dismissed.</p>
+				{:else}
+					<div class="row-list">
+						{#each dismissed as payment (payment.id)}
+							<div class="row-card">
+								<div class="row-main">
+									<div class="row-info">
+										<span class="row-name">
+											{payment.name}
+											{#if payment.is_income}
+												<span class="badge income">income</span>
+											{/if}
+										</span>
+										<span class="row-detail">
+											{formatEuro(payment.expected_amount)} &middot; {cadenceLabel(payment)}
+										</span>
+										<span class="row-detail muted">
+											Last seen {payment.last_seen ? formatDate(payment.last_seen) : 'unknown'} &middot; {payment.occurrence_count} occurrence{payment.occurrence_count === 1 ? '' : 's'}
+										</span>
+									</div>
+									<div class="row-actions">
+										<button class="confirm-button" onclick={() => reconfirm(payment.id)}>Re-confirm</button>
+									</div>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
 			{/if}
 		</section>
 	{/if}
@@ -320,6 +398,15 @@
 	}
 	h1 { margin: 0; color: #1a1a1a; }
 	h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+	.collapse-toggle {
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+		text-align: left;
+		width: 100%;
+	}
+	.collapse-toggle h2 { color: #444; }
 	.muted { color: #999; font-style: italic; }
 	.error {
 		background: #fef2f2;
