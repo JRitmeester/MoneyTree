@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Iterable, Sequence
 
 from sqlalchemy.orm import Session
@@ -44,6 +44,17 @@ DAY_OF_MONTH_TOLERANCE = 4
 AMOUNT_TOLERANCE_FRACTION = 0.15
 AMOUNT_QUALIFYING_FRACTION = 0.75
 DEFAULT_AMOUNT_TOLERANCE = 0.15
+
+# --- Lifecycle constants (import-time matching, drift, notices; see spec
+# "Recurring-payment detection" Lifecycle paragraph) ---------------------
+
+DATE_MATCH_WINDOW_DAYS = 5
+POSSIBLY_MISSED_GRACE_DAYS = 5
+# expected_amount drifts partially (not fully) toward each newly matched
+# occurrence's amount, so a genuinely changed amount still shows up as a
+# deviation from expected_amount on read (the "amount changed" notice),
+# rather than the tracked expectation snapping to match every payment.
+AMOUNT_DRIFT_ALPHA = 0.3
 
 
 @dataclass(frozen=True)
@@ -279,3 +290,166 @@ def upsert_recurring_payments(
 
     db.flush()
     return result
+
+
+def amount_deviates(amount: float, expected_amount: float, tolerance: float) -> bool:
+    """Whether `amount` falls outside `tolerance` of `expected_amount`.
+
+    Unlike `is_amount_outlier` (which compares against an already-abs
+    median), `expected_amount` here is a signed value (positive for income,
+    negative for expenses), so it is abs'd before comparison."""
+    median = abs(expected_amount)
+    if median == 0:
+        return True
+    return abs(abs(amount) - median) > tolerance * median
+
+
+def _add_months(base: date, months: int, day: int) -> date:
+    """Add `months` calendar months to `base`, then set the day-of-month to
+    `day`, clamped to the last valid day of the resulting month."""
+    month_index = base.month - 1 + months
+    year = base.year + month_index // 12
+    month = month_index % 12 + 1
+    # Clamp to the last day of the target month.
+    if month == 12:
+        days_in_month = (date(year + 1, 1, 1) - date(year, 12, 1)).days
+    else:
+        days_in_month = (date(year, month + 1, 1) - date(year, month, 1)).days
+    return date(year, month, min(day, days_in_month))
+
+
+def next_expected_date(payment: RecurringPayment) -> date | None:
+    """The next occurrence date expected after `payment.anchor_date`.
+
+    monthly/yearly step from `expected_day`; four_weekly steps 28 days from
+    the anchor. Returns None if the cadence lacks the data needed (should
+    not happen for a fully-detected row)."""
+    if payment.cadence == "four_weekly":
+        return payment.anchor_date + timedelta(days=28)
+    if payment.cadence == "monthly" and payment.expected_day is not None:
+        return _add_months(payment.anchor_date, 1, payment.expected_day)
+    if payment.cadence == "yearly" and payment.expected_day is not None:
+        return _add_months(payment.anchor_date, 12, payment.expected_day)
+    return None
+
+
+def backfill_occurrences(db: Session, payment: RecurringPayment) -> None:
+    """Rebuild `payment`'s occurrences from the full transaction history,
+    matched by the same group key used by detection. Called on confirm so a
+    just-confirmed pattern has its complete history recorded, independent of
+    whatever the last detector run happened to populate."""
+    key = _row_key(payment)
+    transactions = db.query(Transaction).all()
+    matches = [
+        tx for tx in transactions if not tx.is_internal_transfer and _group_key(tx) == key
+    ]
+    matches.sort(key=lambda t: t.datum)
+
+    db.query(RecurringPaymentOccurrence).filter_by(recurring_payment_id=payment.id).delete()
+    for tx in matches:
+        db.add(
+            RecurringPaymentOccurrence(
+                recurring_payment_id=payment.id,
+                transaction_id=tx.id,
+                amount=tx.bedrag,
+                date=tx.datum,
+            )
+        )
+    if matches:
+        payment.anchor_date = matches[-1].datum
+    db.flush()
+
+
+def match_new_transactions(db: Session, transactions: Sequence[Transaction]) -> int:
+    """Match newly-imported transactions against confirmed recurring
+    patterns (spec Lifecycle paragraph): same group key, date within
+    +/-DATE_MATCH_WINDOW_DAYS of the expected date. A match appends an
+    occurrence and drifts `anchor_date`/`expected_amount`; amount deviation
+    itself does not block the match, it surfaces later as an "amount
+    changed" notice on read. Returns the number of matches made."""
+    confirmed = db.query(RecurringPayment).filter_by(status="confirmed").all()
+    if not confirmed:
+        return 0
+
+    by_key: dict[str, RecurringPayment] = {_row_key(row): row for row in confirmed}
+    already_linked: set[int] = {
+        occ.transaction_id for row in confirmed for occ in row.occurrences
+    }
+
+    matches = 0
+    for tx in transactions:
+        if tx.is_internal_transfer or tx.id in already_linked:
+            continue
+        key = _group_key(tx)
+        if key is None:
+            continue
+        row = by_key.get(key)
+        if row is None:
+            continue
+        expected_date = next_expected_date(row)
+        if expected_date is None:
+            continue
+        if abs((tx.datum - expected_date).days) > DATE_MATCH_WINDOW_DAYS:
+            continue
+
+        db.add(
+            RecurringPaymentOccurrence(
+                recurring_payment_id=row.id,
+                transaction_id=tx.id,
+                amount=tx.bedrag,
+                date=tx.datum,
+            )
+        )
+        row.anchor_date = tx.datum
+        row.expected_amount = row.expected_amount + AMOUNT_DRIFT_ALPHA * (
+            tx.bedrag - row.expected_amount
+        )
+        already_linked.add(tx.id)
+        matches += 1
+
+    db.flush()
+    return matches
+
+
+def compute_notices(db: Session, today: date | None = None) -> list[dict]:
+    """Notices computed on read from confirmed recurring payments (spec
+    Lifecycle paragraph): "amount_changed" when the latest occurrence
+    deviates from `expected_amount` beyond `amount_tolerance`;
+    "possibly_missed" when the expected date has passed by
+    POSSIBLY_MISSED_GRACE_DAYS or more with no matching occurrence."""
+    today = today or date.today()
+    notices: list[dict] = []
+
+    confirmed = db.query(RecurringPayment).filter_by(status="confirmed").all()
+    for payment in confirmed:
+        occurrences = sorted(payment.occurrences, key=lambda o: o.date)
+
+        if occurrences:
+            latest = occurrences[-1]
+            if amount_deviates(latest.amount, payment.expected_amount, payment.amount_tolerance):
+                notices.append(
+                    {
+                        "recurring_payment_id": payment.id,
+                        "name": payment.name,
+                        "type": "amount_changed",
+                        "detail": (
+                            f"Latest amount {latest.amount:.2f} deviates from expected "
+                            f"{payment.expected_amount:.2f}"
+                        ),
+                        "date": latest.date,
+                    }
+                )
+
+        expected = next_expected_date(payment)
+        if expected is not None and (today - expected).days >= POSSIBLY_MISSED_GRACE_DAYS:
+            notices.append(
+                {
+                    "recurring_payment_id": payment.id,
+                    "name": payment.name,
+                    "type": "possibly_missed",
+                    "detail": f"Expected on {expected.isoformat()}, no matching transaction yet",
+                    "date": expected,
+                }
+            )
+
+    return notices

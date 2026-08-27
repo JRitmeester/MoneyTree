@@ -94,6 +94,7 @@ async def import_csv(
     categorized = 0
     uncategorized = 0
     ibans = own_ibans(db)
+    affected_transactions: list[Transaction] = []
 
     for tx_data in parsed:
         # Check for duplicate
@@ -111,6 +112,7 @@ async def import_csv(
                 if not existing.is_internal_transfer_manual:
                     existing.is_internal_transfer = is_internal(existing, ibans)
                 updated += 1
+                affected_transactions.append(existing)
             else:
                 skipped += 1
                 continue
@@ -126,6 +128,22 @@ async def import_csv(
                 categorized += 1
             else:
                 uncategorized += 1
+            affected_transactions.append(tx)
+
+    db.flush()
+
+    # Match newly imported/updated transactions against confirmed recurring
+    # patterns, then refresh suggestions (spec "Recurring-payment detection"
+    # Lifecycle paragraph). Keeps import a single pass.
+    from ..services.recurring_detector import (
+        detect_recurring_payments,
+        match_new_transactions,
+        upsert_recurring_payments,
+    )
+
+    match_new_transactions(db, affected_transactions)
+    candidates = detect_recurring_payments(db)
+    upsert_recurring_payments(db, candidates)
 
     db.commit()
 

@@ -458,6 +458,62 @@ class OwnAccountOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RecurringPaymentOut(BaseModel):
+    id: int
+    merchant_pattern: str
+    counterparty_iban: Optional[str]
+    name: str
+    expected_amount: float
+    amount_tolerance: float
+    cadence: str
+    expected_day: Optional[int]
+    anchor_date: date
+    status: str
+    category_id: Optional[int]
+    is_income: bool
+    created_at: datetime
+    updated_at: datetime
+    next_expected: Optional[date] = None
+
+    model_config = {"from_attributes": True}
+
+
+class RecurringPaymentConfirm(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    category_id: Optional[int] = None
+
+
+class RecurringPaymentUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    category_id: Optional[int] = None
+    expected_amount: Optional[float] = None
+    amount_tolerance: Optional[float] = Field(default=None, gt=0)
+    status: Optional[Literal["suggested", "confirmed", "dismissed"]] = None
+
+
+class RecurringPaymentOccurrenceOut(BaseModel):
+    id: int
+    transaction_id: int
+    amount: float
+    date: date
+
+    model_config = {"from_attributes": True}
+
+
+class RescanResult(BaseModel):
+    suggested: int
+    confirmed: int
+    dismissed: int
+
+
+class RecurringNoticeOut(BaseModel):
+    recurring_payment_id: int
+    name: str
+    type: Literal["amount_changed", "possibly_missed"]
+    detail: str
+    date: date
+
+
 class BulkFlagsRequest(BaseModel):
     transaction_ids: list[int] = Field(min_length=1)
     is_incidental: Optional[bool] = None

@@ -15,6 +15,8 @@ from ..models import (
     OwnAccount,
     PasskeyCredential,
     Receipt,
+    RecurringPayment,
+    RecurringPaymentOccurrence,
     Transaction,
     TransactionOffset,
 )
@@ -176,6 +178,8 @@ def delete_all_categories(db: Session = Depends(get_db)):
 def delete_everything(db: Session = Depends(get_db)):
     """Delete ALL application data (transactions, receipts, budgets, categories)."""
     # Delete in FK dependency order
+    db.execute(delete(RecurringPaymentOccurrence))
+    db.execute(delete(RecurringPayment))
     db.execute(delete(LineItem))
     db.execute(delete(TransactionOffset))
     db.execute(delete(Receipt))

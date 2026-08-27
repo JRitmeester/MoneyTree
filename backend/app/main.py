@@ -26,6 +26,7 @@ from .routers import (
     line_items,
     own_accounts,
     receipts,
+    recurring,
     settings,
     sync,
     transactions,
@@ -100,6 +101,7 @@ app.include_router(uncategorized.router)
 app.include_router(settings.router)
 app.include_router(sync.router)
 app.include_router(own_accounts.router)
+app.include_router(recurring.router)
 
 if os.getenv("ENABLE_DEBUG_ROUTES", "").lower() == "true":
     app.include_router(debug.router)
