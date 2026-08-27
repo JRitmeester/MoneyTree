@@ -33,6 +33,8 @@ export interface Transaction {
 	type: string;
 	code: string;
 	has_receipt: boolean;
+	is_internal_transfer: boolean;
+	is_incidental: boolean;
 	created_at: string;
 }
 
@@ -303,6 +305,9 @@ export interface DashboardSummary {
 	net: number;
 	transaction_count: number;
 	receipts_attached: number;
+	transfers_out: number;
+	transfers_in: number;
+	transfers_net: number;
 }
 
 export interface CategorySpending {
@@ -807,4 +812,119 @@ export async function commitSyncImport(
 	form.append('file', file);
 	const qs = `?dry_run=false&update_duplicates=${updateDuplicates}`;
 	return request(`/api/sync/import${qs}`, { method: 'POST', body: form });
+}
+
+// --- Own accounts ---
+
+export interface OwnAccount {
+	id: number;
+	iban: string;
+	name: string;
+	account_type: 'checking' | 'savings';
+	starting_balance: number | null;
+	starting_balance_date: string | null;
+}
+
+export async function getOwnAccounts(): Promise<OwnAccount[]> {
+	return request('/api/own-accounts');
+}
+
+export async function createOwnAccount(data: Omit<OwnAccount, 'id'>): Promise<OwnAccount> {
+	return request('/api/own-accounts', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data)
+	});
+}
+
+export async function updateOwnAccount(
+	id: number,
+	data: Partial<Omit<OwnAccount, 'id'>>
+): Promise<OwnAccount> {
+	return request(`/api/own-accounts/${id}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data)
+	});
+}
+
+export async function deleteOwnAccount(id: number): Promise<void> {
+	await request(`/api/own-accounts/${id}`, { method: 'DELETE' });
+}
+
+// --- Financial insights ---
+
+export interface BalancePoint {
+	date: string;
+	balance: number;
+}
+
+export async function getBalanceHistory(params: {
+	date_from?: string;
+	date_to?: string;
+}): Promise<BalancePoint[]> {
+	const qs = new URLSearchParams();
+	if (params.date_from) qs.set('date_from', params.date_from);
+	if (params.date_to) qs.set('date_to', params.date_to);
+	const suffix = qs.toString() ? `?${qs}` : '';
+	return request(`/api/dashboard/balance-history${suffix}`);
+}
+
+export interface SavingsBalance {
+	balance: number;
+	is_net_only: boolean;
+	account_name: string;
+}
+
+export async function getSavingsBalance(): Promise<SavingsBalance | null> {
+	return request('/api/dashboard/savings-balance');
+}
+
+export interface SavingsCapacityMonth {
+	month: string;
+	partial: boolean;
+	income: number;
+	expenses_total: number;
+	expenses_structural: number;
+	incidental: number;
+	fixed: number;
+	flexible: number;
+	uncategorized: number;
+	net_raw: number;
+	net_structural: number;
+}
+
+export interface SavingsCapacitySummary {
+	months: SavingsCapacityMonth[];
+	trailing_3_raw: number | null;
+	trailing_3_structural: number | null;
+	trailing_6_raw: number | null;
+	trailing_6_structural: number | null;
+	current_month_projection: number | null;
+}
+
+export async function getSavingsCapacity(months = 6): Promise<SavingsCapacitySummary> {
+	return request(`/api/dashboard/savings-capacity?months=${months}`);
+}
+
+export async function setTransactionFlags(
+	id: number,
+	flags: { is_incidental?: boolean; is_internal_transfer?: boolean }
+): Promise<Transaction> {
+	return request(`/api/transactions/${id}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(flags)
+	});
+}
+
+export async function bulkSetIncidental(
+	transactionIds: number[],
+	isIncidental: boolean
+): Promise<{ updated: number }> {
+	return request('/api/transactions/bulk-incidental', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ transaction_ids: transactionIds, is_incidental: isIncidental })
+	});
 }
