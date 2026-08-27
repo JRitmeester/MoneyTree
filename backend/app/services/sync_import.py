@@ -17,6 +17,7 @@ from ..sync_schemas import (
     ExportFile, ExportReceipt, ExportSyncEvent, ImportConflict, ImportPreview,
     PREVIEW_SAMPLE_LIMIT, TransactionPreview, TransactionUpdatePreview,
 )
+from .category_merge import apply_category_merge
 
 
 def _category_index(db: Session) -> dict[str, Category]:
@@ -413,6 +414,18 @@ def _apply_sync_event(db: Session, ev: ExportSyncEvent) -> None:
             ).scalar_one_or_none()
             if parent is not None:
                 cat.parent_id = parent.id
+    elif ev.event_type == "category.merge":
+        source = db.execute(
+            select(Category).where(Category.name == payload["source_name"])
+        ).scalar_one_or_none()
+        if source is None:
+            return
+        target = db.execute(
+            select(Category).where(Category.name == payload["target_name"])
+        ).scalar_one_or_none()
+        if target is None:
+            return
+        apply_category_merge(db, source, target)
     elif ev.event_type == "category_mapping.delete":
         m = db.execute(
             select(CategoryMapping).where(CategoryMapping.bank_category == payload["bank_category"])

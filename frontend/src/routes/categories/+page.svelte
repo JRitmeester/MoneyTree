@@ -1,10 +1,11 @@
 <script lang="ts">
 	import {
-		getCategories, createCategory, deleteCategory, updateCategory,
+		getCategories, createCategory, deleteCategory, updateCategory, mergeCategory,
 		getCategoryMappings, getUnmappedCategories, createCategoryMapping, deleteCategoryMapping,
 		type Category, type CategoryMapping
 	} from '$lib/api';
 	import { focusOnMount } from '$lib/actions/focusOnMount';
+	import CategoryInput from '$lib/components/CategoryInput.svelte';
 
 	let categories: Category[] = $state([]);
 	let mappings: CategoryMapping[] = $state([]);
@@ -54,6 +55,39 @@
 			await load();
 		} catch (e: any) {
 			error = extractErrorDetail(e);
+		}
+	}
+
+	// Merge into...
+	let mergingId: number | null = $state(null);
+
+	function startMerge(id: number) {
+		mergingId = id;
+	}
+
+	function cancelMerge() {
+		mergingId = null;
+	}
+
+	async function handleMergeTargetChosen(source: Category, targetId: number | null) {
+		if (targetId == null) return;
+		try {
+			const counts = await mergeCategory(source.id, targetId, true);
+			const target = userCategories.find((c) => c.id === targetId);
+			const targetName = target?.name ?? 'target';
+			const confirmed = confirm(
+				`Merge '${source.name}' into '${targetName}'? ${counts.transactions} transactions, ${counts.budget_lines} budget lines... will move. This cannot be undone.`
+			);
+			if (!confirmed) {
+				mergingId = null;
+				return;
+			}
+			await mergeCategory(source.id, targetId);
+			mergingId = null;
+			await load();
+		} catch (e: any) {
+			error = extractErrorDetail(e);
+			mergingId = null;
 		}
 	}
 
@@ -219,12 +253,26 @@
 								{cat.category_type === 'income' ? 'Income' : 'Expense'}
 							</button>
 						</span>
+						<button class="merge-btn" onclick={() => startMerge(cat.id)}>Merge into...</button>
 						<span class="col-delete">
 							{#if !cat.children.length}
 								<button class="del-btn" onclick={() => handleDelete(cat.id)}>Delete</button>
 							{/if}
 						</span>
 					</div>
+					{#if mergingId === cat.id}
+						<div class="merge-inline">
+							<span class="merge-label">Merge "{cat.name}" into:</span>
+							<div class="merge-picker">
+								<CategoryInput
+									value={null}
+									onchange={(targetId) => handleMergeTargetChosen(cat, targetId)}
+									placeholder="Select target category..."
+								/>
+							</div>
+							<button class="cancel-sub-btn" onclick={cancelMerge} title="Cancel">&times;</button>
+						</div>
+					{/if}
 					{#if cat.children.length > 0}
 						{#each cat.children as child}
 							{@render catNode(child, depth + 1)}
@@ -444,6 +492,33 @@
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.75rem;
+	}
+	.merge-btn {
+		padding: 0.2rem 0.6rem;
+		background: white;
+		border: 1px solid #2d6a4f;
+		color: #2d6a4f;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 0.75rem;
+		flex-shrink: 0;
+	}
+	.merge-inline {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.3rem 0.5rem 0.5rem 0.75rem;
+		margin-left: 1.5rem;
+		border-left: 2px solid #e5e7eb;
+	}
+	.merge-label {
+		font-size: 0.85rem;
+		color: #666;
+		white-space: nowrap;
+	}
+	.merge-picker {
+		flex: 1;
+		max-width: 320px;
 	}
 
 	/* Mappings section */

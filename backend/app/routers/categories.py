@@ -7,9 +7,10 @@ from ..database import get_db
 from ..models import (
     BudgetLine, BudgetTemplate, Category, CategoryMapping, LineItem, Transaction,
 )
-from ..schemas import CategoryCreate, CategoryOut, CategoryUpdate
+from ..schemas import CategoryCreate, CategoryMergeCounts, CategoryOut, CategoryUpdate
+from ..services.category_merge import apply_category_merge, count_category_references, is_descendant
 from ..services.sync_events import (
-    EVENT_CATEGORY_DELETE, EVENT_CATEGORY_RENAME, EVENT_CATEGORY_UPDATE,
+    EVENT_CATEGORY_DELETE, EVENT_CATEGORY_MERGE, EVENT_CATEGORY_RENAME, EVENT_CATEGORY_UPDATE,
     record_event,
 )
 
@@ -139,3 +140,42 @@ def delete_category(category_id: int, db: Session = Depends(get_db)):
     db.delete(cat)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/{source_id}/merge-into/{target_id}", response_model=CategoryMergeCounts)
+def merge_category(
+    source_id: int, target_id: int, dry_run: bool = False, db: Session = Depends(get_db)
+):
+    """Merge source category into target: re-point all references, summing
+    budget lines/templates on clash, re-parent children, then delete source.
+
+    With ?dry_run=true, returns the counts that would be re-pointed without
+    mutating anything or recording a sync event.
+    """
+    if source_id == target_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a category into itself")
+
+    source = db.get(Category, source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source category not found")
+
+    target = db.get(Category, target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target category not found")
+
+    if is_descendant(db, source_id, target_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Target category cannot be a descendant of the source category",
+        )
+
+    counts = count_category_references(db, source_id)
+
+    if dry_run:
+        return counts
+
+    source_name, target_name = source.name, target.name
+    apply_category_merge(db, source, target)
+    record_event(db, EVENT_CATEGORY_MERGE, {"source_name": source_name, "target_name": target_name})
+    db.commit()
+    return counts

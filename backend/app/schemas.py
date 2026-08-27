@@ -208,6 +208,15 @@ class CategoryUpdate(BaseModel):
     is_fixed: Optional[bool] = None
 
 
+class CategoryMergeCounts(BaseModel):
+    transactions: int
+    line_items: int
+    budget_lines: int
+    budget_templates: int
+    category_mappings: int
+    children: int
+
+
 # --- Dashboard ---
 
 

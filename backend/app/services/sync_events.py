@@ -18,6 +18,7 @@ from ..models import SyncEvent
 EVENT_CATEGORY_RENAME = "category.rename"
 EVENT_CATEGORY_DELETE = "category.delete"
 EVENT_CATEGORY_UPDATE = "category.update"
+EVENT_CATEGORY_MERGE = "category.merge"
 EVENT_CATEGORY_MAPPING_DELETE = "category_mapping.delete"
 EVENT_BUDGET_DELETE = "budget.delete"
 

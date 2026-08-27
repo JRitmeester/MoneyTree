@@ -465,6 +465,24 @@ export async function deleteCategory(id: number): Promise<void> {
 	return request(`/api/categories/${id}`, { method: 'DELETE' });
 }
 
+export interface CategoryMergeCounts {
+	transactions: number;
+	line_items: number;
+	budget_lines: number;
+	budget_templates: number;
+	category_mappings: number;
+	children: number;
+}
+
+export async function mergeCategory(
+	sourceId: number,
+	targetId: number,
+	dryRun: boolean = false
+): Promise<CategoryMergeCounts> {
+	const qs = dryRun ? '?dry_run=true' : '';
+	return request(`/api/categories/${sourceId}/merge-into/${targetId}${qs}`, { method: 'POST' });
+}
+
 // --- Category Mappings ---
 
 export interface CategoryMapping {

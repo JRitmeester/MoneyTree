@@ -1,9 +1,14 @@
+import json
 from datetime import date
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping, LineItem, Receipt
+from app.models import (
+    Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping, LineItem, Receipt,
+    SyncEvent,
+)
 
 from .conftest import make_category, make_transaction
 
@@ -173,3 +178,159 @@ def test_delete_message_lists_multiple_reference_kinds(client: TestClient, db: S
     detail = resp.json()["detail"]
     assert "transaction" in detail
     assert "budget line" in detail
+
+
+# --- Task 1 (categories-offsets): category merge ---
+
+
+def test_merge_dry_run_returns_counts_without_mutating(client: TestClient, db: Session):
+    source = make_category(db, name="Source")
+    target = make_category(db, name="Target")
+    tx = make_transaction(db, category_id=source.id)
+    db.commit()
+
+    resp = client.post(f"/api/categories/{source.id}/merge-into/{target.id}?dry_run=true")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["transactions"] == 1
+    assert body["line_items"] == 0
+    assert body["budget_lines"] == 0
+    assert body["budget_templates"] == 0
+    assert body["category_mappings"] == 0
+    assert body["children"] == 0
+
+    db.refresh(tx)
+    assert tx.category_id == source.id
+    assert db.get(Category, source.id) is not None
+    assert db.execute(select(SyncEvent)).scalars().all() == []
+
+
+def test_merge_repoints_all_references_and_sums_budget_lines(client: TestClient, db: Session):
+    source = make_category(db, name="Source")
+    target = make_category(db, name="Target")
+    tx = make_transaction(db, category_id=source.id)
+
+    receipt = Receipt(transaction_id=None)
+    db.add(receipt)
+    db.flush()
+    line_item = LineItem(receipt_id=receipt.id, description="Item", amount=5.0, category_id=source.id)
+    db.add(line_item)
+
+    mapping = CategoryMapping(bank_category="BANKCAT", category_id=source.id)
+    db.add(mapping)
+
+    budget = Budget(start_date=date(2026, 1, 1), end_date=date(2026, 1, 31))
+    db.add(budget)
+    db.flush()
+    source_line = BudgetLine(budget_id=budget.id, category_id=source.id, amount=50.0)
+    target_line = BudgetLine(budget_id=budget.id, category_id=target.id, amount=30.0)
+    db.add(source_line)
+    db.add(target_line)
+
+    source_template = BudgetTemplate(category_id=source.id, amount=100.0)
+    target_template = BudgetTemplate(category_id=target.id, amount=20.0)
+    db.add(source_template)
+    db.add(target_template)
+
+    child = Category(name="Child", parent_id=source.id)
+    db.add(child)
+    db.commit()
+
+    resp = client.post(f"/api/categories/{source.id}/merge-into/{target.id}")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["transactions"] == 1
+    assert body["line_items"] == 1
+    assert body["budget_lines"] == 1
+    assert body["budget_templates"] == 1
+    assert body["category_mappings"] == 1
+    assert body["children"] == 1
+
+    db.refresh(tx)
+    assert tx.category_id == target.id
+    db.refresh(line_item)
+    assert line_item.category_id == target.id
+    db.refresh(mapping)
+    assert mapping.category_id == target.id
+    db.refresh(child)
+    assert child.parent_id == target.id
+
+    remaining_lines = db.execute(
+        select(BudgetLine).where(BudgetLine.budget_id == budget.id)
+    ).scalars().all()
+    assert len(remaining_lines) == 1
+    assert remaining_lines[0].category_id == target.id
+    assert remaining_lines[0].amount == 80.0
+
+    remaining_templates = db.execute(select(BudgetTemplate)).scalars().all()
+    assert len(remaining_templates) == 1
+    assert remaining_templates[0].category_id == target.id
+    assert remaining_templates[0].amount == 120.0
+
+    assert db.get(Category, source.id) is None
+
+
+def test_merge_repoints_budget_line_when_no_clash(client: TestClient, db: Session):
+    source = make_category(db, name="Source")
+    target = make_category(db, name="Target")
+    budget = Budget(start_date=date(2026, 3, 1), end_date=date(2026, 3, 31))
+    db.add(budget)
+    db.flush()
+    line = BudgetLine(budget_id=budget.id, category_id=source.id, amount=40.0)
+    db.add(line)
+    db.commit()
+
+    resp = client.post(f"/api/categories/{source.id}/merge-into/{target.id}")
+
+    assert resp.status_code == 200
+    db.refresh(line)
+    assert line.category_id == target.id
+    assert line.amount == 40.0
+
+
+def test_merge_source_equals_target_rejected(client: TestClient, db: Session):
+    cat = make_category(db, name="Solo")
+    db.commit()
+
+    resp = client.post(f"/api/categories/{cat.id}/merge-into/{cat.id}")
+
+    assert resp.status_code == 400
+
+
+def test_merge_into_descendant_rejected(client: TestClient, db: Session):
+    parent = make_category(db, name="Parent")
+    db.commit()
+    child = Category(name="Child", parent_id=parent.id)
+    db.add(child)
+    db.commit()
+    db.refresh(child)
+
+    resp = client.post(f"/api/categories/{parent.id}/merge-into/{child.id}")
+
+    assert resp.status_code == 400
+
+
+def test_merge_source_not_found(client: TestClient, db: Session):
+    target = make_category(db, name="OnlyTarget")
+    db.commit()
+
+    resp = client.post(f"/api/categories/9999/merge-into/{target.id}")
+
+    assert resp.status_code == 404
+
+
+def test_merge_records_sync_event(client: TestClient, db: Session):
+    source = make_category(db, name="EventSource")
+    target = make_category(db, name="EventTarget")
+    db.commit()
+
+    resp = client.post(f"/api/categories/{source.id}/merge-into/{target.id}")
+
+    assert resp.status_code == 200
+    events = db.execute(select(SyncEvent)).scalars().all()
+    assert len(events) == 1
+    assert events[0].event_type == "category.merge"
+    payload = json.loads(events[0].payload_json)
+    assert payload == {"source_name": "EventSource", "target_name": "EventTarget"}
