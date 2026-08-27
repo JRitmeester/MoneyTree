@@ -1,11 +1,12 @@
 <script lang="ts">
 	import {
 		getDashboardSummary, getByCategory, getCategoryChildren, getMonthlyTrend, getBudgets,
-		getBudgetVsActual,
+		getBudgetVsActual, getSavingsBalance,
 		formatEuro, type DashboardSummary, type CategorySpending, type MonthlyTrend, type BudgetSummary,
-		type BudgetVsActualSummary
+		type BudgetVsActualSummary, type SavingsBalance
 	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
+	import BalanceChart from '$lib/components/BalanceChart.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
 	import { get } from 'svelte/store';
 
@@ -15,6 +16,7 @@
 	let monthlyTrend: MonthlyTrend[] = $state([]);
 	let budgetPeriods: BudgetSummary[] = $state([]);
 	let bvaData: BudgetVsActualSummary | null = $state(null);
+	let savingsBalance: SavingsBalance | null = $state(null);
 	let loading = $state(true);
 	let dateFrom = $state(initialRange.dateFrom);
 	let dateTo = $state(initialRange.dateTo);
@@ -29,16 +31,18 @@
 		if (dateFrom) params.date_from = dateFrom;
 		if (dateTo) params.date_to = dateTo;
 
-		const [s, c, t, bp] = await Promise.all([
+		const [s, c, t, bp, sb] = await Promise.all([
 			getDashboardSummary(params),
 			getByCategory(params),
 			getMonthlyTrend(12),
 			getBudgets(),
+			getSavingsBalance(),
 		]);
 		summary = s;
 		categories = c;
 		monthlyTrend = t;
 		budgetPeriods = bp;
+		savingsBalance = sb;
 
 		// Load BVA for the current budget period (contains today)
 		const today = new Date().toISOString().slice(0, 10);
@@ -147,6 +151,17 @@
 					<div class="card-label">Net</div>
 				</div>
 			{/if}
+			{#if summary.transfers_net !== 0 || savingsBalance}
+				<div class="card info">
+					<div class="card-value">{formatEuro(summary.transfers_net)}</div>
+					<div class="card-label">To savings</div>
+					{#if savingsBalance}
+						<div class="card-detail">
+							{savingsBalance.is_net_only ? 'Net transferred' : 'Balance'}: {formatEuro(savingsBalance.balance)}
+						</div>
+					{/if}
+				</div>
+			{/if}
 			<div class="card info">
 				<div class="card-value">{summary.transaction_count}</div>
 				<div class="card-label">Transactions</div>
@@ -241,6 +256,8 @@
 				{/if}
 			</div>
 		</div>
+
+		<BalanceChart {dateFrom} {dateTo} />
 
 	{/if}
 </div>
