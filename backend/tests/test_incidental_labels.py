@@ -162,3 +162,16 @@ class TestSingleTransactionLabel:
         assert resp.status_code == 200
         db.refresh(tx)
         assert tx.incidental_label_id is None
+
+    def test_patch_incidental_false_wins_over_label(self, client, db: Session):
+        label = make_label(db)
+        tx = make_transaction(db, bedrag=-100.0)
+        db.commit()
+        resp = client.patch(f"/api/transactions/{tx.id}", json={
+            "is_incidental": False,
+            "incidental_label_id": label.id,
+        })
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["is_incidental"] is False
+        assert body["incidental_label_id"] is None

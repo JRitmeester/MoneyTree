@@ -69,7 +69,11 @@
 		try {
 			if (raw === 'new') {
 				const name = prompt('Name for the new label:')?.trim();
-				if (!name) return;
+				if (!name) {
+					// Force the select back to the actual value after a cancelled prompt.
+					tx = { ...tx };
+					return;
+				}
 				const created = await createIncidentalLabel(name);
 				labels = [...labels, { ...created, total: 0, count: 0, date_from: null, date_to: null }]
 					.sort((a, b) => a.name.localeCompare(b.name));

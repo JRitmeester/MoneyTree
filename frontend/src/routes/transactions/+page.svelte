@@ -8,6 +8,7 @@
 	} from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
+	import { applyFlagsToTransactions } from '$lib/transactionFlags';
 	import { dateRange } from '$lib/stores/dateRange';
 	import { get } from 'svelte/store';
 
@@ -175,23 +176,7 @@
 			}
 
 			await bulkSetFlags(selectedIds, flags);
-
-			const ids = new Set(selectedIds);
-			transactions = transactions.map((t) => {
-				if (!ids.has(t.id)) return t;
-				const next = { ...t };
-				if (flags.is_incidental === true) {
-					next.is_incidental = true;
-					if (flags.incidental_label_id != null) next.incidental_label_id = flags.incidental_label_id;
-				} else if (flags.is_incidental === false) {
-					next.is_incidental = false;
-					next.incidental_label_id = null;
-				}
-				if (flags.is_internal_transfer !== undefined) {
-					next.is_internal_transfer = flags.is_internal_transfer;
-				}
-				return next;
-			});
+			transactions = applyFlagsToTransactions(transactions, selectedIds, flags);
 			selected = {};
 		} catch (e: any) {
 			error = e.message;

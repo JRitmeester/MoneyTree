@@ -346,18 +346,20 @@ def update_transaction(transaction_id: int, data: dict, db: Session = Depends(ge
                     li.category_id = cat_id
                     break
 
-    if "is_incidental" in data:
-        tx.is_incidental = bool(data["is_incidental"])
-        if not tx.is_incidental:
-            tx.incidental_label_id = None
-
-    if "incidental_label_id" in data:
-        label_id = data["incidental_label_id"]
-        if label_id is not None:
-            if not db.get(IncidentalLabel, label_id):
-                raise HTTPException(status_code=404, detail="Label not found")
-            tx.is_incidental = True
-        tx.incidental_label_id = label_id
+    # is_incidental=False wins over a supplied label, matching bulk_set_flags.
+    if data.get("is_incidental") is False:
+        tx.is_incidental = False
+        tx.incidental_label_id = None
+    else:
+        if "is_incidental" in data:
+            tx.is_incidental = bool(data["is_incidental"])
+        if "incidental_label_id" in data:
+            label_id = data["incidental_label_id"]
+            if label_id is not None:
+                if not db.get(IncidentalLabel, label_id):
+                    raise HTTPException(status_code=404, detail="Label not found")
+                tx.is_incidental = True
+            tx.incidental_label_id = label_id
 
     if "is_internal_transfer" in data:
         tx.is_internal_transfer = bool(data["is_internal_transfer"])
