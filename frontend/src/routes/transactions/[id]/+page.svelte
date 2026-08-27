@@ -47,6 +47,24 @@
 		}
 	}
 
+	async function handleToggleIncidental() {
+		if (!tx) return;
+		try {
+			tx = { ...tx, ...(await setTransactionFlags(tx.id, { is_incidental: !tx.is_incidental })) };
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
+	async function handleToggleInternalTransfer() {
+		if (!tx) return;
+		try {
+			tx = { ...tx, ...(await setTransactionFlags(tx.id, { is_internal_transfer: !tx.is_internal_transfer })) };
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
 	async function handleSplit() {
 		if (!tx) return;
 		splitting = true;
@@ -183,19 +201,11 @@
 
 		<div class="flags">
 			<label>
-				<input
-					type="checkbox"
-					checked={tx.is_incidental}
-					onchange={async () => { if (!tx) return; tx = { ...tx, ...(await setTransactionFlags(tx.id, { is_incidental: !tx.is_incidental })) }; }}
-				/>
+				<input type="checkbox" checked={tx.is_incidental} onchange={handleToggleIncidental} />
 				Incidental (one-off, excluded from structural savings capacity)
 			</label>
 			<label>
-				<input
-					type="checkbox"
-					checked={tx.is_internal_transfer}
-					onchange={async () => { if (!tx) return; tx = { ...tx, ...(await setTransactionFlags(tx.id, { is_internal_transfer: !tx.is_internal_transfer })) }; }}
-				/>
+				<input type="checkbox" checked={tx.is_internal_transfer} onchange={handleToggleInternalTransfer} />
 				Internal transfer (between own accounts, excluded from income/expenses)
 			</label>
 		</div>

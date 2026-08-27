@@ -16,6 +16,7 @@
 	let page = $state(1);
 	let perPage = $state(50);
 	let loading = $state(true);
+	let error = $state<string | null>(null);
 
 	const PAGE_SIZE_OPTIONS = [20, 50, 100, 200, 500];
 
@@ -97,8 +98,12 @@
 	}
 
 	async function toggleIncidental(tx: Transaction) {
-		const updated = await setTransactionFlags(tx.id, { is_incidental: !tx.is_incidental });
-		transactions = transactions.map((t) => (t.id === tx.id ? { ...t, is_incidental: updated.is_incidental } : t));
+		try {
+			const updated = await setTransactionFlags(tx.id, { is_incidental: !tx.is_incidental });
+			transactions = transactions.map((t) => (t.id === tx.id ? { ...t, is_incidental: updated.is_incidental } : t));
+		} catch (e: any) {
+			error = e.message;
+		}
 	}
 </script>
 
@@ -117,6 +122,10 @@
 <div class="info">
 	{total} transactions found
 </div>
+
+{#if error}
+	<div class="error">{error}</div>
+{/if}
 
 {#if loading}
 	<div class="loading">Loading...</div>
@@ -213,6 +222,11 @@
 		text-align: center;
 		padding: 3rem;
 		color: #666;
+	}
+	.error {
+		color: #dc2626;
+		font-size: 0.85rem;
+		margin-bottom: 0.75rem;
 	}
 	.table-wrap {
 		overflow-x: auto;
