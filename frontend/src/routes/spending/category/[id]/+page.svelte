@@ -42,8 +42,11 @@
 		load();
 	}
 
-	let explicitItems = $derived(data?.line_items.filter(li => !li.is_remaining) ?? []);
-	let remainingItems = $derived(data?.line_items.filter(li => li.is_remaining) ?? []);
+	// Keep Remaining rows anchored at the bottom of each table, as before.
+	function remainingLast(items: SpendingLineItem[]): SpendingLineItem[] {
+		return [...items.filter((li) => !li.is_remaining), ...items.filter((li) => li.is_remaining)];
+	}
+
 	let allItems = $derived([
 		...(data?.line_items ?? []),
 		...(data?.groups.flatMap((g) => g.line_items) ?? [])
@@ -153,7 +156,7 @@
 				</div>
 			{/if}
 			<div class="table-wrap">
-				{@render itemsTable(data.line_items, data.groups.length === 0 ? data.total : null)}
+				{@render itemsTable(remainingLast(data.line_items), data.groups.length === 0 ? data.total : null)}
 			</div>
 		{/if}
 
@@ -167,7 +170,7 @@
 				<span class="group-total">{formatEuro(group.total)}</span>
 			</div>
 			<div class="table-wrap">
-				{@render itemsTable(group.line_items, null)}
+				{@render itemsTable(remainingLast(group.line_items), null)}
 			</div>
 		{/each}
 
