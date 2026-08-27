@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import {
-		getTransaction, getTransactions, updateTransaction,
+		getTransaction, getTransactions, updateTransaction, setTransactionFlags,
 		linkOffset, unlinkOffset, splitTransactionReceipt,
 		formatEuro, formatDate,
 		type TransactionDetail, type Transaction
@@ -180,6 +180,25 @@
 				<span class="value">{formatEuro(tx.saldo_voor_boeking)}</span>
 			</div>
 		</div>
+
+		<div class="flags">
+			<label>
+				<input
+					type="checkbox"
+					checked={tx.is_incidental}
+					onchange={async () => { if (!tx) return; tx = { ...tx, ...(await setTransactionFlags(tx.id, { is_incidental: !tx.is_incidental })) }; }}
+				/>
+				Incidental (one-off, excluded from structural savings capacity)
+			</label>
+			<label>
+				<input
+					type="checkbox"
+					checked={tx.is_internal_transfer}
+					onchange={async () => { if (!tx) return; tx = { ...tx, ...(await setTransactionFlags(tx.id, { is_internal_transfer: !tx.is_internal_transfer })) }; }}
+				/>
+				Internal transfer (between own accounts, excluded from income/expenses)
+			</label>
+		</div>
 	</div>
 
 	<div class="card receipt-section">
@@ -319,6 +338,25 @@
 	.saving-indicator { font-size: 0.8rem; color: #666; }
 	.details {
 		margin-top: 1.25rem;
+	}
+	.flags {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		margin-top: 1rem;
+		padding-top: 1rem;
+		border-top: 1px solid #f0f0f0;
+	}
+	.flags label {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.85rem;
+		color: #444;
+		cursor: pointer;
+	}
+	.flags input[type="checkbox"] {
+		cursor: pointer;
 	}
 	.row {
 		display: flex;

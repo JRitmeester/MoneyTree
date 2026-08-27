@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page as pageStore } from '$app/state';
-	import { getTransactions, getBudgets, formatEuro, formatDate, type Transaction, type BudgetSummary } from '$lib/api';
+	import { getTransactions, getBudgets, setTransactionFlags, formatEuro, formatDate, type Transaction, type BudgetSummary } from '$lib/api';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
@@ -95,6 +95,11 @@
 		if (index === 0) return false;
 		return transactions[index].datum !== transactions[index - 1].datum;
 	}
+
+	async function toggleIncidental(tx: Transaction) {
+		const updated = await setTransactionFlags(tx.id, { is_incidental: !tx.is_incidental });
+		transactions = transactions.map((t) => (t.id === tx.id ? { ...t, is_incidental: updated.is_incidental } : t));
+	}
 </script>
 
 <h1>Transactions</h1>
@@ -134,7 +139,22 @@
 						<td class="merchant">
 							{tx.merchant_name || tx.naam || tx.omschrijving.substring(0, 40)}
 						</td>
-						<td><span class="badge">{tx.category_name || tx.categorie}</span></td>
+						<td>
+							<span class="badge">{tx.category_name || tx.categorie}</span>
+							{#if tx.is_internal_transfer}
+								<span class="badge transfer">transfer</span>
+							{/if}
+							{#if tx.is_incidental}
+								<span class="badge incidental">incidental</span>
+							{/if}
+							{#if tx.bedrag < 0 && !tx.is_internal_transfer}
+								<button
+									class="flag-toggle"
+									title={tx.is_incidental ? 'Unmark as incidental (one-off)' : 'Mark as incidental (one-off)'}
+									onclick={(e) => { e.stopPropagation(); toggleIncidental(tx); }}
+								>{tx.is_incidental ? '★' : '☆'}</button>
+							{/if}
+						</td>
 						<td class="amount" class:positive={tx.bedrag > 0} class:negative={tx.bedrag < 0}>
 							{formatEuro(tx.bedrag)}
 						</td>
@@ -249,6 +269,30 @@
 		text-align: center;
 		width: 60px;
 		color: #16a34a;
+	}
+	.badge.transfer {
+		background: #eff6ff;
+		color: #2563eb;
+		font-size: 0.65rem;
+		border-radius: 4px;
+		padding: 0.05rem 0.35rem;
+		margin-left: 0.35rem;
+	}
+	.badge.incidental {
+		background: #fefce8;
+		color: #a16207;
+		font-size: 0.65rem;
+		border-radius: 4px;
+		padding: 0.05rem 0.35rem;
+		margin-left: 0.35rem;
+	}
+	.flag-toggle {
+		background: none;
+		border: none;
+		cursor: pointer;
+		color: #a16207;
+		font-size: 0.9rem;
+		margin-left: 0.35rem;
 	}
 	.pagination {
 		display: flex;
