@@ -35,13 +35,25 @@
 
 	$effect(() => { load(); });
 
+	function extractErrorDetail(e: any): string {
+		const message = e?.message ?? String(e);
+		const jsonStart = message.indexOf('{');
+		if (jsonStart === -1) return message;
+		try {
+			const parsed = JSON.parse(message.slice(jsonStart));
+			return parsed.detail ?? message;
+		} catch {
+			return message;
+		}
+	}
+
 	async function handleDelete(id: number) {
 		if (!confirm('Delete this category?')) return;
 		try {
 			await deleteCategory(id);
 			await load();
 		} catch (e: any) {
-			error = e.message;
+			error = extractErrorDetail(e);
 		}
 	}
 

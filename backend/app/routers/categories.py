@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
-from ..models import Category
+from ..models import (
+    BudgetLine, BudgetTemplate, Category, CategoryMapping, LineItem, Transaction,
+)
 from ..schemas import CategoryCreate, CategoryOut, CategoryUpdate
 from ..services.sync_events import (
     EVENT_CATEGORY_DELETE, EVENT_CATEGORY_RENAME, EVENT_CATEGORY_UPDATE,
@@ -99,15 +101,39 @@ def update_category(category_id: int, data: CategoryUpdate, db: Session = Depend
     return cat
 
 
+def _count(db: Session, model, category_id: int) -> int:
+    return db.execute(
+        select(func.count()).select_from(model).where(model.category_id == category_id)
+    ).scalar_one()
+
+
 @router.delete("/{category_id}")
 def delete_category(category_id: int, db: Session = Depends(get_db)):
-    """Delete a category (must have no children)."""
+    """Delete a category. Must have no children and no references left."""
     cat = db.get(Category, category_id)
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
 
     if cat.children:
         raise HTTPException(status_code=409, detail="Category has children, delete them first")
+
+    reference_counts = [
+        (_count(db, Transaction, category_id), "transaction"),
+        (_count(db, LineItem, category_id), "line item"),
+        (_count(db, BudgetLine, category_id), "budget line"),
+        (_count(db, BudgetTemplate, category_id), "budget template"),
+        (_count(db, CategoryMapping, category_id), "category mapping"),
+    ]
+    parts = [
+        f"{count} {label}{'s' if count != 1 else ''}"
+        for count, label in reference_counts
+        if count > 0
+    ]
+    if parts:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Category is in use: {', '.join(parts)}. Reassign them first.",
+        )
 
     record_event(db, EVENT_CATEGORY_DELETE, {"name": cat.name})
     db.delete(cat)
