@@ -15,9 +15,11 @@ from ..schemas import (
     CategorySpending,
     DashboardSummary,
     MonthlyTrend,
+    SavingsBalanceOut,
     SpendingLineItem,
     SubcategorySpending,
 )
+from ..services.transfers import savings_balance as compute_savings_balance
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_auth)])
 
@@ -135,6 +137,7 @@ def _iter_expense_items(db: Session, date_from: date | None, date_to: date | Non
         .join(Receipt, Receipt.transaction_id == Transaction.id)
         .join(LineItem, LineItem.receipt_id == Receipt.id)
         .where(Transaction.bedrag < 0)
+        .where(Transaction.is_internal_transfer.is_(False))
     )
     for tx, li in db.execute(li_query).all():
         yield ExpenseItem(tx=tx, amount=li.amount * li.quantity, category_id=li.category_id, li=li)
@@ -143,6 +146,7 @@ def _iter_expense_items(db: Session, date_from: date | None, date_to: date | Non
     no_receipt_query = _date_filter(
         select(Transaction)
         .where(Transaction.bedrag < 0)
+        .where(Transaction.is_internal_transfer.is_(False))
         .where(
             ~select(Receipt.id)
             .where(Receipt.transaction_id == Transaction.id)
@@ -172,11 +176,17 @@ def get_summary(
 
     transactions = db.execute(query).scalars().all()
 
-    total_income = sum(tx.bedrag for tx in transactions if tx.bedrag > 0)
-    total_expenses = sum(tx.bedrag for tx in transactions if tx.bedrag < 0)
+    external = [tx for tx in transactions if not tx.is_internal_transfer]
+    internal = [tx for tx in transactions if tx.is_internal_transfer]
+
+    total_income = sum(tx.bedrag for tx in external if tx.bedrag > 0)
+    total_expenses = sum(tx.bedrag for tx in external if tx.bedrag < 0)
     net = total_income + total_expenses
 
-    tx_ids = [tx.id for tx in transactions]
+    transfers_out = sum(-tx.bedrag for tx in internal if tx.bedrag < 0)
+    transfers_in = sum(tx.bedrag for tx in internal if tx.bedrag > 0)
+
+    tx_ids = [tx.id for tx in external]
     receipts_attached = 0
     if tx_ids:
         receipts_attached = db.execute(
@@ -189,8 +199,24 @@ def get_summary(
         total_income=total_income,
         total_expenses=abs(total_expenses),
         net=net,
-        transaction_count=len(transactions),
+        transaction_count=len(external),
         receipts_attached=receipts_attached,
+        transfers_out=round(transfers_out, 2),
+        transfers_in=round(transfers_in, 2),
+        transfers_net=round(transfers_out - transfers_in, 2),
+    )
+
+
+@router.get("/savings-balance", response_model=SavingsBalanceOut | None)
+def get_savings_balance(db: Session = Depends(get_db)):
+    """Inferred savings-account balance from starting balance plus net transfers."""
+    result = compute_savings_balance(db)
+    if result is None:
+        return None
+    return SavingsBalanceOut(
+        balance=result.balance,
+        is_net_only=result.is_net_only,
+        account_name=result.account_name,
     )
 
 
@@ -388,6 +414,8 @@ def get_monthly_trend(
 
     monthly: dict[str, dict] = {}
     for tx in transactions:
+        if tx.is_internal_transfer:
+            continue
         key = tx.datum.strftime("%Y-%m")
         if key not in monthly:
             monthly[key] = {"income": 0.0, "expenses": 0.0}
@@ -443,6 +471,7 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
         .join(LineItem, LineItem.receipt_id == Receipt.id)
         .where(Transaction.bedrag > 0)
         .where(Transaction.datum >= first_day, Transaction.datum <= last_day)
+        .where(Transaction.is_internal_transfer.is_(False))
     )
     for tx, li in db.execute(income_query).all():
         if li.category_id is None:
@@ -455,6 +484,7 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
         select(Transaction)
         .where(Transaction.bedrag > 0)
         .where(Transaction.datum >= first_day, Transaction.datum <= last_day)
+        .where(Transaction.is_internal_transfer.is_(False))
         .where(~select(Receipt.id).where(Receipt.transaction_id == Transaction.id).exists())
     )
     for tx in db.execute(direct_income_query).scalars().all():

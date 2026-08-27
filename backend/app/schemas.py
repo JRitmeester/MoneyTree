@@ -207,6 +207,9 @@ class DashboardSummary(BaseModel):
     net: float
     transaction_count: int
     receipts_attached: int
+    transfers_out: float = 0.0
+    transfers_in: float = 0.0
+    transfers_net: float = 0.0
 
 
 class CategorySpending(BaseModel):
@@ -427,3 +430,9 @@ class OwnAccountOut(BaseModel):
 class BulkIncidentalRequest(BaseModel):
     transaction_ids: list[int] = Field(min_length=1)
     is_incidental: bool
+
+
+class SavingsBalanceOut(BaseModel):
+    balance: float
+    is_net_only: bool
+    account_name: str
