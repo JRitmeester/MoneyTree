@@ -1103,3 +1103,65 @@ export async function updateRecurring(
 		body: JSON.stringify(data)
 	});
 }
+
+// --- Cash-flow calendar and transfer advisor ---
+
+export interface CashflowCalendarItem {
+	recurring_payment_id: number;
+	name: string;
+	amount: number;
+	is_income: boolean;
+	is_salary: boolean;
+}
+
+export interface CashflowCalendarDay {
+	date: string;
+	items: CashflowCalendarItem[];
+}
+
+export interface CashflowCalendar {
+	month: string;
+	days: CashflowCalendarDay[];
+}
+
+export async function getCashflowCalendar(month: string): Promise<CashflowCalendar> {
+	return request(`/api/cashflow/calendar?month=${month}`);
+}
+
+export interface CashflowReturnTransfer {
+	date: string;
+	amount: number;
+	cadence: string;
+	covers: string[];
+}
+
+export interface CashflowAdvice {
+	salary_confirmed: boolean;
+	message: string | null;
+	payday: string | null;
+	next_payday: string | null;
+	sweep_amount: number | null;
+	buffer_pct: number;
+	return_transfers: CashflowReturnTransfer[];
+	warnings: string[];
+}
+
+export async function getCashflowAdvice(): Promise<CashflowAdvice> {
+	return request('/api/cashflow/advice');
+}
+
+export interface CashflowSettings {
+	buffer_pct: number;
+}
+
+export async function getCashflowSettings(): Promise<CashflowSettings> {
+	return request('/api/cashflow/settings');
+}
+
+export async function updateCashflowSettings(bufferPct: number): Promise<CashflowSettings> {
+	return request('/api/cashflow/settings', {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ buffer_pct: bufferPct })
+	});
+}

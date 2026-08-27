@@ -1,15 +1,38 @@
+import re
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
-from ..models import RecurringPayment, RecurringPaymentOccurrence
-from ..schemas import CashflowPeriodOut
+from ..models import AppSetting, RecurringPayment, RecurringPaymentOccurrence
+from ..schemas import (
+    CashflowAdviceOut,
+    CashflowCalendarDayOut,
+    CashflowCalendarItemOut,
+    CashflowCalendarOut,
+    CashflowPeriodOut,
+    CashflowReturnTransferOut,
+    CashflowSettingsOut,
+    CashflowSettingsUpdate,
+)
+from ..services.cashflow_advisor import (
+    DEFAULT_BUFFER_PCT,
+    compute_advice,
+    project_calendar_month,
+)
 
 router = APIRouter(prefix="/api/cashflow", tags=["cashflow"], dependencies=[Depends(require_auth)])
+
+BUFFER_PCT_KEY = "buffer_pct"
+_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
+def get_buffer_pct(db: Session) -> float:
+    row = db.get(AppSetting, BUFFER_PCT_KEY)
+    return float(row.value) if row else DEFAULT_BUFFER_PCT
 
 
 def _format_period_date(d: date) -> str:
@@ -66,3 +89,95 @@ def get_periods(count: int = Query(6, ge=1, le=24), db: Session = Depends(get_db
 
     periods.reverse()
     return periods[:count]
+
+
+def _find_salary_payment_id(db: Session) -> int | None:
+    row = db.execute(
+        select(
+            RecurringPaymentOccurrence.recurring_payment_id,
+            func.count(RecurringPaymentOccurrence.id).label("occurrence_count"),
+        )
+        .join(RecurringPayment, RecurringPayment.id == RecurringPaymentOccurrence.recurring_payment_id)
+        .where(RecurringPayment.status == "confirmed", RecurringPayment.is_income.is_(True))
+        .group_by(RecurringPaymentOccurrence.recurring_payment_id)
+        .order_by(func.count(RecurringPaymentOccurrence.id).desc())
+        .limit(1)
+    ).first()
+    return row[0] if row else None
+
+
+@router.get("/calendar", response_model=CashflowCalendarOut)
+def get_calendar(month: str = Query(...), db: Session = Depends(get_db)):
+    """Per-day expected debits/credits for `month` (YYYY-MM), projected from
+    confirmed recurring payments. See spec "Cash-flow calendar and transfer
+    advisor"."""
+    if not _MONTH_RE.match(month):
+        raise HTTPException(status_code=400, detail="month must be in YYYY-MM format")
+    year, month_num = (int(part) for part in month.split("-"))
+    if not 1 <= month_num <= 12:
+        raise HTTPException(status_code=400, detail="month must be in YYYY-MM format")
+
+    payments = db.query(RecurringPayment).filter_by(status="confirmed").all()
+    salary_payment_id = _find_salary_payment_id(db)
+    items = project_calendar_month(payments, year, month_num, salary_payment_id)
+
+    days: dict[date, list[CashflowCalendarItemOut]] = {}
+    for item in items:
+        days.setdefault(item.date, []).append(
+            CashflowCalendarItemOut(
+                recurring_payment_id=item.recurring_payment_id,
+                name=item.name,
+                amount=item.amount,
+                is_income=item.is_income,
+                is_salary=item.is_salary,
+            )
+        )
+
+    return CashflowCalendarOut(
+        month=month,
+        days=[
+            CashflowCalendarDayOut(date=d, items=day_items)
+            for d, day_items in sorted(days.items())
+        ],
+    )
+
+
+@router.get("/advice", response_model=CashflowAdviceOut)
+def get_advice(db: Session = Depends(get_db)):
+    """Sweep amount, at most two return-transfer recommendations, and
+    warnings, computed on read from confirmed recurring payments. See spec
+    "Cash-flow calendar and transfer advisor"."""
+    buffer_pct = get_buffer_pct(db)
+    advice = compute_advice(db, buffer_pct)
+    return CashflowAdviceOut(
+        salary_confirmed=advice.salary_confirmed,
+        message=advice.message,
+        payday=advice.payday,
+        next_payday=advice.next_payday,
+        sweep_amount=advice.sweep_amount,
+        buffer_pct=advice.buffer_pct,
+        return_transfers=[
+            CashflowReturnTransferOut(
+                date=t.date, amount=t.amount, cadence=t.cadence, covers=t.covers
+            )
+            for t in advice.return_transfers
+        ],
+        warnings=advice.warnings,
+    )
+
+
+@router.get("/settings", response_model=CashflowSettingsOut)
+def get_settings(db: Session = Depends(get_db)):
+    return CashflowSettingsOut(buffer_pct=get_buffer_pct(db))
+
+
+@router.put("/settings", response_model=CashflowSettingsOut)
+def update_settings(data: CashflowSettingsUpdate, db: Session = Depends(get_db)):
+    row = db.get(AppSetting, BUFFER_PCT_KEY)
+    if row is None:
+        row = AppSetting(key=BUFFER_PCT_KEY, value=str(data.buffer_pct))
+        db.add(row)
+    else:
+        row.value = str(data.buffer_pct)
+    db.commit()
+    return CashflowSettingsOut(buffer_pct=data.buffer_pct)

@@ -339,3 +339,13 @@ class RecurringPaymentOccurrence(Base):
 
     recurring_payment: Mapped["RecurringPayment"] = relationship(back_populates="occurrences")
     transaction: Mapped["Transaction"] = relationship()
+
+
+class AppSetting(Base):
+    """Tiny key-value settings store. Currently holds only `buffer_pct` (the
+    cash-flow advisor's sweep buffer percentage), but kept generic so future
+    single-value settings don't each need their own table/migration."""
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)

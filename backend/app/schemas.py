@@ -602,3 +602,47 @@ class SavingsCapacitySummary(BaseModel):
     trailing_6_raw: Optional[float]
     trailing_6_structural: Optional[float]
     current_month_projection: Optional[float] = None
+
+
+class CashflowCalendarItemOut(BaseModel):
+    recurring_payment_id: int
+    name: str
+    amount: float
+    is_income: bool
+    is_salary: bool
+
+
+class CashflowCalendarDayOut(BaseModel):
+    date: date
+    items: list[CashflowCalendarItemOut]
+
+
+class CashflowCalendarOut(BaseModel):
+    month: str
+    days: list[CashflowCalendarDayOut]
+
+
+class CashflowReturnTransferOut(BaseModel):
+    date: date
+    amount: float
+    cadence: str  # "monthly" | "four_weekly"
+    covers: list[str]
+
+
+class CashflowAdviceOut(BaseModel):
+    salary_confirmed: bool
+    message: Optional[str] = None
+    payday: Optional[date] = None
+    next_payday: Optional[date] = None
+    sweep_amount: Optional[float] = None
+    buffer_pct: float
+    return_transfers: list[CashflowReturnTransferOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class CashflowSettingsOut(BaseModel):
+    buffer_pct: float
+
+
+class CashflowSettingsUpdate(BaseModel):
+    buffer_pct: float = Field(ge=0, le=100)
