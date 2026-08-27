@@ -44,6 +44,9 @@ class Transaction(Base):
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
     category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
+    is_internal_transfer: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_internal_transfer_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_incidental: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     receipt: Mapped["Receipt | None"] = relationship(back_populates="transaction")
     category: Mapped["Category | None"] = relationship(foreign_keys=[category_id])
@@ -247,3 +250,17 @@ class SyncEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, nullable=False, index=True
     )
+
+
+class OwnAccount(Base):
+    """A bank account owned by the user. Transactions whose counterparty
+    IBAN matches an own account are internal transfers, not income/expenses."""
+    __tablename__ = "own_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    iban: Mapped[str] = mapped_column(String(34), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    account_type: Mapped[str] = mapped_column(String(10), nullable=False)  # "checking" | "savings"
+    starting_balance: Mapped[float | None] = mapped_column(Float)
+    starting_balance_date: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
