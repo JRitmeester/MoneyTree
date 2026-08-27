@@ -103,6 +103,28 @@
 		return cat.category_id != null && expandedChildren[cat.category_id] !== undefined;
 	}
 
+	let dataThroughLabel = $derived.by(() => {
+		if (!summary?.data_through) return null;
+		return new Date(summary.data_through).toLocaleDateString('en-GB', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric'
+		});
+	});
+
+	let dataThroughStale = $derived.by(() => {
+		if (!summary?.data_through) return false;
+		const dataThrough = new Date(summary.data_through).getTime();
+		const today = Date.now();
+		const diffDays = (today - dataThrough) / 86_400_000;
+		return diffDays > 7;
+	});
+
+	let savedPercent = $derived.by(() => {
+		if (!summary || summary.total_income <= 0) return null;
+		return Math.round((summary.net / summary.total_income) * 100);
+	});
+
 	let burndown = $derived.by(() => {
 		if (!bvaData) return null;
 		const flexLines = bvaData.expense_lines.filter(l => !l.is_fixed && l.category_type === 'expense');
@@ -125,7 +147,16 @@
 <div class="dashboard">
 	<div class="header">
 		<h1>Dashboard</h1>
-		<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} periods={budgetPeriods} />
+		<div class="header-filter">
+			<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} periods={budgetPeriods} />
+			{#if dataThroughLabel}
+				<span
+					class="data-through"
+					class:amber={dataThroughStale}
+					title={dataThroughStale ? 'Import your latest bank export' : undefined}
+				>Data through {dataThroughLabel}</span>
+			{/if}
+		</div>
 	</div>
 
 	{#if loading}
@@ -152,13 +183,20 @@
 					<div class="card-label">Net</div>
 				</div>
 			{/if}
+			{#if savedPercent !== null}
+				<div class="card saved">
+					<div class="card-value">{savedPercent}%</div>
+					<div class="card-label">Saved</div>
+					<div class="card-detail">{formatEuro(Math.abs(summary.net))}</div>
+				</div>
+			{/if}
 			{#if summary.transfers_net !== 0 || savingsBalance}
 				<div class="card info">
 					<div class="card-value">{formatEuro(summary.transfers_net)}</div>
 					<div class="card-label">To savings</div>
 					{#if savingsBalance}
 						<div class="card-detail">
-							{savingsBalance.is_net_only ? 'Net transferred' : 'Balance'}: {formatEuro(savingsBalance.balance)}
+							{savingsBalance.is_net_only ? 'Net transferred' : 'Balance'}: {formatEuro(savingsBalance.balance)} · in {formatEuro(summary.transfers_in)} / out {formatEuro(summary.transfers_out)}
 						</div>
 					{/if}
 				</div>
@@ -279,6 +317,21 @@
 	h1 { margin: 0; color: #1a1a1a; }
 	.loading { text-align: center; padding: 3rem; color: #666; }
 
+	.header-filter {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+	.data-through {
+		font-size: 0.8rem;
+		color: #666;
+	}
+	.data-through.amber {
+		color: #a16207;
+		font-weight: 600;
+	}
+
 	.summary-cards {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -303,6 +356,7 @@
 	.card.income .card-value { color: #16a34a; }
 	.card.expenses .card-value { color: #dc2626; }
 	.card.net .card-value { color: #2d6a4f; }
+	.card.saved .card-value { color: #2d6a4f; }
 	.card.burndown .card-value { font-size: 1.3rem; }
 	.card-detail { font-size: 0.75rem; color: #999; margin-top: 0.15rem; }
 	.positive { color: #16a34a !important; }

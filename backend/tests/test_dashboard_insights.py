@@ -35,6 +35,20 @@ class TestSummaryExcludesTransfers:
         assert body["transfers_net"] == 300.0
 
 
+class TestDataThrough:
+    def test_max_datum_ignores_date_filter(self, client, db: Session):
+        make_transaction(db, datum=date(2025, 1, 5))
+        make_transaction(db, datum=date(2025, 6, 20))
+        db.commit()
+
+        body = client.get("/api/dashboard/summary?date_from=2025-01-01&date_to=2025-01-31").json()
+        assert body["data_through"] == "2025-06-20"
+
+    def test_null_on_empty_db(self, client):
+        body = client.get("/api/dashboard/summary").json()
+        assert body["data_through"] is None
+
+
 class TestByCategoryExcludesTransfers:
     def test_transfer_not_in_category_spending(self, client, db: Session):
         setup_savings(db)

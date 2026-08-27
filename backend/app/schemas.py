@@ -220,6 +220,7 @@ class DashboardSummary(BaseModel):
     transfers_out: float = 0.0
     transfers_in: float = 0.0
     transfers_net: float = 0.0
+    data_through: Optional[date] = None
 
 
 class CategorySpending(BaseModel):

@@ -200,6 +200,8 @@ def get_summary(
             )
         ).scalar() or 0
 
+    data_through = db.execute(select(func.max(Transaction.datum))).scalar()
+
     return DashboardSummary(
         total_income=total_income,
         total_expenses=abs(total_expenses),
@@ -209,6 +211,7 @@ def get_summary(
         transfers_out=round(transfers_out, 2),
         transfers_in=round(transfers_in, 2),
         transfers_net=round(transfers_out - transfers_in, 2),
+        data_through=data_through,
     )
 
 

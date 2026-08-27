@@ -311,6 +311,7 @@ export interface DashboardSummary {
 	transfers_out: number;
 	transfers_in: number;
 	transfers_net: number;
+	data_through: string | null;
 }
 
 export interface CategorySpending {
