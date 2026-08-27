@@ -144,10 +144,22 @@
 					</div>
 				</div>
 
+				{#if advice.keep_in_checking > 0}
+					<p class="keep-in-checking">
+						Keep {formatEuro(advice.keep_in_checking)} in checking at sweep time for debits due right after payday.
+					</p>
+				{/if}
+
+				{#if advice.standing_buffer > 0}
+					<p class="standing-buffer">
+						Standing buffer for small 4-weekly payments: {formatEuro(advice.standing_buffer)}
+					</p>
+				{/if}
+
 				{#if advice.return_transfers.length > 0}
 					<h3>Return transfers</h3>
 					<ul class="transfer-list">
-						{#each advice.return_transfers as transfer}
+						{#each advice.return_transfers as transfer (transfer.date + transfer.cadence + transfer.covers.join())}
 							<li>
 								<span class="transfer-date">{transfer.date}</span>
 								<span class="transfer-amount">{formatEuro(transfer.amount)}</span>
@@ -160,7 +172,7 @@
 				{#if advice.warnings.length > 0}
 					<h3>Warnings</h3>
 					<ul class="warning-list">
-						{#each advice.warnings as warning}
+						{#each advice.warnings as warning (warning)}
 							<li>{warning}</li>
 						{/each}
 					</ul>
@@ -275,6 +287,11 @@
 	.transfer-date { font-weight: 600; }
 	.transfer-amount { color: #1a1a1a; }
 	.transfer-covers { color: #666; font-size: 0.85rem; }
+	.keep-in-checking, .standing-buffer {
+		font-size: 0.85rem;
+		color: #444;
+		margin: 0.5rem 0 0;
+	}
 	.warning-list li {
 		font-size: 0.85rem;
 		color: #a16207;

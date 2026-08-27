@@ -148,6 +148,8 @@ def get_advice(db: Session = Depends(get_db)):
         payday=advice.payday,
         next_payday=advice.next_payday,
         sweep_amount=advice.sweep_amount,
+        keep_in_checking=advice.keep_in_checking,
+        standing_buffer=advice.standing_buffer,
         buffer_pct=advice.buffer_pct,
         return_transfers=[
             CashflowReturnTransferOut(

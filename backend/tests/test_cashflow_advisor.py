@@ -121,15 +121,16 @@ class TestAdvisor:
         assert advice.return_transfers == []
 
     def test_real_pattern_sweep_transfers_and_warnings(self, db: Session):
-        # Salary on the 22nd (monthly), last seen 2026-07-22 -> next payday
-        # 2026-08-22 (a Saturday, but advisor timing uses the raw expected
-        # day, not the calendar-display weekend shift).
+        # Salary on the 22nd (monthly), last seen 2026-07-22 -> raw next
+        # payday 2026-08-22 (a Saturday), shifted to Monday 2026-08-24 to
+        # match the calendar view; raw next-next payday 2026-09-22 is
+        # already a weekday.
         _confirmed(
             db, name="Salary", expected_amount=3000, cadence="monthly",
             expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
         )
-        # Bills cluster, days 25 and 29 of the month right after payday:
-        # both fall inside [2026-08-22, 2026-09-22).
+        # Bills cluster, days 25 and 29 of the month right after payday.
+        # 2026-08-29 is a Saturday, shifted to Monday 2026-08-31.
         _confirmed(
             db, name="Energy", expected_amount=-300, cadence="monthly",
             expected_day=25, anchor_date=date(2026, 7, 25),
@@ -138,8 +139,8 @@ class TestAdvisor:
             db, name="Water", expected_amount=-300, cadence="monthly",
             expected_day=29, anchor_date=date(2026, 7, 29),
         )
-        # Rent cluster, days 1 and 6 of the following month: also inside
-        # the [2026-08-22, 2026-09-22) window.
+        # Rent cluster, days 1 and 6 of the following month (2026-09-06 is
+        # a Sunday, shifted to Monday 2026-09-07).
         _confirmed(
             db, name="Rent", expected_amount=-900, cadence="monthly",
             expected_day=1, anchor_date=date(2026, 7, 1),
@@ -148,51 +149,171 @@ class TestAdvisor:
             db, name="Ground rent", expected_amount=-333, cadence="monthly",
             expected_day=6, anchor_date=date(2026, 7, 6),
         )
-        # Small four-weekly item, folded into the buffer rather than given
-        # its own return transfer.
+        # Small four-weekly item, folded into the standing buffer rather
+        # than given its own return transfer.
         _confirmed(
             db, name="Streaming", expected_amount=-25, cadence="four_weekly",
             expected_day=None, anchor_date=date(2026, 7, 28),
         )
-        # Pre-payday debit on the 20th, 2 days before the salary on the
-        # 22nd: lands just before this payday, in the previous cycle.
+        # Pre-payday debit on the 20th: lands just before this payday, in
+        # the previous cycle, but also recurs on 2026-09-20 (shifted to
+        # 2026-09-21) inside this cycle's sweep window.
         _confirmed(
             db, name="Credit card", expected_amount=-150, cadence="monthly",
             expected_day=20, anchor_date=date(2026, 7, 20),
         )
 
-        advice = compute_advice(db, buffer_pct=10.0)
+        # today is before the raw 2026-08-22 payday, so it doesn't trigger
+        # the stale-payday rollover (covered by its own test below).
+        advice = compute_advice(db, buffer_pct=10.0, today=date(2026, 8, 20))
 
         assert advice.salary_confirmed is True
-        assert advice.payday == date(2026, 8, 22)
+        assert advice.payday == date(2026, 8, 24)
         assert advice.next_payday == date(2026, 9, 22)
 
-        # Sweep covers all debits due before next payday, plus the buffer:
-        # 300 + 300 + 900 + 333 + 25 + 150 = 2008; *1.1 = 2208.8
-        assert advice.sweep_amount == 2208.8
+        # All debits before next payday: 300 + 300 + 900 + 333 + 25 + 150 =
+        # 2008. The bills cluster (Energy+Water, earliest 2026-08-25) is
+        # only 1 business day after payday (2026-08-24): 2 business days
+        # before 2026-08-25 is 2026-08-21, which precedes payday, so a
+        # transfer can't arrive in time. That 600 is kept in checking
+        # instead of swept: (2008 - 600) * 1.1 = 1548.8.
+        assert advice.keep_in_checking == 600.0
+        assert advice.sweep_amount == 1548.8
+        assert advice.standing_buffer == 25.0
 
-        # At most two return transfers: bills cluster and rent cluster.
-        assert len(advice.return_transfers) == 2
-        for transfer in advice.return_transfers:
-            assert transfer.date.weekday() < 5
-
-        bills_transfer = next(t for t in advice.return_transfers if "Energy" in t.covers)
-        assert bills_transfer.amount == 600.0
-        # Earliest debit covered is 2026-08-25 (Tuesday); 2 business days
-        # before is 2026-08-21 (Friday).
-        assert bills_transfer.date == date(2026, 8, 21)
-
-        rent_transfer = next(t for t in advice.return_transfers if "Rent" in t.covers)
+        # Only the rent cluster gets a transfer; the bills cluster couldn't
+        # arrive in time (folded into keep_in_checking above) and the
+        # credit card cluster lost out to rent on total amount.
+        assert len(advice.return_transfers) == 1
+        rent_transfer = advice.return_transfers[0]
+        assert set(rent_transfer.covers) == {"Rent", "Ground rent"}
         assert rent_transfer.amount == 1233.0
         # Earliest debit covered is 2026-09-01 (Tuesday); 2 business days
-        # before is 2026-08-28 (Friday).
+        # before is 2026-08-28 (Friday), which is on/after payday.
         assert rent_transfer.date == date(2026, 8, 28)
+        assert rent_transfer.date.weekday() < 5
+        assert rent_transfer.date >= advice.payday
 
-        # No dedicated transfer for the small four-weekly item; it's folded.
+        # No dedicated transfer for the small four-weekly item; it's folded
+        # into the standing buffer instead.
         assert not any("Streaming" in t.covers for t in advice.return_transfers)
 
         # Pre-payday debit warning fires for the Credit card on the 20th.
         assert any("Credit card" in w and "before payday" in w for w in advice.warnings)
+
+    def test_return_transfer_never_precedes_payday(self, db: Session):
+        """Critical fix: a debit landing within ~2 business days after
+        payday can't be pre-funded by a return transfer (the transfer would
+        have to be sent before the money is even swept), so it's kept in
+        checking instead of scheduled with an impossible date."""
+        _confirmed(
+            db, name="Salary", expected_amount=3000, cadence="monthly",
+            expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
+        )
+        # Payday shifts Sat 2026-08-22 -> Mon 2026-08-24; this debit lands
+        # the very next day, leaving no room for a 2-business-day transfer.
+        _confirmed(
+            db, name="Gym", expected_amount=-40, cadence="monthly",
+            expected_day=25, anchor_date=date(2026, 7, 25),
+        )
+        advice = compute_advice(db, buffer_pct=0.0, today=date(2026, 8, 20))
+
+        assert advice.return_transfers == []
+        assert advice.keep_in_checking == 40.0
+        # Sweep total excludes the kept-in-checking amount (buffer is 0%).
+        assert advice.sweep_amount == 0.0
+        for transfer in advice.return_transfers:
+            assert transfer.date >= advice.payday
+
+    def test_four_weekly_fold_threshold_both_sides(self, db: Session):
+        _confirmed(
+            db, name="Salary", expected_amount=3000, cadence="monthly",
+            expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
+        )
+        # Below/at threshold: folded into the standing buffer, no dedicated
+        # transfer.
+        _confirmed(
+            db, name="Streaming", expected_amount=-25, cadence="four_weekly",
+            expected_day=None, anchor_date=date(2026, 7, 28),
+        )
+        # Above threshold: 2026-07-29 + 28 days = 2026-08-26 (Wednesday),
+        # well clear of payday (2026-08-24) for the 2-business-day rule.
+        _confirmed(
+            db, name="Big subscription", expected_amount=-80, cadence="four_weekly",
+            expected_day=None, anchor_date=date(2026, 7, 29),
+        )
+
+        advice = compute_advice(db, buffer_pct=0.0, today=date(2026, 8, 20))
+
+        assert advice.standing_buffer == 25.0
+        assert len(advice.return_transfers) == 1
+        transfer = advice.return_transfers[0]
+        assert transfer.cadence == "four_weekly"
+        assert transfer.covers == ["Big subscription"]
+        assert transfer.amount == 80.0
+        assert transfer.date == date(2026, 8, 24)
+
+    def test_payday_matches_calendar_shifted_salary_date(self, db: Session):
+        """Saturday-expected salary shows Monday in both the calendar and
+        the advisor."""
+        salary = _confirmed(
+            db, name="Salary", expected_amount=3000, cadence="monthly",
+            expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
+        )
+        advice = compute_advice(db, buffer_pct=10.0, today=date(2026, 8, 20))
+        assert advice.payday == date(2026, 8, 24)
+
+        calendar_items = project_calendar_month([salary], 2026, 8, salary_payment_id=salary.id)
+        salary_item = next(i for i in calendar_items if i.is_salary)
+        assert salary_item.date == date(2026, 8, 24) == advice.payday
+
+    def test_stale_payday_rolls_forward_with_warning(self, db: Session):
+        """A salary whose next-expected date has already passed (the
+        detector hasn't matched a new occurrence yet) rolls forward by
+        cadence until it's not in the past, and warns about it."""
+        _confirmed(
+            db, name="Salary", expected_amount=3000, cadence="monthly",
+            expected_day=22, anchor_date=date(2026, 6, 22), is_income=True,
+        )
+        # Raw next-expected from anchor 2026-06-22 is 2026-07-22, long past
+        # "today" of 2026-08-25; rolls forward through 2026-08-22 to
+        # 2026-09-22 (already a weekday, no shift needed).
+        advice = compute_advice(db, buffer_pct=10.0, today=date(2026, 8, 25))
+
+        assert advice.payday == date(2026, 9, 22)
+        assert any(
+            "2026-07-22" in w and "has not been seen yet" in w for w in advice.warnings
+        )
+
+    def test_overflow_cluster_beyond_cap_still_fully_covered_by_sweep(self, db: Session):
+        """A third cluster beyond MAX_RETURN_TRANSFERS doesn't get its own
+        transfer, but its amount is never dropped from the sweep."""
+        _confirmed(
+            db, name="Salary", expected_amount=3000, cadence="monthly",
+            expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
+        )
+        _confirmed(
+            db, name="Big bill", expected_amount=-500, cadence="monthly",
+            expected_day=1, anchor_date=date(2026, 7, 1),
+        )
+        _confirmed(
+            db, name="Medium bill", expected_amount=-400, cadence="monthly",
+            expected_day=10, anchor_date=date(2026, 7, 10),
+        )
+        _confirmed(
+            db, name="Small bill", expected_amount=-100, cadence="monthly",
+            expected_day=20, anchor_date=date(2026, 7, 20),
+        )
+
+        advice = compute_advice(db, buffer_pct=10.0, today=date(2026, 8, 20))
+
+        assert len(advice.return_transfers) == 2
+        covered = {name for t in advice.return_transfers for name in t.covers}
+        assert covered == {"Big bill", "Medium bill"}
+        assert advice.keep_in_checking == 0.0
+        # The overflow "Small bill" cluster is still fully counted in the
+        # sweep: no money is silently lost by not getting a transfer.
+        assert advice.sweep_amount == round((500 + 400 + 100) * 1.1, 2)
 
     def test_yearly_item_due_soon_warns(self, db: Session):
         _confirmed(

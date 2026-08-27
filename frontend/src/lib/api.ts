@@ -1141,6 +1141,8 @@ export interface CashflowAdvice {
 	payday: string | null;
 	next_payday: string | null;
 	sweep_amount: number | null;
+	keep_in_checking: number;
+	standing_buffer: number;
 	buffer_pct: number;
 	return_transfers: CashflowReturnTransfer[];
 	warnings: string[];

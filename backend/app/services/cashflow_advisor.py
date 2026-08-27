@@ -45,9 +45,14 @@ CLUSTER_MAX_SPAN_DAYS = 6
 # dedicated transfer.
 MAX_RETURN_TRANSFERS = 2
 
-# Four-weekly debits below this absolute amount are folded into the sweep
-# buffer instead of getting their own dedicated four-weekly transfer.
+# Four-weekly debits at or below this absolute amount are folded into the
+# standing buffer instead of getting their own dedicated four-weekly
+# transfer; above it, the item gets its own return-transfer entry.
 FOUR_WEEKLY_FOLD_THRESHOLD = 50.0
+
+# A return transfer must arrive at least this many business days before the
+# earliest debit it covers.
+TRANSFER_LEAD_BUSINESS_DAYS = 2
 
 
 def _is_weekend(d: date) -> bool:
@@ -197,14 +202,18 @@ class Advice:
     payday: date | None = None
     next_payday: date | None = None
     sweep_amount: float | None = None
+    keep_in_checking: float = 0.0
+    standing_buffer: float = 0.0
     buffer_pct: float = DEFAULT_BUFFER_PCT
     return_transfers: list[ReturnTransfer] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
 def _find_salary_payment(db: Session) -> RecurringPayment | None:
-    """The confirmed income recurring payment with the most occurrences
-    (same rule as the cashflow/periods endpoint)."""
+    """The confirmed income recurring payment most likely to be the salary:
+    most occurrences wins; ties broken by the latest occurrence date, then
+    by lowest id, so the pick is deterministic and agrees with the
+    calendar/periods endpoints' `_find_salary_payment_id`."""
     from sqlalchemy import func, select
 
     from app.models import RecurringPaymentOccurrence
@@ -213,11 +222,16 @@ def _find_salary_payment(db: Session) -> RecurringPayment | None:
         select(
             RecurringPaymentOccurrence.recurring_payment_id,
             func.count(RecurringPaymentOccurrence.id).label("occurrence_count"),
+            func.max(RecurringPaymentOccurrence.date).label("latest_date"),
         )
         .join(RecurringPayment, RecurringPayment.id == RecurringPaymentOccurrence.recurring_payment_id)
         .where(RecurringPayment.status == "confirmed", RecurringPayment.is_income.is_(True))
         .group_by(RecurringPaymentOccurrence.recurring_payment_id)
-        .order_by(func.count(RecurringPaymentOccurrence.id).desc())
+        .order_by(
+            func.count(RecurringPaymentOccurrence.id).desc(),
+            func.max(RecurringPaymentOccurrence.date).desc(),
+            RecurringPaymentOccurrence.recurring_payment_id.asc(),
+        )
         .limit(1)
     ).first()
     if row is None:
@@ -230,6 +244,14 @@ def _next_payday_after(payment: RecurringPayment, after: date) -> date:
         return after + timedelta(days=28)
     months = 12 if payment.cadence == "yearly" else 1
     return _add_months(after, months, payment.expected_day)
+
+
+def _shift_for_cadence(d: date, cadence: str) -> date:
+    """Weekend-shift a monthly/yearly date onto the next business day;
+    four-weekly dates are never shifted. Mirrors `occurrences_in_range`'s
+    `shift_weekend` handling so the advisor's payday always matches what
+    the calendar view shows for the same recurring payment."""
+    return d if cadence == "four_weekly" else next_business_day(d)
 
 
 @dataclass(frozen=True)
@@ -264,14 +286,34 @@ def compute_advice(db: Session, buffer_pct: float, today: date | None = None) ->
             buffer_pct=buffer_pct,
         )
 
-    payday = next_expected_date(salary)
-    if payday is None:
+    raw_payday = next_expected_date(salary)
+    if raw_payday is None:
         return Advice(
             salary_confirmed=False,
             message="Confirm your salary as recurring income first",
             buffer_pct=buffer_pct,
         )
-    next_payday = _next_payday_after(salary, payday)
+
+    warnings: list[str] = []
+
+    # Stale payday: if the salary's next expected date has already passed
+    # (the detector hasn't matched it against a real transaction yet), roll
+    # forward by cadence until it's not in the past, and say so, rather than
+    # silently computing a window that already closed.
+    original_raw_payday = raw_payday
+    while raw_payday < today:
+        raw_payday = _next_payday_after(salary, raw_payday)
+    if raw_payday != original_raw_payday:
+        warnings.append(
+            f"Salary expected on {original_raw_payday.isoformat()} has not been seen yet"
+        )
+
+    raw_next_payday = _next_payday_after(salary, raw_payday)
+
+    # Weekend-shifted, matching the calendar view: the sweep happens on the
+    # actual banking day the salary lands, not the raw expected_day.
+    payday = _shift_for_cadence(raw_payday, salary.cadence)
+    next_payday = _shift_for_cadence(raw_next_payday, salary.cadence)
 
     debit_payments = (
         db.query(RecurringPayment)
@@ -279,50 +321,73 @@ def compute_advice(db: Session, buffer_pct: float, today: date | None = None) ->
         .all()
     )
 
-    # Debits swept for by the upcoming payday (all due before next payday).
+    # Debits swept for by the upcoming payday (all due before next payday),
+    # projected with the same weekend shift as the calendar view.
     window_debits: list[_Debit] = []
-    four_weekly_folded_total = 0.0
+    standing_buffer_total = 0.0
     monthly_yearly_debits: list[_Debit] = []
+    four_weekly_dedicated: dict[int, list[_Debit]] = {}
     for payment in debit_payments:
-        for d in occurrences_in_range(payment, payday, next_payday):
+        for d in occurrences_in_range(payment, payday, next_payday, shift_weekend=True):
             debit = _Debit(date=d, amount=abs(payment.expected_amount), name=payment.name, cadence=payment.cadence)
             window_debits.append(debit)
             if payment.cadence == "four_weekly":
-                if abs(payment.expected_amount) < FOUR_WEEKLY_FOLD_THRESHOLD:
-                    four_weekly_folded_total += abs(payment.expected_amount)
+                if abs(payment.expected_amount) <= FOUR_WEEKLY_FOLD_THRESHOLD:
+                    # Folded into the standing buffer: still swept for (it's
+                    # part of sweep_total below), just not worth a dedicated
+                    # transfer of its own.
+                    standing_buffer_total += abs(payment.expected_amount)
                 else:
-                    monthly_yearly_debits.append(debit)
+                    four_weekly_dedicated.setdefault(payment.id, []).append(debit)
             else:
                 monthly_yearly_debits.append(debit)
 
     sweep_total = sum(d.amount for d in window_debits)
-    sweep_amount = round(sweep_total * (1 + buffer_pct / 100), 2)
 
-    clusters = _cluster_debits(monthly_yearly_debits)
-    clusters.sort(key=lambda c: sum(d.amount for d in c), reverse=True)
-    chosen = clusters[:MAX_RETURN_TRANSFERS]
+    # Candidate clusters: span-based groups of monthly/yearly debits, plus
+    # one dedicated candidate per above-threshold four-weekly payment
+    # (whichever wins between a matching four-weekly transfer and the
+    # standing buffer is decided by the fold threshold above; a payment
+    # that clears it always gets its own candidate here).
+    candidate_clusters = _cluster_debits(monthly_yearly_debits)
+    candidate_clusters.extend(four_weekly_dedicated.values())
+    candidate_clusters.sort(key=lambda c: sum(d.amount for d in c), reverse=True)
+    chosen = candidate_clusters[:MAX_RETURN_TRANSFERS]
 
-    return_transfers = []
+    return_transfers: list[ReturnTransfer] = []
+    keep_in_checking_total = 0.0
     for cluster in chosen:
         earliest = min(d.date for d in cluster)
-        cadence = "four_weekly" if all(d.cadence == "four_weekly" for d in cluster) else "monthly"
-        return_transfers.append(
-            ReturnTransfer(
-                date=business_days_before(earliest, 2),
-                amount=round(sum(d.amount for d in cluster), 2),
-                cadence=cadence,
-                covers=[d.name for d in cluster],
+        total = sum(d.amount for d in cluster)
+        ideal_date = business_days_before(earliest, TRANSFER_LEAD_BUSINESS_DAYS)
+        if ideal_date >= payday:
+            # A transfer scheduled on `ideal_date` (on or after payday)
+            # still arrives the required lead time before the earliest
+            # debit it covers.
+            cadence = "four_weekly" if all(d.cadence == "four_weekly" for d in cluster) else "monthly"
+            return_transfers.append(
+                ReturnTransfer(
+                    date=max(payday, ideal_date),
+                    amount=round(total, 2),
+                    cadence=cadence,
+                    covers=[d.name for d in cluster],
+                )
             )
-        )
+        else:
+            # Even a transfer sent the moment the sweep happens (payday)
+            # can't arrive the required lead time before the earliest debit:
+            # don't move this money out at all, keep it in checking instead.
+            keep_in_checking_total += total
+            sweep_total -= total
     return_transfers.sort(key=lambda t: t.date)
 
-    warnings: list[str] = []
+    sweep_amount = round(sweep_total * (1 + buffer_pct / 100), 2)
 
     # Pre-payday debits: land in the days just before this payday, so the
     # previous sweep won't have covered them.
     pre_payday_start = payday - timedelta(days=PRE_PAYDAY_WARNING_DAYS)
     for payment in debit_payments:
-        for d in occurrences_in_range(payment, pre_payday_start, payday):
+        for d in occurrences_in_range(payment, pre_payday_start, payday, shift_weekend=True):
             days_before = (payday - d).days
             warnings.append(
                 f"{payment.name} is due on {d.isoformat()}, {days_before} day(s) before payday "
@@ -346,6 +411,8 @@ def compute_advice(db: Session, buffer_pct: float, today: date | None = None) ->
         payday=payday,
         next_payday=next_payday,
         sweep_amount=sweep_amount,
+        keep_in_checking=round(keep_in_checking_total, 2),
+        standing_buffer=round(standing_buffer_total, 2),
         buffer_pct=buffer_pct,
         return_transfers=return_transfers,
         warnings=warnings,

@@ -635,6 +635,8 @@ class CashflowAdviceOut(BaseModel):
     payday: Optional[date] = None
     next_payday: Optional[date] = None
     sweep_amount: Optional[float] = None
+    keep_in_checking: float = 0.0
+    standing_buffer: float = 0.0
     buffer_pct: float
     return_transfers: list[CashflowReturnTransferOut] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
