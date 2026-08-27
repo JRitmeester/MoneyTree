@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..auth import require_auth
 from ..database import get_db
 from ..models import Category
-from ..schemas import CategoryCreate, CategoryOut
+from ..schemas import CategoryCreate, CategoryOut, CategoryUpdate
 from ..services.sync_events import (
     EVENT_CATEGORY_DELETE, EVENT_CATEGORY_RENAME, EVENT_CATEGORY_UPDATE,
     record_event,
@@ -50,30 +50,40 @@ def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/{category_id}", response_model=CategoryOut)
-def update_category(category_id: int, data: CategoryCreate, db: Session = Depends(get_db)):
-    """Rename a category and/or change its attributes."""
+def update_category(category_id: int, data: CategoryUpdate, db: Session = Depends(get_db)):
+    """Rename a category and/or change its attributes.
+
+    Only fields present in the request body are applied; omitted fields keep
+    their current value (e.g. renaming does not reset is_fixed/category_type).
+    """
     cat = db.get(Category, category_id)
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
 
+    fields = data.model_dump(exclude_unset=True)
+
     old_name = cat.name
-    new_parent_id = data.parent_id if data.parent_id is not None else cat.parent_id
+    new_parent_id = fields.get("parent_id", cat.parent_id)
+    new_category_type = fields.get("category_type", cat.category_type)
+    new_is_fixed = fields.get("is_fixed", cat.is_fixed)
+    new_name = fields.get("name", cat.name)
+
     attr_changed = (
-        data.category_type != cat.category_type
-        or data.is_fixed != cat.is_fixed
+        new_category_type != cat.category_type
+        or new_is_fixed != cat.is_fixed
         or new_parent_id != cat.parent_id
     )
 
-    if data.name != old_name:
+    if new_name != old_name:
         record_event(db, EVENT_CATEGORY_RENAME, {
-            "old_name": old_name, "new_name": data.name,
+            "old_name": old_name, "new_name": new_name,
         })
 
-    cat.name = data.name
-    if data.parent_id is not None:
-        cat.parent_id = data.parent_id
-    cat.category_type = data.category_type
-    cat.is_fixed = data.is_fixed
+    cat.name = new_name
+    if "parent_id" in fields:
+        cat.parent_id = fields["parent_id"]
+    cat.category_type = new_category_type
+    cat.is_fixed = new_is_fixed
 
     if attr_changed:
         new_parent = db.get(Category, cat.parent_id) if cat.parent_id else None

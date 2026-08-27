@@ -199,6 +199,13 @@ class CategoryCreate(BaseModel):
     is_fixed: bool = False
 
 
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    parent_id: Optional[int] = None
+    category_type: Optional[str] = None
+    is_fixed: Optional[bool] = None
+
+
 # --- Dashboard ---
 
 

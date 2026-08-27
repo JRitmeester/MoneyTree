@@ -99,7 +99,7 @@
 			return;
 		}
 		try {
-			await updateCategory(cat.id, { name: newName, category_type: cat.category_type });
+			await updateCategory(cat.id, { name: newName });
 			editingId = null;
 			await load();
 		} catch (e: any) {
@@ -115,7 +115,7 @@
 	async function handleToggleType(cat: Category) {
 		const newType = cat.category_type === 'income' ? 'expense' : 'income';
 		try {
-			await updateCategory(cat.id, { name: cat.name, category_type: newType });
+			await updateCategory(cat.id, { category_type: newType });
 			await load();
 		} catch (e: any) {
 			error = e.message;
