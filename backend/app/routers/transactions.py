@@ -1,3 +1,4 @@
+import re
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -39,6 +40,27 @@ def _collect_descendant_ids(db: Session, category_id: int) -> set[int]:
         result.add(current)
         stack.extend(children_map.get(current, []))
     return result
+
+
+_AMOUNT_PATTERN = re.compile(r"^-?\s*€?\s*\d+(?:[.,]\d+)?$")
+
+
+def _parse_amount(search: str) -> float | None:
+    """Parse a search string as a monetary amount, or return None.
+
+    Accepts Dutch comma or dot decimal separators, an optional leading minus
+    sign, and an optional euro sign, e.g. "46", "46,95", "46.95", "-46,95",
+    "€46,95". The sign is irrelevant to matching since it compares against
+    abs(bedrag), so the returned value is always non-negative."""
+    text = search.strip()
+    if not text or not _AMOUNT_PATTERN.match(text):
+        return None
+    cleaned = text.replace("€", "").replace("-", "").replace(" ", "")
+    cleaned = cleaned.replace(",", ".")
+    try:
+        return abs(float(cleaned))
+    except ValueError:
+        return None
 
 
 def _category_id_for_categorie(categorie: str, db: Session) -> int | None:
@@ -194,11 +216,18 @@ def list_transactions(
         )
     if search:
         pattern = f"%{search}%"
-        query = query.where(
+        text_match = (
             Transaction.omschrijving.ilike(pattern)
             | Transaction.merchant_name.ilike(pattern)
             | Transaction.naam.ilike(pattern)
         )
+        amount = _parse_amount(search)
+        if amount is not None:
+            query = query.where(
+                text_match | (func.abs(Transaction.bedrag) - amount).between(-0.005, 0.005)
+            )
+        else:
+            query = query.where(text_match)
     if has_receipt is not None:
         receipt_tx_ids = select(Receipt.transaction_id).where(
             Receipt.transaction_id.is_not(None)

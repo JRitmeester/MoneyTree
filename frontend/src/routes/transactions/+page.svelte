@@ -195,7 +195,7 @@
 
 <div class="filters">
 	<div class="filter-row">
-		<input type="text" placeholder="Search transactions..." value={search} oninput={handleSearch} />
+		<input type="text" placeholder="Search description, merchant, or amount..." value={search} oninput={handleSearch} />
 		<div class="category-filter">
 			<CategoryInput value={categoryFilter} onchange={(v) => { categoryFilter = v; applyFilters(); }} placeholder="Filter by category..." />
 		</div>
