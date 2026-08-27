@@ -287,3 +287,55 @@ class IncidentalLabel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class RecurringPayment(Base):
+    """A detected or confirmed recurring payment pattern (subscription, vaste
+    last, or recurring income like salary). Suggested rows are refreshed in
+    place by the detector on every run; confirmed/dismissed rows are never
+    touched by the detector."""
+    __tablename__ = "recurring_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_pattern: Mapped[str] = mapped_column(String(255), nullable=False)
+    counterparty_iban: Mapped[str | None] = mapped_column(String(34))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    expected_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount_tolerance: Mapped[float] = mapped_column(Float, default=0.15, nullable=False)
+    cadence: Mapped[str] = mapped_column(String(20), nullable=False)  # monthly | four_weekly | yearly
+    expected_day: Mapped[int | None] = mapped_column(Integer)
+    anchor_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(10), default="suggested", nullable=False
+    )  # suggested | confirmed | dismissed
+    category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
+    is_income: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    category: Mapped["Category | None"] = relationship(foreign_keys=[category_id])
+    occurrences: Mapped[list["RecurringPaymentOccurrence"]] = relationship(
+        back_populates="recurring_payment", cascade="all, delete-orphan"
+    )
+
+
+class RecurringPaymentOccurrence(Base):
+    """One matched transaction for a recurring payment. Kept separate from
+    Transaction so a detector re-run can rebuild occurrences without
+    touching transaction rows."""
+    __tablename__ = "recurring_payment_occurrences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    recurring_payment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("recurring_payments.id"), nullable=False
+    )
+    transaction_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("transactions.id"), nullable=False, unique=True
+    )
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    recurring_payment: Mapped["RecurringPayment"] = relationship(back_populates="occurrences")
+    transaction: Mapped["Transaction"] = relationship()
