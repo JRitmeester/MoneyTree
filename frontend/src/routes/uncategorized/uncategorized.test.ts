@@ -14,6 +14,7 @@ vi.mock('$lib/stores/dateRange', () => {
 vi.mock('$lib/api', () => ({
 	getUncategorized: vi.fn(),
 	categorizeSelected: vi.fn(),
+	bulkCategorize: vi.fn(),
 	getCategories: vi.fn(),
 	createCategory: vi.fn(),
 	formatEuro: (amount: number) =>
@@ -26,7 +27,8 @@ vi.mock('$lib/api', () => ({
 		}),
 }));
 
-import { getUncategorized, categorizeSelected, getCategories } from '$lib/api';
+import { getUncategorized, categorizeSelected, bulkCategorize, getCategories } from '$lib/api';
+import { dateRange } from '$lib/stores/dateRange';
 
 const mockGroups = [
 	{
@@ -439,6 +441,177 @@ describe('Date range filter', () => {
 			expect(screen.queryByText('Horeca')).not.toBeInTheDocument();
 		});
 		expect(screen.getByText('Albert Heijn')).toBeInTheDocument();
+	});
+});
+
+describe('Bank category mapping', () => {
+	afterEach(() => {
+		cleanup();
+	});
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		// Earlier "Date range filter" tests persist real dates into this shared mocked
+		// store; reset it so DateRangeFilter's mount effect doesn't inherit a stale
+		// range that would filter out these tests' January 2025 fixtures.
+		dateRange.set({ activePreset: null, dateFrom: '', dateTo: '' });
+		(getCategories as Mock).mockResolvedValue([
+			{ id: 10, name: 'Eten', parent_id: null, is_fixed: false, category_type: 'expense', children: [] },
+		]);
+	});
+
+	async function selectCategory(assignInput: HTMLElement, name: string) {
+		await fireEvent.input(assignInput, { target: { value: name } });
+		await fireEvent.keyDown(assignInput, { key: 'Enter' });
+	}
+
+	it('shows a mapped badge for a group with an existing mapping', async () => {
+		const mapped = [{ ...mockGroups[0], has_mapping: true }, mockGroups[1]];
+		(getUncategorized as Mock).mockResolvedValue(mapped);
+		render(UncategorizedPage);
+
+		await screen.findByText('Boodschappen');
+		expect(screen.getByTitle('Future imports map this bank category automatically')).toBeInTheDocument();
+	});
+
+	it('does not show a mapped badge for a group without a mapping', async () => {
+		(getUncategorized as Mock).mockResolvedValue(mockGroups);
+		render(UncategorizedPage);
+
+		await screen.findByText('Boodschappen');
+		expect(screen.queryByTitle('Future imports map this bank category automatically')).not.toBeInTheDocument();
+	});
+
+	it('shows the mapping checkbox when a whole group is selected', async () => {
+		(getUncategorized as Mock).mockResolvedValue(mockGroups);
+		render(UncategorizedPage);
+
+		await screen.findByText('Albert Heijn');
+		const checkboxes = screen.getAllByRole('checkbox');
+		await fireEvent.click(checkboxes[0]); // group 1 checkbox, selects both its transactions
+
+		expect(
+			await screen.findByLabelText('Also map "Boodschappen" to this category for future imports')
+		).toBeChecked();
+	});
+
+	it('does not show the mapping checkbox for a partial group selection', async () => {
+		(getUncategorized as Mock).mockResolvedValue(mockGroups);
+		render(UncategorizedPage);
+
+		await screen.findByText('Albert Heijn');
+		const checkboxes = screen.getAllByRole('checkbox');
+		await fireEvent.click(checkboxes[1]); // only one transaction of group 1
+
+		expect(
+			screen.queryByLabelText(/Also map .* to this category for future imports/)
+		).not.toBeInTheDocument();
+	});
+
+	it('does not show the mapping checkbox when selection spans multiple groups', async () => {
+		(getUncategorized as Mock).mockResolvedValue(mockGroups);
+		render(UncategorizedPage);
+
+		await screen.findByText('Albert Heijn');
+		const checkboxes = screen.getAllByRole('checkbox');
+		await fireEvent.click(checkboxes[0]); // full group 1
+		await fireEvent.click(checkboxes[3]); // group 2 checkbox
+
+		expect(
+			screen.queryByLabelText(/Also map .* to this category for future imports/)
+		).not.toBeInTheDocument();
+	});
+
+	it('calls bulkCategorize with save_mapping when applying a full group selection', async () => {
+		(getUncategorized as Mock).mockResolvedValue(mockGroups);
+		(bulkCategorize as Mock).mockResolvedValue({ updated: 2 });
+		render(UncategorizedPage);
+
+		await screen.findByText('Albert Heijn');
+		const checkboxes = screen.getAllByRole('checkbox');
+		await fireEvent.click(checkboxes[0]); // full group 1
+
+		const assignInput = screen.getByPlaceholderText('Assign category...');
+		await selectCategory(assignInput, 'Eten');
+
+		const mappingCheckbox = await screen.findByLabelText(
+			'Also map "Boodschappen" to this category for future imports'
+		);
+		expect(mappingCheckbox).toBeChecked();
+
+		const applyBtn = screen.getByRole('button', { name: 'Apply' });
+		await fireEvent.click(applyBtn);
+
+		await waitFor(() => {
+			expect(bulkCategorize).toHaveBeenCalledWith({
+				bank_category: 'Boodschappen',
+				category_id: 10,
+				save_mapping: true,
+			});
+		});
+		expect(categorizeSelected).not.toHaveBeenCalled();
+	});
+
+	it('calls bulkCategorize with save_mapping false when the checkbox is unchecked', async () => {
+		(getUncategorized as Mock).mockResolvedValue(mockGroups);
+		(bulkCategorize as Mock).mockResolvedValue({ updated: 2 });
+		render(UncategorizedPage);
+
+		await screen.findByText('Albert Heijn');
+		const checkboxes = screen.getAllByRole('checkbox');
+		await fireEvent.click(checkboxes[0]); // full group 1
+
+		const assignInput = screen.getByPlaceholderText('Assign category...');
+		await selectCategory(assignInput, 'Eten');
+
+		const mappingCheckbox = await screen.findByLabelText(
+			'Also map "Boodschappen" to this category for future imports'
+		);
+		await fireEvent.click(mappingCheckbox);
+
+		const applyBtn = screen.getByRole('button', { name: 'Apply' });
+		await fireEvent.click(applyBtn);
+
+		await waitFor(() => {
+			expect(bulkCategorize).toHaveBeenCalledWith({
+				bank_category: 'Boodschappen',
+				category_id: 10,
+				save_mapping: false,
+			});
+		});
+	});
+
+	it('calls categorizeSelected (not bulkCategorize) for a partial selection', async () => {
+		(getUncategorized as Mock).mockResolvedValue(mockGroups);
+		(categorizeSelected as Mock).mockResolvedValue({ updated: 1 });
+		render(UncategorizedPage);
+
+		await screen.findByText('Albert Heijn');
+		const checkboxes = screen.getAllByRole('checkbox');
+		await fireEvent.click(checkboxes[1]); // single transaction, group 1 not fully selected
+
+		const assignInput = screen.getByPlaceholderText('Assign category...');
+		await selectCategory(assignInput, 'Eten');
+
+		const applyBtn = screen.getByRole('button', { name: 'Apply' });
+		await fireEvent.click(applyBtn);
+
+		await waitFor(() => {
+			expect(categorizeSelected).toHaveBeenCalledWith({
+				transaction_ids: [1],
+				category_id: 10,
+			});
+		});
+		expect(bulkCategorize).not.toHaveBeenCalled();
+	});
+
+	it('shows a link back to the dashboard in the empty state', async () => {
+		(getUncategorized as Mock).mockResolvedValue([]);
+		render(UncategorizedPage);
+
+		await screen.findByText('All transactions are categorized.');
+		const link = screen.getByRole('link', { name: /back to dashboard/i });
+		expect(link).toHaveAttribute('href', '/');
 	});
 });
 

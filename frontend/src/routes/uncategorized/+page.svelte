@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getUncategorized, categorizeSelected, formatEuro, formatDate, type UncategorizedGroup } from '$lib/api';
+	import { getUncategorized, categorizeSelected, bulkCategorize, formatEuro, formatDate, type UncategorizedGroup } from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 
@@ -15,6 +15,7 @@
 	let dateTo = $state('');
 	let selectedIds: Set<number> = $state(new Set());
 	let selectedCategoryId: number | null = $state(null);
+	let saveMapping = $state(true);
 
 	async function load() {
 		loading = true;
@@ -63,10 +64,19 @@
 		if (selectedIds.size === 0 || selectedCategoryId == null) return;
 		applying = true;
 		try {
-			await categorizeSelected({
-				transaction_ids: [...selectedIds],
-				category_id: selectedCategoryId,
-			});
+			const mappingGroup = fullySelectedGroup;
+			if (mappingGroup) {
+				await bulkCategorize({
+					bank_category: mappingGroup.bank_category,
+					category_id: selectedCategoryId,
+					save_mapping: saveMapping,
+				});
+			} else {
+				await categorizeSelected({
+					transaction_ids: [...selectedIds],
+					category_id: selectedCategoryId,
+				});
+			}
 			const removedIds = new Set(selectedIds);
 			groups = groups
 				.map(g => ({
@@ -78,6 +88,7 @@
 				.filter(g => g.transactions.length > 0);
 			selectedIds = new Set();
 			selectedCategoryId = null;
+			saveMapping = true;
 		} finally {
 			applying = false;
 		}
@@ -152,6 +163,18 @@
 
 	let totalCount = $derived(filteredGroups.reduce((s, g) => s + g.count, 0));
 	let selectedCount = $derived(selectedIds.size);
+
+	let fullySelectedGroup: UncategorizedGroup | null = $derived.by(() => {
+		if (selectedIds.size === 0) return null;
+		const candidates = filteredGroups.filter(g => {
+			const groupIds = g.transactions.map(tx => tx.id);
+			return groupIds.length > 0 && groupIds.every(id => selectedIds.has(id));
+		});
+		if (candidates.length !== 1) return null;
+		const group = candidates[0];
+		if (group.transactions.length !== selectedIds.size) return null;
+		return group;
+	});
 </script>
 
 <div class="page">
@@ -162,6 +185,7 @@
 	{:else if groups.length === 0}
 		<div class="empty">
 			<p>All transactions are categorized.</p>
+			<a href="/" class="back">&larr; Back to dashboard</a>
 		</div>
 	{:else}
 		<div class="date-filter-row">
@@ -211,6 +235,12 @@
 				</div>
 			</div>
 			<div class="bar-right">
+				{#if fullySelectedGroup}
+					<label class="map-checkbox">
+						<input type="checkbox" bind:checked={saveMapping} />
+						Also map "{fullySelectedGroup.bank_category}" to this category for future imports
+					</label>
+				{/if}
 				<div class="cat-input-wrap">
 					<CategoryInput
 						value={selectedCategoryId}
@@ -244,7 +274,12 @@
 							/>
 						</label>
 						<div class="group-info">
-							<span class="bank-cat">{group.bank_category}</span>
+							<span class="bank-cat-row">
+								<span class="bank-cat">{group.bank_category}</span>
+								{#if group.has_mapping}
+									<span class="badge mapped-badge" title="Future imports map this bank category automatically">Mapped</span>
+								{/if}
+							</span>
 							<span class="group-meta">{group.count} transaction{group.count !== 1 ? 's' : ''} &middot; {formatEuro(group.total)}</span>
 						</div>
 					</div>
@@ -296,6 +331,14 @@
 		padding: 3rem;
 		text-align: center;
 		color: #666;
+	}
+
+	.back {
+		display: inline-block;
+		margin-top: 0.75rem;
+		color: #2d6a4f;
+		text-decoration: none;
+		font-size: 0.9rem;
 	}
 
 	.sticky-bar {
@@ -405,6 +448,24 @@
 		width: 250px;
 	}
 
+	.map-checkbox {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.8rem;
+		color: #555;
+		cursor: pointer;
+		max-width: 260px;
+		line-height: 1.2;
+	}
+
+	.map-checkbox input {
+		width: 14px;
+		height: 14px;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
 	.apply-btn {
 		padding: 0.35rem 0.9rem;
 		background: #2d6a4f;
@@ -458,12 +519,32 @@
 		min-width: 0;
 	}
 
+	.bank-cat-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-width: 0;
+	}
+
 	.bank-cat {
 		font-weight: 600;
 		font-size: 0.95rem;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+
+	.badge {
+		padding: 0.1rem 0.5rem;
+		border-radius: 4px;
+		font-size: 0.7rem;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
+	.mapped-badge {
+		background: #e0f2fe;
+		color: #0369a1;
 	}
 
 	.group-meta {
