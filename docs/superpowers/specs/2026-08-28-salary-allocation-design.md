@@ -85,6 +85,12 @@ not "what will next month look like". Therefore:
 - If no confirmed salary: same explicit "confirm your salary first" state
   as the advice endpoint.
 
+Stale anchor: when the anchored period has already ended (the next payday
+after the anchor is before today), the plan still computes, but `warnings`
+gains "This plan is based on the salary received on <date>; a newer salary
+may not be imported yet." The UI shows it in the warning box like any
+other warning.
+
 ### Bills pot for the anchored period
 
 The existing `compute_advice` is strictly forward-looking, so the advisor
@@ -117,6 +123,12 @@ Given `salary` (absolute), ordered active buckets, `bills_pot`,
    gets `floor_to_cent(percent_base * value / 100)`. All percent buckets
    share the same base, so they cannot overshoot it (write-time cap keeps
    the sum <= 100).
+
+   `shortfall` is a fixed-bucket concept only: a fixed bucket is
+   shortfalled when it receives less than its configured value. Percent
+   buckets are never marked shortfalled; receiving a small amount because
+   the remainder is small is their rule working as configured
+   (`shortfall` is always `false` on percent lines).
 4. `free_to_spend = salary - bills_pot - kept_in_checking - sum(all
    bucket amounts)`. Rounding leftovers from the floor therefore land in
    `free_to_spend`, and all displayed rows sum exactly to `salary`.
@@ -183,6 +195,12 @@ name is updated, others created; buckets present locally but absent from
 the file are left alone (consistent with how labels/own accounts import).
 Files without the section import as today.
 
+Position normalization: imported positions are treated as relative order
+only, never written verbatim. After the upsert, all buckets are re-sorted
+(imported buckets in the file's order first, then local-only buckets in
+their existing relative order) and positions rewritten 0..n-1, so
+duplicates and gaps cannot occur.
+
 ## UI
 
 On `/cashflow`, a new section below the payday transfer plan:
@@ -191,8 +209,11 @@ On `/cashflow`, a new section below the payday transfer plan:
 basis ("Salary received Fri 23 Aug" vs "Expected salary, not yet
 received"). A waterfall list:
 
-1. "Recurring bills pot" row (the bills_pot; muted, annotated "the
-   transfer above").
+1. "Recurring bills pot" row (the anchored `bills_pot`; muted, captioned
+   "covers bills until next payday"). Do NOT annotate it as equal to the
+   advice card's transfer figure: the advice card is forward-looking
+   (next payday) while this card is anchored to the current period, so
+   the two amounts legitimately differ late in a pay period.
 2. "Kept in checking for imminent bills" row when nonzero (muted).
 3. One row per active bucket: name, computed euro amount, muted rule
    caption ("fixed" / "50% of remainder"), linked category name when set,
