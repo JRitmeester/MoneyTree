@@ -24,6 +24,10 @@ from sqlalchemy.orm import Session
 
 from app.models import RecurringPayment, RecurringPaymentOccurrence, Transaction
 from app.services.merchant import normalize_merchant_name
+from app.services.nl_holidays import (
+    shift_backward_to_business_day,
+    shift_forward_to_business_day,
+)
 
 # --- Detection thresholds (named constants, see spec "Recurring-payment
 # detection") -----------------------------------------------------------
@@ -140,6 +144,9 @@ def _trimmed_gaps(gaps: Sequence[int]) -> list[int]:
     if not gaps:
         return list(gaps)
     median = statistics.median(gaps)
+    # Floor rounding is deliberate: a fractional allowance (e.g. 3 gaps *
+    # 0.25 = 0.75) rounds down to 0, so a short series only gets an outlier
+    # dropped once it can clearly afford one, not on a rounded-up technicality.
     n_drop = int(len(gaps) * GAP_OUTLIER_FRACTION)
     if n_drop == 0:
         return list(gaps)
@@ -284,8 +291,19 @@ def _cluster_by_amount(transactions: Sequence[Transaction]) -> list[list[Transac
     return clusters
 
 
+def _cluster_group_key(base_key: str, direction: str, amount: float) -> str:
+    """The stable composite identity for a cluster: base key, direction,
+    and the cluster's representative amount rounded to the nearest euro.
+    Rounded amount (not an ordinal cluster index) is deliberate: a new
+    cluster appearing between two existing ones (e.g. a 60 cluster showing
+    up alongside existing 10 and 150 clusters) must not shift the other
+    clusters' keys, or upsert would drop and recreate them instead of
+    refreshing in place."""
+    return f"{base_key}|{direction}|{int(round(abs(amount)))}"
+
+
 def _build_candidate(
-    base_key: str, direction: str, cluster_index: int, txs: Sequence[Transaction]
+    base_key: str, direction: str, txs: Sequence[Transaction]
 ) -> RecurringCandidate | None:
     txs_sorted = sorted(txs, key=lambda t: t.datum)
     dates = [t.datum for t in txs_sorted]
@@ -309,7 +327,7 @@ def _build_candidate(
     )
 
     return RecurringCandidate(
-        group_key=f"{base_key}|{direction}|{cluster_index}",
+        group_key=_cluster_group_key(base_key, direction, expected_amount),
         counterparty_iban=counterparty_iban,
         merchant_pattern=merchant_pattern,
         name=display_name,
@@ -346,32 +364,14 @@ def build_candidates(transactions: Iterable[Transaction]) -> list[RecurringCandi
             if not direction_txs:
                 continue
             clusters = _cluster_by_amount(direction_txs)
-            # Stable ordering across reruns: sort clusters by ascending
-            # median amount so the same real-world pattern gets the same
-            # cluster index (and hence the same group_key) each time,
-            # letting upsert refresh it in place instead of duplicating it.
-            clusters.sort(key=lambda c: statistics.median(abs(t.bedrag) for t in c))
-            for idx, cluster_txs in enumerate(clusters):
+            for cluster_txs in clusters:
                 if len(cluster_txs) < MIN_OCCURRENCES_YEARLY:
                     continue
-                candidate = _build_candidate(base_key, direction, idx, cluster_txs)
+                candidate = _build_candidate(base_key, direction, cluster_txs)
                 if candidate is not None:
                     candidates.append(candidate)
 
     return candidates
-
-
-def _row_key(row: RecurringPayment) -> str:
-    """The stable identity used to match a candidate to an existing row.
-    Prefers the persisted composite `group_key`; falls back to
-    "{base_key}|{direction}|0" for rows created before clustering existed
-    (or created directly, e.g. in tests/fixtures), which is exactly the key
-    a single-cluster candidate for that base key would produce."""
-    if row.group_key:
-        return row.group_key
-    base = row.counterparty_iban if row.counterparty_iban else row.merchant_pattern
-    direction = "income" if row.is_income else "expense"
-    return f"{base}|{direction}|0"
 
 
 def detect_recurring_payments(db: Session) -> list[RecurringCandidate]:
@@ -389,19 +389,61 @@ def upsert_recurring_payments(
     rows. A `suggested` row whose group key no longer appears in this run's
     candidates is removed, keeping the suggestion list clean; confirmed and
     dismissed rows are kept regardless (the user's decision persists even if
-    the pattern temporarily drops out of detection)."""
+    the pattern temporarily drops out of detection).
+
+    Rows without a persisted `group_key` (created before clustering
+    existed, or created directly, e.g. in tests) predate multi-cluster
+    detection, so they're matched to a candidate by base key + direction
+    alone rather than by amount: there is at most one such legacy row per
+    (base key, direction), and it stands in for whichever single candidate
+    now occupies that slot, regardless of how much its amount may have
+    drifted since it was first detected."""
     existing_rows = db.query(RecurringPayment).all()
-    by_key = {_row_key(row): row for row in existing_rows}
+    keyed_rows: dict[str, RecurringPayment] = {
+        row.group_key: row for row in existing_rows if row.group_key
+    }
     current_keys = {candidate.group_key for candidate in candidates}
 
-    for key, row in by_key.items():
-        if row.status == "suggested" and key not in current_keys:
+    deleted_ids: set[int] = set()
+    for row in existing_rows:
+        if row.group_key and row.status == "suggested" and row.group_key not in current_keys:
             db.delete(row)
+            deleted_ids.add(row.id)
     db.flush()
+
+    legacy_rows_by_base_direction: dict[tuple[str, str], list[RecurringPayment]] = {}
+    for row in existing_rows:
+        if row.group_key or row.id in deleted_ids:
+            continue
+        base = row.counterparty_iban if row.counterparty_iban else row.merchant_pattern
+        direction = "income" if row.is_income else "expense"
+        legacy_rows_by_base_direction.setdefault((base, direction), []).append(row)
+
+    claimed_legacy_ids: set[int] = set()
+
+    def resolve_row(candidate: RecurringCandidate) -> RecurringPayment | None:
+        row = keyed_rows.get(candidate.group_key)
+        if row is not None:
+            return row
+        base = candidate.counterparty_iban if candidate.counterparty_iban else candidate.merchant_pattern
+        direction = "income" if candidate.is_income else "expense"
+        unclaimed = [
+            r
+            for r in legacy_rows_by_base_direction.get((base, direction), [])
+            if r.id not in claimed_legacy_ids
+        ]
+        # Only match unambiguously: if more than one legacy row shares this
+        # base key/direction (shouldn't happen in practice, since legacy
+        # rows predate multi-cluster detection), don't guess which one this
+        # candidate corresponds to.
+        if len(unclaimed) == 1:
+            claimed_legacy_ids.add(unclaimed[0].id)
+            return unclaimed[0]
+        return None
 
     result: list[RecurringPayment] = []
     for candidate in candidates:
-        row = by_key.get(candidate.group_key)
+        row = resolve_row(candidate)
         if row is not None and row.status != "suggested":
             continue
 
@@ -433,6 +475,12 @@ def upsert_recurring_payments(
             )
 
         result.append(row)
+
+    # Legacy suggested rows not claimed by any candidate this run are stale.
+    for rows in legacy_rows_by_base_direction.values():
+        for row in rows:
+            if row.status == "suggested" and row.id not in claimed_legacy_ids:
+                db.delete(row)
 
     db.flush()
     return result
@@ -466,9 +514,8 @@ def _add_months(base: date, months: int, day: int) -> date:
 
 def next_expected_date(payment: RecurringPayment) -> date | None:
     """The next occurrence date expected after `payment.anchor_date`, in
-    calendar terms (not weekend/holiday-shifted; see
-    `app.services.cashflow_advisor` for the shifted, banking-day version
-    used for display).
+    calendar terms (not weekend/holiday-shifted; see `shift_expected_date`
+    for the shifted, banking-day version used for display and matching).
 
     monthly/yearly step from `expected_day`; four_weekly steps 28 days from
     the anchor. Returns None if the cadence lacks the data needed (should
@@ -480,6 +527,22 @@ def next_expected_date(payment: RecurringPayment) -> date | None:
     if payment.cadence == "yearly" and payment.expected_day is not None:
         return _add_months(payment.anchor_date, 12, payment.expected_day)
     return None
+
+
+def shift_expected_date(d: date, cadence: str, is_income: bool) -> date:
+    """Shift an expected monthly/yearly date onto the nearest actual
+    banking day: income shifts backward (paid early when it would land on
+    a weekend/NL holiday), expenses shift forward (collected the next
+    banking day). four_weekly dates are never shifted; their date is
+    already a fixed step from `anchor_date`, not tied to a calendar day.
+
+    Single source of truth shared by the calendar/advisor
+    (`app.services.cashflow_advisor`) and import-time matching
+    (`match_new_transactions`), so a payment's expected date always lands
+    on the same real-world day everywhere it's used."""
+    if cadence == "four_weekly":
+        return d
+    return shift_backward_to_business_day(d) if is_income else shift_forward_to_business_day(d)
 
 
 def find_salary_payment_id(db: Session) -> int | None:
@@ -574,7 +637,8 @@ def match_new_transactions(db: Session, transactions: Sequence[Transaction]) -> 
     """Match newly-imported transactions against confirmed recurring
     patterns (spec Lifecycle paragraph, two-band ruling 2026-08-28): same
     base group key and direction, date within
-    +/-DATE_MATCH_WINDOW_DAYS of the expected date, amount within
+    +/-DATE_MATCH_WINDOW_DAYS of the shift-aware expected date (via
+    `shift_expected_date`, same as the calendar/advisor use), amount within
     MATCH_WIDE_BAND of expected_amount. A base key can have more than one
     confirmed pattern (e.g. a salary cluster and a claims-reimbursement
     cluster sharing an IBAN); the first confirmed row for that base key
@@ -615,7 +679,10 @@ def match_new_transactions(db: Session, transactions: Sequence[Transaction]) -> 
             expected_date = next_expected_date(candidate_row)
             if expected_date is None:
                 continue
-            if abs((tx.datum - expected_date).days) > DATE_MATCH_WINDOW_DAYS:
+            shifted_expected_date = shift_expected_date(
+                expected_date, candidate_row.cadence, candidate_row.is_income
+            )
+            if abs((tx.datum - shifted_expected_date).days) > DATE_MATCH_WINDOW_DAYS:
                 continue
             if amount_deviates(tx.bedrag, candidate_row.expected_amount, MATCH_WIDE_BAND):
                 continue

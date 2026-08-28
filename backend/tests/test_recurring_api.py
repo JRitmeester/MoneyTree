@@ -272,6 +272,53 @@ class TestImportTimeMatching:
         assert len(occ_resp.json()) == 5
 
 
+class TestShiftAwareMatching:
+    """Controller ruling: match_new_transactions must anchor its
+    +/-DATE_MATCH_WINDOW_DAYS window on the same shift-aware expected date
+    the calendar/advisor use (`shift_expected_date`), not the raw calendar
+    date, since that's the day the payment actually lands."""
+
+    def test_income_matches_on_backward_shifted_date_across_holiday_weekend(self, db: Session):
+        # Easter Sunday 2008-03-23 falls on the 23rd: raw next_expected for
+        # a salary expected on day 23 lands on that Sunday. Income shifts
+        # backward: 23rd Sun -> 22nd Sat -> 21st Fri (Good Friday, an NL
+        # holiday) -> 20th Thu (the actual banking day).
+        payment = RecurringPayment(
+            merchant_pattern="",
+            counterparty_iban="NL06SALARY000000001",
+            name="Salary",
+            expected_amount=3000.0,
+            cadence="monthly",
+            expected_day=23,
+            anchor_date=date(2008, 2, 23),
+            status="confirmed",
+            is_income=True,
+        )
+        db.add(payment)
+        db.flush()
+
+        # Raw expected is 2008-03-23; 2008-03-16 is 7 days before that (
+        # outside the +/-5 day window measured from the raw date) but only
+        # 4 days before the shifted banking day 2008-03-20 (inside the
+        # window measured from the shifted date).
+        tx = make_transaction(
+            db, bedrag=3000.0, naam="Employer", tegenrekening="NL06SALARY000000001",
+            datum=date(2008, 3, 16), volgnummer="shifted1",
+        )
+        db.commit()
+
+        matched = match_new_transactions(db, [tx])
+        db.commit()
+
+        assert matched == 1
+        db.refresh(payment)
+        assert payment.anchor_date == date(2008, 3, 16)
+        occurrences = db.query(RecurringPaymentOccurrence).filter_by(
+            recurring_payment_id=payment.id
+        ).all()
+        assert any(o.transaction_id == tx.id for o in occurrences)
+
+
 class TestNotices:
     def test_amount_changed_notice(self, client, db: Session):
         _seed_monthly_group(db, count=4, amount=-12.99)

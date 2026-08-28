@@ -558,3 +558,45 @@ class TestUpsertRecurringPayments:
         still_there = db.query(RecurringPayment).filter_by(id=confirmed_id).one_or_none()
         assert still_there is not None
         assert still_there.status == "confirmed"
+
+    def test_new_mid_range_cluster_does_not_shift_existing_cluster_keys(self, db: Session):
+        # Controller ruling: group_key uses the cluster's rounded median
+        # amount, not an ordinal index, so a new cluster appearing between
+        # two existing ones can't shift their keys and orphan them.
+        iban = "NL07TWOC0000000001"
+        dates_10 = [date(2025, 1, 10) + timedelta(days=30 * i) for i in range(4)]
+        dates_150 = [date(2025, 1, 20) + timedelta(days=30 * i) for i in range(4)]
+        for d in dates_10:
+            make_transaction(db, bedrag=-10.0, naam="Two", tegenrekening=iban, datum=d)
+        for d in dates_150:
+            make_transaction(db, bedrag=-150.0, naam="Two", tegenrekening=iban, datum=d)
+
+        from app.models import Transaction
+
+        candidates_a = rd.build_candidates(db.query(Transaction).all())
+        rows_a = rd.upsert_recurring_payments(db, candidates_a)
+        db.flush()
+        assert len(rows_a) == 2
+        id_by_amount_a = {row.expected_amount: row.id for row in rows_a}
+        assert set(id_by_amount_a) == {-10.0, -150.0}
+
+        # Run B: a new mid-range cluster (60) appears alongside the
+        # existing two.
+        dates_60 = [date(2025, 1, 5) + timedelta(days=30 * i) for i in range(4)]
+        for d in dates_60:
+            make_transaction(db, bedrag=-60.0, naam="Two", tegenrekening=iban, datum=d)
+
+        candidates_b = rd.build_candidates(db.query(Transaction).all())
+        rows_b = rd.upsert_recurring_payments(db, candidates_b)
+        db.flush()
+
+        assert len(rows_b) == 3
+        id_by_amount_b = {row.expected_amount: row.id for row in rows_b}
+        assert set(id_by_amount_b) == {-10.0, -60.0, -150.0}
+        # The 10 and 150 clusters kept their original row ids; no
+        # duplicate suggested rows were created for them.
+        assert id_by_amount_b[-10.0] == id_by_amount_a[-10.0]
+        assert id_by_amount_b[-150.0] == id_by_amount_a[-150.0]
+
+        all_rows = db.query(RecurringPayment).filter_by(counterparty_iban=iban).all()
+        assert len(all_rows) == 3

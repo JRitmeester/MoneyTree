@@ -21,14 +21,11 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from app.models import RecurringPayment
-from app.services.nl_holidays import (
-    shift_backward_to_business_day,
-    shift_forward_to_business_day,
-)
 from app.services.recurring_detector import (
     compute_notices,
     find_salary_payment_id,
     next_expected_date,
+    shift_expected_date,
 )
 
 DEFAULT_BUFFER_PCT = 10.0
@@ -103,17 +100,6 @@ def _months_spanning(start: date, end: date) -> list[tuple[int, int]]:
             m = 1
             y += 1
     return months
-
-
-def shift_expected_date(d: date, cadence: str, is_income: bool) -> date:
-    """Shift an expected monthly/yearly date onto the nearest actual
-    banking day: income shifts backward (paid early when it would land on
-    a weekend/NL holiday), expenses shift forward (collected the next
-    banking day). four_weekly dates are never shifted; their date is
-    already a fixed step from `anchor_date`, not tied to a calendar day."""
-    if cadence == "four_weekly":
-        return d
-    return shift_backward_to_business_day(d) if is_income else shift_forward_to_business_day(d)
 
 
 def _monthly_date_in_month(
