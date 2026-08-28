@@ -8,6 +8,16 @@
 	let error = $state('');
 	let loading = $state(false);
 
+	// Brand-new instance with no credentials at all: run first-time setup.
+	$effect(() => {
+		fetch('/api/auth/setup-status')
+			.then((res) => res.json())
+			.then((body) => {
+				if (body.needs_setup) goto('/setup');
+			})
+			.catch(() => {});
+	});
+
 	async function login() {
 		loading = true;
 		error = '';

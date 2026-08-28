@@ -38,3 +38,6 @@ sync-to-nas.sh
 /*.pdf
 /*.csv
 /*.xml
+
+# Auto-generated auth secret
+data/jwt_secret
