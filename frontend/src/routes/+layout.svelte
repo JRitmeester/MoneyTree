@@ -15,6 +15,7 @@
 		{
 			label: 'Money',
 			links: [
+				{ href: '/import', label: 'Import' },
 				{ href: '/transactions', label: 'Transactions' },
 				{ href: '/uncategorized', label: 'Uncategorized' },
 				{ href: '/recurring', label: 'Recurring' },
@@ -26,8 +27,7 @@
 			label: 'Records',
 			links: [
 				{ href: '/receipts', label: 'Receipts' },
-				{ href: '/categories', label: 'Categories' },
-				{ href: '/import', label: 'Import' }
+				{ href: '/categories', label: 'Categories' }
 			]
 		}
 	];

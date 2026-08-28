@@ -135,7 +135,7 @@
 		</div>
 	{:else}
 		<div class="empty-state">
-			<p>No data for {year} yet.</p>
+			<p>No data for {year} yet. <a href="/import">Import transactions</a> to get started.</p>
 			<a href="/import">Import transactions</a> to see your year in review.
 		</div>
 	{/if}

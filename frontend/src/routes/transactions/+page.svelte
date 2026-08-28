@@ -2,7 +2,7 @@
 	import { page as pageStore } from '$app/state';
 	import {
 		getTransactions, getBudgets, setTransactionFlags, bulkSetFlags,
-		getIncidentalLabels, createIncidentalLabel,
+		getIncidentalLabels, createIncidentalLabel, getOwnAccounts,
 		formatEuro, formatDate,
 		type Transaction, type BudgetSummary, type IncidentalLabelSummary, type TransactionFlags
 	} from '$lib/api';
@@ -119,6 +119,13 @@ import Loading from '$lib/components/Loading.svelte';
 		page = 1;
 		load();
 	}
+
+	let hasOwnAccounts = $state(true);
+	$effect(() => {
+		getOwnAccounts()
+			.then((accounts) => (hasOwnAccounts = accounts.length > 0))
+			.catch(() => {});
+	});
 
 	$effect(() => {
 		load();
@@ -273,6 +280,21 @@ import Loading from '$lib/components/Loading.svelte';
 <div class="info">
 	{total} transactions found
 </div>
+
+{#if !hasOwnAccounts && total > 0}
+	<div class="accounts-nudge">
+		Transfers between your own accounts currently count as income and
+		spending. <a href="/settings/accounts">Register your accounts</a> so
+		they are excluded automatically.
+	</div>
+{/if}
+
+{#if total > 0 && selectedIds.length === 0}
+	<p class="bulk-hint">
+		Tip: select rows with the checkboxes to mark transfers or incidental
+		spending in bulk.
+	</p>
+{/if}
 
 {#if error}
 	<ErrorBanner message={error} />
@@ -651,5 +673,24 @@ import Loading from '$lib/components/Loading.svelte';
 			min-height: 44px;
 			margin: -0.5rem -0.5rem -0.5rem 0;
 		}
+	}
+
+	.accounts-nudge {
+		background: var(--color-warn-bg-amber);
+		border: 1px solid #facc15;
+		border-left: 4px solid var(--color-amber);
+		border-radius: var(--radius-sm);
+		padding: 0.6rem 0.9rem;
+		font-size: 0.85rem;
+		margin-bottom: 0.75rem;
+	}
+	.accounts-nudge a {
+		color: var(--color-accent);
+		font-weight: 600;
+	}
+	.bulk-hint {
+		font-size: 0.8rem;
+		color: var(--color-text-faint);
+		margin: 0 0 0.5rem;
 	}
 </style>

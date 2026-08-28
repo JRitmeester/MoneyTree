@@ -266,6 +266,7 @@
 	{:else if groups.length === 0}
 		<div class="empty">
 			<p>All transactions are categorized.</p>
+			<a href="/recurring" class="next-step">Next: review detected recurring payments &rarr;</a>
 			<a href="/" class="back">&larr; Back to dashboard</a>
 		</div>
 	{:else}
@@ -745,5 +746,12 @@
 			padding-top: 0.5rem;
 			padding-bottom: 0.5rem;
 		}
+	}
+
+	.next-step {
+		display: block;
+		margin-bottom: 0.75rem;
+		color: var(--color-accent);
+		font-weight: 600;
 	}
 </style>

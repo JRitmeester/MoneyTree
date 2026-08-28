@@ -225,6 +225,13 @@
 		{/snippet}
 	</PageHeader>
 
+<p class="page-explainer">
+	MoneyTree detects repeating payments in your imported history. Confirming
+	them (your salary first) unlocks pay-period filters, the cash-flow
+	planner, and self-updating budget lines; give each one a category so the
+	budget can use it.
+</p>
+
 	{#if error}
 		<ErrorBanner message={error} />
 	{/if}
@@ -591,5 +598,12 @@
 	}
 	@media (max-width: 480px) {
 		.badge.no-category { min-height: 44px; }
+	}
+
+	.page-explainer {
+		font-size: 0.85rem;
+		color: var(--color-text-muted);
+		margin: -0.5rem 0 1rem;
+		max-width: 46rem;
 	}
 </style>

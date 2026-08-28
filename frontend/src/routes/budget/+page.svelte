@@ -706,6 +706,7 @@
 			<div class="onboarding-card">
 				<h2>Create your first budget period</h2>
 				<p>Define a date range for your budget period (e.g. your salary cycle). You can always add more periods later.</p>
+				<p class="muted">Fixed bills and savings goals fill themselves from your confirmed recurring payments and allocation buckets; you only type amounts for flexible categories.</p>
 				<button class="btn primary large" onclick={openWizard}>Create first period</button>
 			</div>
 		</div>

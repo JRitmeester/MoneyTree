@@ -149,6 +149,9 @@
 				Categorize {result.uncategorized} transaction{result.uncategorized === 1 ? '' : 's'} &rarr;
 			</a>
 		{/if}
+		<a href="/recurring" class="link categorize-link">
+			Review detected recurring payments &rarr;
+		</a>
 
 		{#if pendingMatches.length > 0}
 			<h3>Confirm Matches</h3>
