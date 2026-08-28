@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..config import UPLOADS_DIR
 from ..models import (
     Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping,
-    ImportedExport, IncidentalLabel, LineItem, OwnAccount, Receipt, SyncEvent,
+    AllocationBucket, ImportedExport, IncidentalLabel, LineItem, OwnAccount, Receipt, SyncEvent,
     Transaction, TransactionOffset,
 )
 from ..sync_schemas import (
@@ -266,6 +266,13 @@ def preview_import(db: Session, export: ExportFile) -> ImportPreview:
                 code="own_account_conflict", severity="soft",
                 message=f"Own account with IBAN '{ea.iban}' exists; destination values kept.",
             ))
+
+    existing_bucket_names = {
+        b.name for b in db.execute(select(AllocationBucket)).scalars().all()
+    }
+    for eb in export.allocation_buckets:
+        if eb.name not in existing_bucket_names:
+            preview.will_add_allocation_buckets += 1
 
     existing_tx_by_hash = {
         t.import_hash: t
@@ -751,6 +758,42 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
         )
         db.add(new_account)
         existing_accounts_by_iban[ea.iban] = new_account
+
+    # 5d. Allocation buckets -- upsert by name; imported positions are
+    # relative order only: file order first, then local-only buckets, all
+    # rewritten 0..n-1 (spec: salary allocation design, "Sync").
+    if export.allocation_buckets:
+        existing_buckets_by_name = {
+            b.name: b for b in db.execute(select(AllocationBucket)).scalars().all()
+        }
+        imported_names: list[str] = []
+        for eb in export.allocation_buckets:
+            ref_cat = _lookup_category_ref(eb.category_path, export.format_version, cat_idx, db)
+            bucket = existing_buckets_by_name.get(eb.name)
+            if bucket is None:
+                bucket = AllocationBucket(
+                    name=eb.name, rule_type=eb.rule_type, value=eb.value,
+                    position=0, is_active=eb.is_active,
+                    category_id=ref_cat.id if ref_cat else None,
+                )
+                db.add(bucket)
+                existing_buckets_by_name[eb.name] = bucket
+            else:
+                bucket.rule_type = eb.rule_type
+                bucket.value = eb.value
+                bucket.is_active = eb.is_active
+                bucket.category_id = ref_cat.id if ref_cat else None
+            imported_names.append(eb.name)
+        db.flush()
+        local_only = [
+            b for b in sorted(
+                existing_buckets_by_name.values(), key=lambda b: (b.position, b.id or 0)
+            )
+            if b.name not in set(imported_names)
+        ]
+        ordered = [existing_buckets_by_name[n] for n in imported_names] + local_only
+        for i, bucket in enumerate(ordered):
+            bucket.position = i
 
     # 6. Transactions
     existing_tx = {

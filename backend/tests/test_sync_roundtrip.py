@@ -85,3 +85,73 @@ def test_idempotent_double_import(db):
     assert len(dest.execute(select(Budget)).scalars().all()) == 1
     assert len(dest.execute(select(BudgetLine)).scalars().all()) == 1
     assert len(dest.execute(select(Transaction)).scalars().all()) == 1
+
+
+def test_allocation_buckets_roundtrip_and_upsert(db):
+    """Buckets export with category paths and import by name-upsert with
+    normalized positions (spec: salary allocation design, "Sync")."""
+    from app.models import AllocationBucket
+
+    parent = make_category(db, name="Sparen")
+    child = Category(name="Lange termijn", parent_id=parent.id, category_type="expense")
+    db.add(child)
+    db.flush()
+    db.add_all([
+        AllocationBucket(name="Long-term", rule_type="percent", value=50.0,
+                         position=0, category_id=child.id),
+        AllocationBucket(name="Investing", rule_type="fixed", value=300.0,
+                         position=1, is_active=False),
+    ])
+    db.commit()
+
+    export = build_export(db, since=None)
+    assert [b.name for b in export.allocation_buckets] == ["Long-term", "Investing"]
+    assert export.allocation_buckets[0].category_path == "Sparen > Lange termijn"
+    assert export.allocation_buckets[1].category_path is None
+    assert export.allocation_buckets[1].is_active is False
+
+    # Fresh destination: everything created, ancestors resolved by path.
+    dest = _fresh_session()
+    commit_import(dest, export, update_duplicates=False)
+    rows = dest.execute(
+        select(AllocationBucket).order_by(AllocationBucket.position)
+    ).scalars().all()
+    assert [(b.name, b.position) for b in rows] == [("Long-term", 0), ("Investing", 1)]
+    linked = dest.get(Category, rows[0].category_id)
+    assert linked.name == "Lange termijn"
+    assert linked.parent.name == "Sparen"
+    assert rows[1].is_active is False
+
+    # Destination with an existing same-name bucket and a local-only one:
+    # same-name updated, local-only kept, positions normalized 0..n-1 with
+    # the file's buckets first.
+    dest2 = _fresh_session()
+    dest2.add_all([
+        AllocationBucket(name="Long-term", rule_type="fixed", value=100.0, position=0),
+        AllocationBucket(name="Local only", rule_type="fixed", value=50.0, position=1),
+    ])
+    dest2.commit()
+    commit_import(dest2, export, update_duplicates=False)
+    rows = dest2.execute(
+        select(AllocationBucket).order_by(AllocationBucket.position)
+    ).scalars().all()
+    assert [b.name for b in rows] == ["Long-term", "Investing", "Local only"]
+    assert [b.position for b in rows] == [0, 1, 2]
+    updated = rows[0]
+    assert updated.rule_type == "percent"
+    assert updated.value == 50.0
+    assert updated.category_id is not None
+
+
+def test_import_without_bucket_section_leaves_buckets_alone(db):
+    from app.models import AllocationBucket
+
+    export = build_export(db, since=None)
+    export_no_buckets = export.model_copy(update={"allocation_buckets": []})
+
+    dest = _fresh_session()
+    dest.add(AllocationBucket(name="Keep me", rule_type="fixed", value=10.0, position=0))
+    dest.commit()
+    commit_import(dest, export_no_buckets, update_duplicates=False)
+    rows = dest.execute(select(AllocationBucket)).scalars().all()
+    assert [b.name for b in rows] == ["Keep me"]

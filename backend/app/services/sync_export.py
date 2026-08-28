@@ -12,13 +12,13 @@ from pathlib import Path
 from ..config import UPLOADS_DIR
 from ..models import (
     Budget, BudgetLine, BudgetTemplate, Category, CategoryMapping,
-    IncidentalLabel, LineItem, OwnAccount, Receipt, SyncEvent, Transaction,
+    AllocationBucket, IncidentalLabel, LineItem, OwnAccount, Receipt, SyncEvent, Transaction,
     TransactionOffset,
 )
 from .category_paths import full_category_path
 from ..sync_schemas import (
     ExportBudget, ExportBudgetLine, ExportBudgetTemplate, ExportCategory,
-    ExportCategoryMapping, ExportFile, ExportLineItem, ExportOwnAccount,
+    ExportAllocationBucket, ExportCategoryMapping, ExportFile, ExportLineItem, ExportOwnAccount,
     ExportReceipt, ExportSyncEvent, ExportTransaction, ExportTransactionOffset,
 )
 
@@ -134,6 +134,25 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
         for a in own_accounts
     ]
 
+    buckets = db.execute(
+        select(AllocationBucket).order_by(AllocationBucket.position, AllocationBucket.id)
+    ).scalars().all()
+    export_allocation_buckets = [
+        ExportAllocationBucket(
+            name=b.name,
+            rule_type=b.rule_type,
+            value=b.value,
+            position=b.position,
+            is_active=b.is_active,
+            category_path=(
+                full_category_path(b.category_id, cat_by_id)
+                if b.category_id is not None
+                else None
+            ),
+        )
+        for b in buckets
+    ]
+
     tx_ids = set(tx_by_id.keys())
     offsets = db.execute(select(TransactionOffset)).scalars().all()
     export_offsets = [
@@ -223,4 +242,5 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
         sync_events=export_events,
         incidental_labels=export_incidental_labels,
         own_accounts=export_own_accounts,
+        allocation_buckets=export_allocation_buckets,
     )

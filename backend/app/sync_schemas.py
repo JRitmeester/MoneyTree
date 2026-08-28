@@ -84,6 +84,15 @@ class ExportOwnAccount(BaseModel):
     starting_balance_date: Optional[DateType] = None
 
 
+class ExportAllocationBucket(BaseModel):
+    name: str
+    rule_type: str
+    value: float
+    position: int
+    is_active: bool = True
+    category_path: Optional[str] = None
+
+
 class ExportLineItem(BaseModel):
     description: str
     amount: float
@@ -141,6 +150,7 @@ class ExportFile(BaseModel):
     sync_events: list[ExportSyncEvent] = Field(default_factory=list)
     incidental_labels: list[str] = Field(default_factory=list)
     own_accounts: list[ExportOwnAccount] = Field(default_factory=list)
+    allocation_buckets: list[ExportAllocationBucket] = Field(default_factory=list)
 
 
 class ImportConflict(BaseModel):
@@ -191,6 +201,7 @@ class ImportPreview(BaseModel):
     will_skip_receipts: int = 0
     will_add_incidental_labels: int = 0
     will_add_own_accounts: int = 0
+    will_add_allocation_buckets: int = 0
     add_categories: list[str] = Field(default_factory=list)
     add_transactions: list[TransactionPreview] = Field(default_factory=list)
     skip_transactions: list[TransactionPreview] = Field(default_factory=list)
