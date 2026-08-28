@@ -543,4 +543,15 @@
 		display: flex;
 		gap: 0.5rem;
 	}
+
+	@media (max-width: 480px) {
+		.confirm-button, .edit-button, .save-button,
+		.dismiss-button, .cancel-button {
+			min-height: 44px;
+			padding: 0.5rem 0.9rem;
+		}
+		.row-actions {
+			flex-wrap: wrap;
+		}
+	}
 </style>

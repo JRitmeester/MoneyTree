@@ -79,28 +79,30 @@
 			{#if review.by_root_category.length === 0}
 				<p class="muted">No expense data for {review.year}.</p>
 			{:else}
-				<table class="year-table">
-					<thead>
-						<tr>
-							<th>Category</th>
-							<th class="right">{review.year}</th>
-							<th class="right">{review.previous_year.year}</th>
-							<th class="right">Delta</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each review.by_root_category as row (row.category_id ?? 'uncategorized')}
+				<div class="table-wrap">
+					<table class="year-table">
+						<thead>
 							<tr>
-								<td>{row.name}</td>
-								<td class="right">{formatEuro(row.total)}</td>
-								<td class="right">{formatEuro(row.previous_total)}</td>
-								<td class="right" class:positive={row.delta <= 0} class:negative={row.delta > 0}>
-									{row.delta >= 0 ? '+' : ''}{formatEuro(row.delta)}
-								</td>
+								<th>Category</th>
+								<th class="right">{review.year}</th>
+								<th class="right">{review.previous_year.year}</th>
+								<th class="right">Delta</th>
 							</tr>
-						{/each}
-					</tbody>
-				</table>
+						</thead>
+						<tbody>
+							{#each review.by_root_category as row (row.category_id ?? 'uncategorized')}
+								<tr>
+									<td>{row.name}</td>
+									<td class="right">{formatEuro(row.total)}</td>
+									<td class="right">{formatEuro(row.previous_total)}</td>
+									<td class="right" class:positive={row.delta <= 0} class:negative={row.delta > 0}>
+										{row.delta >= 0 ? '+' : ''}{formatEuro(row.delta)}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
 			{/if}
 		</div>
 
@@ -109,24 +111,26 @@
 			{#if amortized.length === 0}
 				<p class="muted">No confirmed yearly recurring payments yet.</p>
 			{:else}
-				<table class="amortized-table">
-					<thead>
-						<tr>
-							<th>Name</th>
-							<th class="right">Per year</th>
-							<th class="right">Per month equivalent</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each amortized as item (item.id)}
+				<div class="table-wrap">
+					<table class="amortized-table">
+						<thead>
 							<tr>
-								<td>{item.name}</td>
-								<td class="right">{formatEuro(item.amount)}</td>
-								<td class="right">{formatEuro(item.monthly_equivalent)}</td>
+								<th>Name</th>
+								<th class="right">Per year</th>
+								<th class="right">Per month equivalent</th>
 							</tr>
-						{/each}
-					</tbody>
-				</table>
+						</thead>
+						<tbody>
+							{#each amortized as item (item.id)}
+								<tr>
+									<td>{item.name}</td>
+									<td class="right">{formatEuro(item.amount)}</td>
+									<td class="right">{formatEuro(item.monthly_equivalent)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
 			{/if}
 		</div>
 	{:else}
@@ -143,6 +147,9 @@
 	.muted { color: var(--color-text-faint); font-style: italic; }
 .empty-state { text-align: center; padding: 3rem; color: var(--color-text-muted); }
 
+	.table-wrap {
+		overflow-x: auto;
+	}
 	.section {
 		background: var(--color-card-bg);
 		padding: 1.5rem;

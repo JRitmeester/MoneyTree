@@ -1773,4 +1773,10 @@
 		}
 		.bar-col { display: none; }
 	}
+	@media (max-width: 480px) {
+		.actual-toggle {
+			padding: 0.6rem 0;
+			margin: -0.6rem 0;
+		}
+	}
 </style>

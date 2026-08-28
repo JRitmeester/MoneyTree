@@ -380,6 +380,7 @@
 						</div>
 					</div>
 
+					<div class="table-wrap">
 					<table>
 						<thead>
 							<tr>
@@ -408,6 +409,7 @@
 							{/each}
 						</tbody>
 					</table>
+					</div>
 				</div>
 			{/each}
 		</div>
@@ -442,6 +444,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+		flex-wrap: wrap;
 		gap: 1rem;
 		padding: 0.75rem 1rem;
 		margin-bottom: 1rem;
@@ -720,4 +723,27 @@
 	}
 
 	.negative { color: var(--color-text); }
+
+	.table-wrap {
+		overflow-x: auto;
+	}
+
+	@media (max-width: 480px) {
+		.description {
+			display: none;
+		}
+		.check-col input,
+		.map-checkbox input {
+			width: 20px;
+			height: 20px;
+		}
+		.check-col {
+			width: 44px;
+		}
+		th,
+		td {
+			padding-top: 0.5rem;
+			padding-bottom: 0.5rem;
+		}
+	}
 </style>

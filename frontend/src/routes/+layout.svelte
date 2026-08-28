@@ -140,4 +140,34 @@
 		margin: 0 auto;
 		padding: 1.5rem;
 	}
+
+	/* Mobile: nav becomes a horizontally scrollable pill row. Group labels
+	   were never rendered (group.label is used only as a key), so this is
+	   just about letting the links scroll instead of wrapping. */
+	@media (max-width: 480px) {
+		nav {
+			padding: 0.6rem 0.75rem;
+			gap: 0.75rem;
+		}
+		.brand {
+			font-size: 1.05rem;
+		}
+		.groups {
+			overflow-x: auto;
+			-webkit-overflow-scrolling: touch;
+			gap: 1.1rem;
+			flex: 1 1 auto;
+			min-width: 0;
+		}
+		.group {
+			flex-shrink: 0;
+		}
+		.groups a,
+		.settings-link {
+			white-space: nowrap;
+			/* Enlarge tap target without affecting desktop layout or link spacing. */
+			padding: 0.75rem 0.1rem;
+			margin: -0.5rem 0;
+		}
+	}
 </style>

@@ -392,6 +392,11 @@
 	@media (max-width: 768px) {
 		.sections { grid-template-columns: 1fr; }
 	}
+	@media (max-width: 480px) {
+		/* auto-fit already stacks these, but shrink the min so two narrow
+		   cards can still sit side by side instead of overflowing. */
+		.summary-cards { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+	}
 
 	.section {
 		background: var(--color-card-bg);

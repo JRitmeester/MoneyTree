@@ -610,4 +610,46 @@ import Loading from '$lib/components/Loading.svelte';
 		color: var(--color-text-muted);
 		margin-left: 0.5rem;
 	}
+
+	@media (max-width: 480px) {
+		/* Receipt column adds little value on a narrow screen; drop it and
+		   tighten the date column so merchant/category/amount stay legible. */
+		.receipt-col {
+			display: none;
+		}
+		.date {
+			font-size: 0.8rem;
+		}
+		th,
+		td {
+			padding: 0.5rem 0.5rem;
+		}
+		.bulk-bar {
+			padding: 0.6rem 0.75rem;
+			gap: 0.6rem;
+		}
+		.bulk-btn,
+		.bulk-label select,
+		.bulk-label input {
+			min-height: 44px;
+		}
+		/* Checkboxes: native controls don't support ::before/::after, so grow
+		   the box itself and widen the cell's hit padding instead. */
+		.select-col input[type='checkbox'] {
+			width: 20px;
+			height: 20px;
+		}
+		.select-col {
+			width: 44px;
+			padding: 0.5rem 0.25rem;
+		}
+		.flag-toggle {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			min-width: 44px;
+			min-height: 44px;
+			margin: -0.5rem -0.5rem -0.5rem 0;
+		}
+	}
 </style>

@@ -209,6 +209,29 @@
 					{/each}
 				</div>
 			{/each}
+
+			<!-- Mobile: the 7-column grid becomes a vertical agenda list of days
+			     that actually have items. Toggled purely via media query. -->
+			<div class="agenda-list">
+				{#if calendar && calendar.days.some((d) => d.items.length > 0)}
+					{#each calendar.days.filter((d) => d.items.length > 0) as day (day.date)}
+						<div class="agenda-day" class:salary-day={day.items.some((i) => i.is_salary)}>
+							<div class="agenda-date">
+								{new Date(day.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
+							</div>
+							<div class="agenda-items">
+								{#each day.items as item}
+									<div class="day-item" class:income={item.is_income}>
+										{item.name} {formatEuro(item.amount)}
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/each}
+				{:else}
+					<p class="muted">No cash flow items this month.</p>
+				{/if}
+			</div>
 		</div>
 	{/if}
 </div>
@@ -341,5 +364,55 @@
 	}
 	.day-item.income {
 		color: #15803d;
+	}
+
+	.agenda-list {
+		display: none;
+	}
+	.muted {
+		color: var(--color-text-muted);
+	}
+
+	@media (max-width: 480px) {
+		/* Swap the 7-column week grid for a vertical agenda list; much easier
+		   to read and tap on a narrow screen. */
+		.weekday-row,
+		.week-row {
+			display: none;
+		}
+		.agenda-list {
+			display: flex;
+			flex-direction: column;
+			gap: 0.5rem;
+			margin-top: 1rem;
+		}
+		.agenda-day {
+			border: 1px solid #eee;
+			border-radius: var(--radius-sm);
+			padding: 0.6rem 0.75rem;
+		}
+		.agenda-day.salary-day {
+			background: #dcfce7;
+			border-color: #86efac;
+		}
+		.agenda-date {
+			font-weight: 600;
+			color: #444;
+			font-size: 0.85rem;
+			margin-bottom: 0.25rem;
+		}
+		.agenda-items {
+			display: flex;
+			flex-direction: column;
+			gap: 0.15rem;
+			font-size: 0.85rem;
+		}
+		.buffer-input-row input {
+			min-height: 44px;
+		}
+		.nav-button {
+			min-width: 44px;
+			min-height: 44px;
+		}
 	}
 </style>
