@@ -59,6 +59,7 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
             budget_start_date=budget_by_id[l.budget_id].start_date,
             category_name=full_category_path(l.category_id, cat_by_id),
             amount=l.amount,
+            source=l.source,
         )
         for l in lines
     ]

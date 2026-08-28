@@ -155,3 +155,31 @@ def test_import_without_bucket_section_leaves_buckets_alone(db):
     commit_import(dest, export_no_buckets, update_duplicates=False)
     rows = dest.execute(select(AllocationBucket)).scalars().all()
     assert [b.name for b in rows] == ["Keep me"]
+
+
+def test_budget_line_source_roundtrips(db):
+    """Derived-line source survives export/import; legacy files default to
+    manual (spec: derived budget lines design, "Sync")."""
+    cat = make_category(db, name="Huur")
+    budget = Budget(start_date=date(2026, 8, 1), end_date=date(2026, 9, 1))
+    db.add(budget)
+    db.flush()
+    db.add(BudgetLine(budget_id=budget.id, category_id=cat.id, amount=1233.0, source="recurring"))
+    db.commit()
+
+    export = build_export(db, since=None)
+    assert export.budget_lines[0].source == "recurring"
+
+    dest = _fresh_session()
+    commit_import(dest, export, update_duplicates=False)
+    line = dest.execute(select(BudgetLine)).scalars().one()
+    assert line.source == "recurring"
+    assert line.amount == 1233.0
+
+    # Legacy file: strip the field the way an old exporter would.
+    legacy = export.model_copy(update={
+        "budget_lines": [l.model_copy(update={"source": "manual"}) for l in export.budget_lines]
+    })
+    dest2 = _fresh_session()
+    commit_import(dest2, legacy, update_duplicates=False)
+    assert dest2.execute(select(BudgetLine)).scalars().one().source == "manual"

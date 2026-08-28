@@ -717,9 +717,12 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
             continue
         existing = existing_lines.get((budget.id, cat.id))
         if existing is None:
-            db.add(BudgetLine(budget_id=budget.id, category_id=cat.id, amount=el.amount))
+            db.add(BudgetLine(
+                budget_id=budget.id, category_id=cat.id, amount=el.amount, source=el.source,
+            ))
         else:
             existing.amount = el.amount
+            existing.source = el.source
 
     # 5. Budget templates -- NAS-wins on conflict (S3)
     existing_template_cat_ids = {

@@ -38,6 +38,7 @@ class ExportBudgetLine(BaseModel):
     budget_start_date: date
     category_name: str
     amount: float
+    source: str = "manual"
 
 
 class ExportBudgetTemplate(BaseModel):
