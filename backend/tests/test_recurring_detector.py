@@ -600,3 +600,189 @@ class TestUpsertRecurringPayments:
 
         all_rows = db.query(RecurringPayment).filter_by(counterparty_iban=iban).all()
         assert len(all_rows) == 3
+
+    def test_legacy_confirmed_row_reconciled_with_v2_candidate(self, db: Session):
+        # A confirmed row created before amount-clustering existed carries
+        # an empty (legacy) group_key, and already has occurrences recorded
+        # for the same transactions v2 detection now clusters into a
+        # candidate with a new-format group_key.
+        iban = "NL01ALLI0000000001"
+        dates = [date(2025, 1, 15), date(2025, 2, 15), date(2025, 3, 15)]
+        txs = [
+            make_transaction(db, bedrag=-50.0, naam="Allianz", tegenrekening=iban, datum=d)
+            for d in dates
+        ]
+        confirmed = RecurringPayment(
+            group_key="",
+            merchant_pattern="",
+            counterparty_iban=iban,
+            name="Allianz",
+            expected_amount=-50.0,
+            cadence="monthly",
+            expected_day=15,
+            anchor_date=dates[-1],
+            status="confirmed",
+            is_income=False,
+        )
+        db.add(confirmed)
+        db.flush()
+        for tx in txs:
+            db.add(
+                RecurringPaymentOccurrence(
+                    recurring_payment_id=confirmed.id,
+                    transaction_id=tx.id,
+                    amount=tx.bedrag,
+                    date=tx.datum,
+                )
+            )
+        db.flush()
+        confirmed_id = confirmed.id
+
+        from app.models import Transaction
+
+        candidates = rd.build_candidates(db.query(Transaction).all())
+        rows = rd.upsert_recurring_payments(db, candidates)
+        db.flush()
+
+        # No crash, and no new suggested row for the same stream.
+        assert rows == []
+        all_rows = db.query(RecurringPayment).filter_by(counterparty_iban=iban).all()
+        assert len(all_rows) == 1
+
+        db.refresh(confirmed)
+        assert confirmed.id == confirmed_id
+        assert confirmed.status == "confirmed"
+        assert confirmed.group_key == candidates[0].group_key
+        occurrences = db.query(RecurringPaymentOccurrence).filter_by(
+            recurring_payment_id=confirmed_id
+        ).all()
+        assert {o.transaction_id for o in occurrences} == {tx.id for tx in txs}
+
+    def test_partial_overlap_below_threshold_creates_candidate_with_unclaimed_occurrences(
+        self, db: Session
+    ):
+        # A confirmed row only owns 1 of 4 occurrence transactions the new
+        # candidate detects (25% overlap, below the 50% adoption
+        # threshold): the candidate is still created, minus the claimed tx.
+        iban = "NL01PART0000000001"
+        dates = [
+            date(2025, 1, 15),
+            date(2025, 2, 15),
+            date(2025, 3, 15),
+            date(2025, 4, 15),
+        ]
+        txs = [
+            make_transaction(db, bedrag=-20.0, naam="Partial", tegenrekening=iban, datum=d)
+            for d in dates
+        ]
+        confirmed = RecurringPayment(
+            group_key="some-other-key",
+            merchant_pattern="",
+            counterparty_iban=iban,
+            name="Partial Other",
+            expected_amount=-20.0,
+            cadence="monthly",
+            expected_day=15,
+            anchor_date=dates[0],
+            status="confirmed",
+            is_income=False,
+        )
+        db.add(confirmed)
+        db.flush()
+        db.add(
+            RecurringPaymentOccurrence(
+                recurring_payment_id=confirmed.id,
+                transaction_id=txs[0].id,
+                amount=txs[0].bedrag,
+                date=txs[0].datum,
+            )
+        )
+        db.flush()
+
+        from app.models import Transaction
+
+        candidates = rd.build_candidates(db.query(Transaction).all())
+        rows = rd.upsert_recurring_payments(db, candidates)
+        db.flush()
+
+        assert len(rows) == 1
+        occurrences = db.query(RecurringPaymentOccurrence).filter_by(
+            recurring_payment_id=rows[0].id
+        ).all()
+        assert {o.transaction_id for o in occurrences} == {tx.id for tx in txs[1:]}
+
+        db.refresh(confirmed)
+        assert confirmed.group_key == "some-other-key"
+
+    def test_majority_overlap_across_two_confirmed_payments_skips_without_adoption(
+        self, db: Session
+    ):
+        # Overlap >= 50% but split across two different confirmed
+        # payments (no single owner): the candidate is dropped without
+        # crashing and without adopting either row's group_key.
+        iban = "NL01SPLIT000000001"
+        dates = [
+            date(2025, 1, 15),
+            date(2025, 2, 15),
+            date(2025, 3, 15),
+            date(2025, 4, 15),
+        ]
+        txs = [
+            make_transaction(db, bedrag=-40.0, naam="Split", tegenrekening=iban, datum=d)
+            for d in dates
+        ]
+        confirmed_a = RecurringPayment(
+            group_key="split-a",
+            merchant_pattern="",
+            counterparty_iban=iban,
+            name="Split A",
+            expected_amount=-40.0,
+            cadence="monthly",
+            expected_day=15,
+            anchor_date=dates[0],
+            status="confirmed",
+            is_income=False,
+        )
+        confirmed_b = RecurringPayment(
+            group_key="split-b",
+            merchant_pattern="",
+            counterparty_iban=iban,
+            name="Split B",
+            expected_amount=-40.0,
+            cadence="monthly",
+            expected_day=15,
+            anchor_date=dates[1],
+            status="confirmed",
+            is_income=False,
+        )
+        db.add_all([confirmed_a, confirmed_b])
+        db.flush()
+        db.add(
+            RecurringPaymentOccurrence(
+                recurring_payment_id=confirmed_a.id,
+                transaction_id=txs[0].id,
+                amount=txs[0].bedrag,
+                date=txs[0].datum,
+            )
+        )
+        db.add(
+            RecurringPaymentOccurrence(
+                recurring_payment_id=confirmed_b.id,
+                transaction_id=txs[1].id,
+                amount=txs[1].bedrag,
+                date=txs[1].datum,
+            )
+        )
+        db.flush()
+
+        from app.models import Transaction
+
+        candidates = rd.build_candidates(db.query(Transaction).all())
+        rows = rd.upsert_recurring_payments(db, candidates)
+        db.flush()
+
+        assert rows == []
+        db.refresh(confirmed_a)
+        db.refresh(confirmed_b)
+        assert confirmed_a.group_key == "split-a"
+        assert confirmed_b.group_key == "split-b"

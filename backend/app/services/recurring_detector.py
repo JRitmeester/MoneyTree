@@ -15,7 +15,7 @@ never touches `confirmed` or `dismissed` rows.
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from typing import Iterable, Sequence
 
@@ -103,6 +103,13 @@ MATCH_WIDE_BAND = 0.5
 # median instead of continuing to notice indefinitely (price-increase
 # acceptance).
 CONSECUTIVE_SNAP_COUNT = 3
+
+# v2/pre-v2 reconciliation (spec-owner ruling, 2026-08-27): a v2 candidate
+# whose occurrence transaction_ids overlap this much or more with a single
+# already-confirmed/dismissed payment's occurrences is the same underlying
+# payment stream re-detected under a new group_key, not a new pattern. See
+# `_reconcile_with_confirmed_streams`.
+OVERLAP_ADOPTION_FRACTION = 0.5
 
 
 @dataclass(frozen=True)
@@ -380,6 +387,48 @@ def detect_recurring_payments(db: Session) -> list[RecurringCandidate]:
     return build_candidates(transactions)
 
 
+def _reconcile_with_confirmed_streams(
+    candidate: RecurringCandidate,
+    owner_by_tx_id: dict[int, tuple[int, str]],
+    payments_by_id: dict[int, RecurringPayment],
+) -> RecurringCandidate | None:
+    """Reconcile a v2 candidate against occurrences already owned by
+    confirmed/dismissed payments (pre-v2 rows may carry a legacy/empty
+    group_key that the key-based matching in `upsert_recurring_payments`
+    does not recognize as the same stream).
+
+    `owner_by_tx_id` only contains occurrences belonging to non-suggested
+    (confirmed/dismissed) rows, so a candidate refreshing its own prior
+    suggestion never collides with itself here.
+
+    Returns None if the candidate should be skipped entirely (either
+    because it was adopted into an existing confirmed/dismissed row, or
+    because too few unclaimed occurrences remain to still qualify).
+    Otherwise returns the candidate, with any already-claimed occurrences
+    dropped.
+    """
+    tx_ids = [occ.transaction_id for occ in candidate.occurrences]
+    if not tx_ids:
+        return candidate
+
+    claimed = {tx_id: owner_by_tx_id[tx_id] for tx_id in tx_ids if tx_id in owner_by_tx_id}
+    if not claimed:
+        return candidate
+
+    overlap_fraction = len(claimed) / len(tx_ids)
+    owner_ids = {owner_id for owner_id, _ in claimed.values()}
+
+    if overlap_fraction >= OVERLAP_ADOPTION_FRACTION and len(owner_ids) == 1:
+        owner_row = payments_by_id[next(iter(owner_ids))]
+        owner_row.group_key = candidate.group_key
+        return None
+
+    remaining = tuple(occ for occ in candidate.occurrences if occ.transaction_id not in claimed)
+    if len(remaining) < MIN_OCCURRENCES_MONTHLY:
+        return None
+    return replace(candidate, occurrences=remaining)
+
+
 def upsert_recurring_payments(
     db: Session, candidates: Sequence[RecurringCandidate]
 ) -> list[RecurringPayment]:
@@ -399,6 +448,27 @@ def upsert_recurring_payments(
     now occupies that slot, regardless of how much its amount may have
     drifted since it was first detected."""
     existing_rows = db.query(RecurringPayment).all()
+    payments_by_id: dict[int, RecurringPayment] = {row.id: row for row in existing_rows}
+    # Snapshot occurrence ownership by confirmed/dismissed rows before this
+    # run makes any changes, so v2 candidates can be reconciled against
+    # pre-v2 rows carrying a legacy/empty group_key (see
+    # `_reconcile_with_confirmed_streams`).
+    owner_by_tx_id: dict[int, tuple[int, str]] = {
+        tx_id: (payment_id, status)
+        for tx_id, payment_id, status in (
+            db.query(
+                RecurringPaymentOccurrence.transaction_id,
+                RecurringPayment.id,
+                RecurringPayment.status,
+            )
+            .join(
+                RecurringPayment,
+                RecurringPayment.id == RecurringPaymentOccurrence.recurring_payment_id,
+            )
+            .filter(RecurringPayment.status != "suggested")
+            .all()
+        )
+    }
     keyed_rows: dict[str, RecurringPayment] = {
         row.group_key: row for row in existing_rows if row.group_key
     }
@@ -443,6 +513,11 @@ def upsert_recurring_payments(
 
     result: list[RecurringPayment] = []
     for candidate in candidates:
+        reconciled = _reconcile_with_confirmed_streams(candidate, owner_by_tx_id, payments_by_id)
+        if reconciled is None:
+            continue
+        candidate = reconciled
+
         row = resolve_row(candidate)
         if row is not None and row.status != "suggested":
             continue
