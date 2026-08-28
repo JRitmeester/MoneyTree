@@ -8,7 +8,7 @@ from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.models import RecurringPayment, RecurringPaymentOccurrence, Transaction
+from app.models import AppSetting, RecurringPayment, RecurringPaymentOccurrence, Transaction
 from app.services.recurring_detector import (
     MATCH_WIDE_BAND,
     detect_recurring_payments,
@@ -530,14 +530,21 @@ class TestDeleteEverythingWipesRecurringTables:
         payment_id = client.get("/api/recurring").json()[0]["id"]
         client.post(f"/api/recurring/{payment_id}/confirm", json={})
 
+        # Seed an AppSetting to verify it gets wiped
+        setting = AppSetting(key="buffer_pct", value="15.0")
+        db.add(setting)
+        db.commit()
+
         assert db.query(RecurringPayment).count() > 0
         assert db.query(RecurringPaymentOccurrence).count() > 0
+        assert db.query(AppSetting).count() == 1
 
         resp = client.delete("/api/settings/everything")
         assert resp.status_code == 200
 
         assert db.query(RecurringPayment).count() == 0
         assert db.query(RecurringPaymentOccurrence).count() == 0
+        assert db.query(AppSetting).count() == 0
 
 
 def _build_asn_csv(rows: list[dict]) -> bytes:

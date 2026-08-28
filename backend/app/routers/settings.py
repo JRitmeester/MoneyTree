@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..auth import require_auth
 from ..database import get_db
 from ..models import (
+    AppSetting,
     Budget,
     BudgetLine,
     BudgetTemplate,
@@ -193,6 +194,7 @@ def delete_everything(db: Session = Depends(get_db)):
     db.execute(update(Category).values(parent_id=None))
     db.execute(delete(Category))
     db.execute(delete(OwnAccount))
+    db.execute(delete(AppSetting))
 
     db.commit()
     return {"ok": True}
