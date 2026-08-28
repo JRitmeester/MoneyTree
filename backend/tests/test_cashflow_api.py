@@ -73,7 +73,9 @@ class TestCalendarEndpoint:
         )
         resp = client.get("/api/cashflow/calendar?month=2026-08")
         body = resp.json()
-        day = next(d for d in body["days"] if d["date"] == "2026-08-24")
+        # 2026-08-22 is a Saturday; income shifts backward to Friday
+        # 2026-08-21 (paid early), unlike an expense which shifts forward.
+        day = next(d for d in body["days"] if d["date"] == "2026-08-21")
         item = next(i for i in day["items"] if i["recurring_payment_id"] == salary.id)
         assert item["is_salary"] is True
 

@@ -297,6 +297,12 @@ class RecurringPayment(Base):
     __tablename__ = "recurring_payments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Stable composite identity used by the detector to refresh a suggested
+    # row in place across reruns: "{base_key}|{income|expense}|{cluster
+    # index}". Empty for rows created before amount clustering existed (or
+    # created directly, e.g. in tests); `_row_key` falls back to
+    # "{base_key}|{direction}|0" for those.
+    group_key: Mapped[str] = mapped_column(String(400), default="", nullable=False)
     merchant_pattern: Mapped[str] = mapped_column(String(255), nullable=False)
     counterparty_iban: Mapped[str | None] = mapped_column(String(34))
     name: Mapped[str] = mapped_column(String(255), nullable=False)

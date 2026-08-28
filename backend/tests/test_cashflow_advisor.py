@@ -122,9 +122,9 @@ class TestAdvisor:
 
     def test_real_pattern_sweep_transfers_and_warnings(self, db: Session):
         # Salary on the 22nd (monthly), last seen 2026-07-22 -> raw next
-        # payday 2026-08-22 (a Saturday), shifted to Monday 2026-08-24 to
-        # match the calendar view; raw next-next payday 2026-09-22 is
-        # already a weekday.
+        # payday 2026-08-22 (a Saturday). Income shifts backward, so it's
+        # paid early on Friday 2026-08-21; raw next-next payday 2026-09-22
+        # is already a weekday.
         _confirmed(
             db, name="Salary", expected_amount=3000, cadence="monthly",
             expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
@@ -168,31 +168,37 @@ class TestAdvisor:
         advice = compute_advice(db, buffer_pct=10.0, today=date(2026, 8, 20))
 
         assert advice.salary_confirmed is True
-        assert advice.payday == date(2026, 8, 24)
+        assert advice.payday == date(2026, 8, 21)
         assert advice.next_payday == date(2026, 9, 22)
 
         # All debits before next payday: 300 + 300 + 900 + 333 + 25 + 150 =
-        # 2008. The bills cluster (Energy+Water, earliest 2026-08-25) is
-        # only 1 business day after payday (2026-08-24): 2 business days
-        # before 2026-08-25 is 2026-08-21, which precedes payday, so a
-        # transfer can't arrive in time. That 600 is kept in checking
-        # instead of swept: (2008 - 600) * 1.1 = 1548.8.
-        assert advice.keep_in_checking == 600.0
-        assert advice.sweep_amount == 1548.8
+        # 2008. Being paid a day earlier (2026-08-21) than a plain
+        # weekend-only shift gives both bill clusters just enough lead
+        # time to be swept via return transfer instead of kept in
+        # checking: sweep_amount = 2008 * 1.1 = 2208.8.
+        assert advice.keep_in_checking == 0.0
+        assert advice.sweep_amount == 2208.8
         assert advice.standing_buffer == 25.0
 
-        # Only the rent cluster gets a transfer; the bills cluster couldn't
-        # arrive in time (folded into keep_in_checking above) and the
-        # credit card cluster lost out to rent on total amount.
-        assert len(advice.return_transfers) == 1
-        rent_transfer = advice.return_transfers[0]
-        assert set(rent_transfer.covers) == {"Rent", "Ground rent"}
-        assert rent_transfer.amount == 1233.0
+        # Both non-four-weekly clusters get a transfer now that payday
+        # lands a day earlier.
+        assert len(advice.return_transfers) == 2
+        by_covers = {frozenset(t.covers): t for t in advice.return_transfers}
+        energy_water = by_covers[frozenset({"Energy", "Water"})]
+        rent = by_covers[frozenset({"Rent", "Ground rent"})]
+
+        assert energy_water.amount == 600.0
+        # Earliest debit covered is 2026-08-25 (Tuesday); 2 business days
+        # before is 2026-08-21, which is exactly payday.
+        assert energy_water.date == date(2026, 8, 21)
+        assert energy_water.date >= advice.payday
+
+        assert rent.amount == 1233.0
         # Earliest debit covered is 2026-09-01 (Tuesday); 2 business days
         # before is 2026-08-28 (Friday), which is on/after payday.
-        assert rent_transfer.date == date(2026, 8, 28)
-        assert rent_transfer.date.weekday() < 5
-        assert rent_transfer.date >= advice.payday
+        assert rent.date == date(2026, 8, 28)
+        assert rent.date.weekday() < 5
+        assert rent.date >= advice.payday
 
         # No dedicated transfer for the small four-weekly item; it's folded
         # into the standing buffer instead.
@@ -210,11 +216,13 @@ class TestAdvisor:
             db, name="Salary", expected_amount=3000, cadence="monthly",
             expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
         )
-        # Payday shifts Sat 2026-08-22 -> Mon 2026-08-24; this debit lands
-        # the very next day, leaving no room for a 2-business-day transfer.
+        # Income shifts Sat 2026-08-22 backward to Fri 2026-08-21; this
+        # debit lands 2026-08-24, leaving no room for a 2-business-day
+        # transfer (2 business days before 2026-08-24 is 2026-08-20, which
+        # precedes payday).
         _confirmed(
             db, name="Gym", expected_amount=-40, cadence="monthly",
-            expected_day=25, anchor_date=date(2026, 7, 25),
+            expected_day=24, anchor_date=date(2026, 7, 24),
         )
         advice = compute_advice(db, buffer_pct=0.0, today=date(2026, 8, 20))
 
@@ -254,18 +262,18 @@ class TestAdvisor:
         assert transfer.date == date(2026, 8, 24)
 
     def test_payday_matches_calendar_shifted_salary_date(self, db: Session):
-        """Saturday-expected salary shows Monday in both the calendar and
-        the advisor."""
+        """Saturday-expected salary is paid early on Friday in both the
+        calendar and the advisor (income shifts backward)."""
         salary = _confirmed(
             db, name="Salary", expected_amount=3000, cadence="monthly",
             expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
         )
         advice = compute_advice(db, buffer_pct=10.0, today=date(2026, 8, 20))
-        assert advice.payday == date(2026, 8, 24)
+        assert advice.payday == date(2026, 8, 21)
 
         calendar_items = project_calendar_month([salary], 2026, 8, salary_payment_id=salary.id)
         salary_item = next(i for i in calendar_items if i.is_salary)
-        assert salary_item.date == date(2026, 8, 24) == advice.payday
+        assert salary_item.date == date(2026, 8, 21) == advice.payday
 
     def test_stale_payday_rolls_forward_with_warning(self, db: Session):
         """A salary whose next-expected date has already passed (the

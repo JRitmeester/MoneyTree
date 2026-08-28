@@ -21,6 +21,10 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from app.models import RecurringPayment
+from app.services.nl_holidays import (
+    shift_backward_to_business_day,
+    shift_forward_to_business_day,
+)
 from app.services.recurring_detector import (
     compute_notices,
     find_salary_payment_id,
@@ -101,10 +105,23 @@ def _months_spanning(start: date, end: date) -> list[tuple[int, int]]:
     return months
 
 
-def _monthly_date_in_month(day: int, year: int, month: int, *, shift_weekend: bool) -> date:
+def shift_expected_date(d: date, cadence: str, is_income: bool) -> date:
+    """Shift an expected monthly/yearly date onto the nearest actual
+    banking day: income shifts backward (paid early when it would land on
+    a weekend/NL holiday), expenses shift forward (collected the next
+    banking day). four_weekly dates are never shifted; their date is
+    already a fixed step from `anchor_date`, not tied to a calendar day."""
+    if cadence == "four_weekly":
+        return d
+    return shift_backward_to_business_day(d) if is_income else shift_forward_to_business_day(d)
+
+
+def _monthly_date_in_month(
+    day: int, year: int, month: int, *, shift_weekend: bool, is_income: bool = False
+) -> date:
     days_in_month = _calendar.monthrange(year, month)[1]
     d = date(year, month, min(day, days_in_month))
-    return next_business_day(d) if shift_weekend else d
+    return shift_expected_date(d, "monthly", is_income) if shift_weekend else d
 
 
 def _four_weekly_dates_between(anchor: date, start: date, end: date) -> list[date]:
@@ -144,7 +161,9 @@ def occurrences_in_range(
     for year, month in _months_spanning(start, end):
         if payment.cadence == "yearly" and payment.anchor_date.month != month:
             continue
-        d = _monthly_date_in_month(payment.expected_day, year, month, shift_weekend=shift_weekend)
+        d = _monthly_date_in_month(
+            payment.expected_day, year, month, shift_weekend=shift_weekend, is_income=payment.is_income
+        )
         if start <= d < end:
             results.append(d)
     return results
@@ -230,12 +249,13 @@ def _next_payday_after(payment: RecurringPayment, after: date) -> date:
     return _add_months(after, months, payment.expected_day)
 
 
-def _shift_for_cadence(d: date, cadence: str) -> date:
-    """Weekend-shift a monthly/yearly date onto the next business day;
-    four-weekly dates are never shifted. Mirrors `occurrences_in_range`'s
-    `shift_weekend` handling so the advisor's payday always matches what
-    the calendar view shows for the same recurring payment."""
-    return d if cadence == "four_weekly" else next_business_day(d)
+def _shift_for_cadence(d: date, cadence: str, is_income: bool) -> date:
+    """Shift a monthly/yearly date onto the nearest actual banking day
+    (income backward, expenses forward); four-weekly dates are never
+    shifted. Mirrors `occurrences_in_range`'s `shift_weekend` handling so
+    the advisor's payday always matches what the calendar view shows for
+    the same recurring payment."""
+    return shift_expected_date(d, cadence, is_income)
 
 
 @dataclass(frozen=True)
@@ -294,10 +314,11 @@ def compute_advice(db: Session, buffer_pct: float, today: date | None = None) ->
 
     raw_next_payday = _next_payday_after(salary, raw_payday)
 
-    # Weekend-shifted, matching the calendar view: the sweep happens on the
-    # actual banking day the salary lands, not the raw expected_day.
-    payday = _shift_for_cadence(raw_payday, salary.cadence)
-    next_payday = _shift_for_cadence(raw_next_payday, salary.cadence)
+    # Weekend/holiday-shifted, matching the calendar view: the sweep happens
+    # on the actual banking day the salary lands (income shifts backward),
+    # not the raw expected_day.
+    payday = _shift_for_cadence(raw_payday, salary.cadence, salary.is_income)
+    next_payday = _shift_for_cadence(raw_next_payday, salary.cadence, salary.is_income)
 
     debit_payments = (
         db.query(RecurringPayment)
@@ -384,7 +405,7 @@ def compute_advice(db: Session, buffer_pct: float, today: date | None = None) ->
             continue
         expected = next_expected_date(payment)
         if expected is not None:
-            expected = next_business_day(expected)
+            expected = shift_expected_date(expected, payment.cadence, payment.is_income)
         if expected is not None and 0 <= (expected - today).days <= YEARLY_DUE_SOON_DAYS:
             warnings.append(f"{payment.name} (yearly) is due on {expected.isoformat()}")
 

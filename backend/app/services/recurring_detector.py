@@ -1,9 +1,12 @@
 """Recurring-payment detection.
 
 Groups non-internal transactions by counterparty IBAN (preferred) or
-normalized merchant name, classifies the group's cadence (monthly,
-four_weekly, yearly) from the gaps between occurrences, and checks whether
-the amounts are stable enough to call it a recurring payment.
+normalized merchant name, splits each group by direction (income/expense),
+then clusters occurrences by amount within that direction (a single IBAN or
+merchant can carry more than one recurring pattern, e.g. a salary payer
+that also reimburses expense claims to the same account). Each qualifying
+amount cluster is classified for cadence (monthly, four_weekly, yearly)
+from the gaps between its occurrence dates and its own amount stability.
 
 Detection runs on the full transaction history each time (single-user
 scale); `upsert_recurring_payments` refreshes `suggested` rows in place and
@@ -31,20 +34,45 @@ MIN_OCCURRENCES_YEARLY = 2
 
 MONTHLY_GAP_MIN_DAYS = 26
 MONTHLY_GAP_MAX_DAYS = 36
-FOUR_WEEKLY_GAP_MIN_DAYS = 26
-FOUR_WEEKLY_GAP_MAX_DAYS = 30
-# Gaps must be tightly clustered around ~28 days for a four_weekly call: this
-# is the simpler, robust stand-in for "day-of-month drifts consistently"
-# (a steady drift produces near-identical gaps; erratic noise does not).
-FOUR_WEEKLY_GAP_SPREAD_MAX_DAYS = 4
+# four_weekly has a tight band (used to actually classify the cadence) and
+# a wider band (used to check how many of the remaining, non-outlier gaps
+# sit close enough to 28 days to call the cadence steady).
+FOUR_WEEKLY_GAP_TIGHT_MIN_DAYS = 27
+FOUR_WEEKLY_GAP_TIGHT_MAX_DAYS = 29
+FOUR_WEEKLY_GAP_WIDE_MIN_DAYS = 26
+FOUR_WEEKLY_GAP_WIDE_MAX_DAYS = 30
+FOUR_WEEKLY_QUALIFYING_FRACTION = 0.6
 YEARLY_GAP_MIN_DAYS = 350
 YEARLY_GAP_MAX_DAYS = 380
 
+# Cadence classification tolerates up to this fraction of gaps being
+# outliers: they are dropped (furthest from the median gap first) before
+# the median gap and windowed checks are computed. This lets a mostly
+# regular series (one skipped or delayed cycle) still classify correctly.
+GAP_OUTLIER_FRACTION = 0.25
+
 DAY_OF_MONTH_TOLERANCE = 4
+# A monthly call by day-of-month stability only needs this fraction of
+# dates within +/-DAY_OF_MONTH_TOLERANCE of the median day, not all of
+# them (real data has the odd weekend/holiday-shifted or delayed payment).
+DAY_STABLE_QUALIFYING_FRACTION = 0.75
+
+# Fallback monthly rule: when the day-of-month isn't stable enough (e.g. a
+# direct debit whose collection day genuinely wanders), a monthly-range gap
+# combined with near-identical amounts is still a strong enough signal
+# (ANWB-style: fixed amount, wandering collection day).
+FIXED_AMOUNT_TOLERANCE = 0.05
 
 AMOUNT_TOLERANCE_FRACTION = 0.15
 AMOUNT_QUALIFYING_FRACTION = 0.75
 DEFAULT_AMOUNT_TOLERANCE = 0.15
+# Amount clustering: within a (group key, direction) series, an amount
+# joins the running cluster when within this fraction of the cluster's
+# running median; otherwise it starts a new cluster. Same value as
+# AMOUNT_TOLERANCE_FRACTION, named separately because it plays a different
+# role (clustering occurrences vs. the post-hoc qualifying check on an
+# already-formed cluster).
+AMOUNT_QUALIFY_TOLERANCE = 0.15
 
 # --- Lifecycle constants (import-time matching, drift, notices; see spec
 # "Recurring-payment detection" Lifecycle paragraph) ---------------------
@@ -106,41 +134,89 @@ def _gaps(dates: Sequence[date]) -> list[int]:
     return [(dates[i + 1] - dates[i]).days for i in range(len(dates) - 1)]
 
 
-def _day_of_month_stable(dates: Sequence[date], median_day: float) -> bool:
-    return all(abs(d.day - median_day) <= DAY_OF_MONTH_TOLERANCE for d in dates)
+def _trimmed_gaps(gaps: Sequence[int]) -> list[int]:
+    """Drop up to GAP_OUTLIER_FRACTION of `gaps`, furthest from the median
+    first, before cadence checks run on the remainder."""
+    if not gaps:
+        return list(gaps)
+    median = statistics.median(gaps)
+    n_drop = int(len(gaps) * GAP_OUTLIER_FRACTION)
+    if n_drop == 0:
+        return list(gaps)
+    ordered = sorted(gaps, key=lambda g: abs(g - median))
+    return ordered[: len(gaps) - n_drop]
 
 
-def detect_cadence(dates: Sequence[date]) -> CadenceResult | None:
-    """Classify the cadence of a series of occurrence dates.
+def _day_stable_fraction(dates: Sequence[date], median_day: float) -> float:
+    within = [d for d in dates if abs(d.day - median_day) <= DAY_OF_MONTH_TOLERANCE]
+    return len(within) / len(dates)
 
-    See spec "Recurring-payment detection" for the exact rules: monthly
-    needs 3+ occurrences with a 26-36 day median gap and a day-of-month
-    stable within +/-4; four_weekly needs 3+ occurrences with a 26-30 day
-    median gap and a drifting day-of-month; yearly needs 2+ occurrences
-    with a 350-380 day median gap.
+
+def _amount_fixed_fraction(amounts: Sequence[float]) -> float:
+    abs_amounts = [abs(a) for a in amounts]
+    median = statistics.median(abs_amounts)
+    if median == 0:
+        return 0.0
+    within = [a for a in abs_amounts if abs(a - median) <= FIXED_AMOUNT_TOLERANCE * median]
+    return len(within) / len(abs_amounts)
+
+
+def detect_cadence(dates: Sequence[date], amounts: Sequence[float] | None = None) -> CadenceResult | None:
+    """Classify the cadence of a series of occurrence dates (optionally with
+    their amounts, for the monthly fixed-amount fallback).
+
+    See spec "Recurring-payment detection" (cadence rules v2) for the exact
+    rules:
+
+    - monthly needs 3+ occurrences with a trimmed median gap of 26-36 days
+      AND either the day-of-month is stable (within +/-4) for >=75% of
+      dates, OR (fallback) >=75% of amounts are within 5% of the median
+      amount.
+    - four_weekly needs 3+ occurrences with a trimmed median gap of 27-29
+      days and >=60% of the (non-outlier) gaps within 26-30 days, and must
+      not already qualify as day-stable monthly.
+    - yearly needs 2+ occurrences with a 350-380 day median gap.
+
+    Up to GAP_OUTLIER_FRACTION of gaps are ignored as outliers (dropped,
+    furthest from the median first) before any of the above is evaluated.
     """
-    ordered = sorted(dates)
+    if amounts is not None and len(amounts) != len(dates):
+        raise ValueError("amounts must be the same length as dates")
+
+    pairs = sorted(zip(dates, amounts) if amounts is not None else zip(dates, [None] * len(dates)))
+    ordered = [p[0] for p in pairs]
+    ordered_amounts = [p[1] for p in pairs] if amounts is not None else None
 
     if len(ordered) >= MIN_OCCURRENCES_MONTHLY:
         gaps = _gaps(ordered)
-        median_gap = statistics.median(gaps)
+        trimmed = _trimmed_gaps(gaps)
+        median_gap = statistics.median(trimmed)
+
         days_of_month = [d.day for d in ordered]
         median_day = statistics.median(days_of_month)
+        day_stable = _day_stable_fraction(ordered, median_day) >= DAY_STABLE_QUALIFYING_FRACTION
 
-        if MONTHLY_GAP_MIN_DAYS <= median_gap <= MONTHLY_GAP_MAX_DAYS and _day_of_month_stable(
-            ordered, median_day
-        ):
+        if MONTHLY_GAP_MIN_DAYS <= median_gap <= MONTHLY_GAP_MAX_DAYS and day_stable:
             return CadenceResult(
                 cadence="monthly", expected_day=round(median_day), anchor_date=ordered[-1]
             )
 
-        gap_spread = max(gaps) - min(gaps)
-        if (
-            FOUR_WEEKLY_GAP_MIN_DAYS <= median_gap <= FOUR_WEEKLY_GAP_MAX_DAYS
-            and gap_spread <= FOUR_WEEKLY_GAP_SPREAD_MAX_DAYS
-        ):
+        if FOUR_WEEKLY_GAP_TIGHT_MIN_DAYS <= median_gap <= FOUR_WEEKLY_GAP_TIGHT_MAX_DAYS:
+            within_wide = [
+                g for g in trimmed if FOUR_WEEKLY_GAP_WIDE_MIN_DAYS <= g <= FOUR_WEEKLY_GAP_WIDE_MAX_DAYS
+            ]
+            if len(within_wide) / len(trimmed) >= FOUR_WEEKLY_QUALIFYING_FRACTION:
+                return CadenceResult(
+                    cadence="four_weekly", expected_day=None, anchor_date=ordered[-1]
+                )
+
+        amount_fixed = (
+            ordered_amounts is not None
+            and _amount_fixed_fraction(ordered_amounts) >= DAY_STABLE_QUALIFYING_FRACTION
+        )
+        if MONTHLY_GAP_MIN_DAYS <= median_gap <= MONTHLY_GAP_MAX_DAYS and amount_fixed:
             return CadenceResult(
-                cadence="four_weekly", expected_day=None, anchor_date=ordered[-1]
+                cadence="monthly", expected_day=round(median_day), anchor_date=ordered[-1]
             )
 
     if len(ordered) >= MIN_OCCURRENCES_YEARLY:
@@ -169,7 +245,8 @@ def is_amount_outlier(amount: float, median: float, tolerance: float) -> bool:
 def amounts_qualify(amounts: Sequence[float]) -> bool:
     """A candidate qualifies if at least 75% of its occurrences fall within
     15% of the median amount. Outliers (e.g. a settlement month) flag but
-    don't disqualify the group."""
+    don't disqualify the group. Acts as a safety net on top of amount
+    clustering, which already groups occurrences by amount."""
     if not amounts:
         return False
     median = median_amount(amounts)
@@ -188,9 +265,69 @@ def _group_key(tx: Transaction) -> str | None:
     return None
 
 
+def _cluster_by_amount(transactions: Sequence[Transaction]) -> list[list[Transaction]]:
+    """Greedy amount clustering: process occurrences in ascending order of
+    absolute amount, joining the current cluster when within
+    AMOUNT_QUALIFY_TOLERANCE of that cluster's running median; otherwise
+    starting a new cluster. This is what separates, e.g., a salary cluster
+    from an expense-claim-reimbursement cluster sharing the same payer."""
+    ordered = sorted(transactions, key=lambda t: abs(t.bedrag))
+    clusters: list[list[Transaction]] = []
+    for tx in ordered:
+        if clusters:
+            current = clusters[-1]
+            median = statistics.median(abs(t.bedrag) for t in current)
+            if median > 0 and abs(abs(tx.bedrag) - median) <= AMOUNT_QUALIFY_TOLERANCE * median:
+                current.append(tx)
+                continue
+        clusters.append([tx])
+    return clusters
+
+
+def _build_candidate(
+    base_key: str, direction: str, cluster_index: int, txs: Sequence[Transaction]
+) -> RecurringCandidate | None:
+    txs_sorted = sorted(txs, key=lambda t: t.datum)
+    dates = [t.datum for t in txs_sorted]
+    amounts = [t.bedrag for t in txs_sorted]
+
+    cadence_result = detect_cadence(dates, amounts)
+    if cadence_result is None:
+        return None
+
+    if not amounts_qualify(amounts):
+        return None
+
+    counterparty_iban = txs_sorted[0].tegenrekening
+    merchant_pattern = "" if counterparty_iban else base_key
+    display_name = txs_sorted[0].merchant_name or txs_sorted[0].naam or base_key
+    expected_amount = statistics.median(amounts)
+    is_income = expected_amount > 0
+
+    occurrences = tuple(
+        Occurrence(transaction_id=t.id, amount=t.bedrag, date=t.datum) for t in txs_sorted
+    )
+
+    return RecurringCandidate(
+        group_key=f"{base_key}|{direction}|{cluster_index}",
+        counterparty_iban=counterparty_iban,
+        merchant_pattern=merchant_pattern,
+        name=display_name,
+        cadence=cadence_result.cadence,
+        expected_day=cadence_result.expected_day,
+        anchor_date=cadence_result.anchor_date,
+        expected_amount=expected_amount,
+        amount_tolerance=DEFAULT_AMOUNT_TOLERANCE,
+        is_income=is_income,
+        occurrences=occurrences,
+    )
+
+
 def build_candidates(transactions: Iterable[Transaction]) -> list[RecurringCandidate]:
-    """Pure detection over an in-memory list of transactions: group,
-    classify cadence, check the amount rule. Excludes internal transfers."""
+    """Pure detection over an in-memory list of transactions: group by
+    counterparty/merchant, split by direction, cluster by amount within
+    each direction, then classify cadence per cluster. Excludes internal
+    transfers."""
     groups: dict[str, list[Transaction]] = {}
     for tx in transactions:
         if tx.is_internal_transfer:
@@ -201,48 +338,40 @@ def build_candidates(transactions: Iterable[Transaction]) -> list[RecurringCandi
         groups.setdefault(key, []).append(tx)
 
     candidates: list[RecurringCandidate] = []
-    for key, txs in groups.items():
-        txs_sorted = sorted(txs, key=lambda t: t.datum)
-        dates = [t.datum for t in txs_sorted]
-        cadence_result = detect_cadence(dates)
-        if cadence_result is None:
-            continue
-
-        amounts = [t.bedrag for t in txs_sorted]
-        if not amounts_qualify(amounts):
-            continue
-
-        counterparty_iban = txs_sorted[0].tegenrekening
-        merchant_pattern = "" if counterparty_iban else key
-        display_name = txs_sorted[0].merchant_name or txs_sorted[0].naam or key
-        expected_amount = statistics.median(amounts)
-        is_income = expected_amount > 0
-
-        occurrences = tuple(
-            Occurrence(transaction_id=t.id, amount=t.bedrag, date=t.datum) for t in txs_sorted
-        )
-
-        candidates.append(
-            RecurringCandidate(
-                group_key=key,
-                counterparty_iban=counterparty_iban,
-                merchant_pattern=merchant_pattern,
-                name=display_name,
-                cadence=cadence_result.cadence,
-                expected_day=cadence_result.expected_day,
-                anchor_date=cadence_result.anchor_date,
-                expected_amount=expected_amount,
-                amount_tolerance=DEFAULT_AMOUNT_TOLERANCE,
-                is_income=is_income,
-                occurrences=occurrences,
-            )
-        )
+    for base_key, txs in groups.items():
+        for direction, direction_txs in (
+            ("income", [t for t in txs if t.bedrag > 0]),
+            ("expense", [t for t in txs if t.bedrag < 0]),
+        ):
+            if not direction_txs:
+                continue
+            clusters = _cluster_by_amount(direction_txs)
+            # Stable ordering across reruns: sort clusters by ascending
+            # median amount so the same real-world pattern gets the same
+            # cluster index (and hence the same group_key) each time,
+            # letting upsert refresh it in place instead of duplicating it.
+            clusters.sort(key=lambda c: statistics.median(abs(t.bedrag) for t in c))
+            for idx, cluster_txs in enumerate(clusters):
+                if len(cluster_txs) < MIN_OCCURRENCES_YEARLY:
+                    continue
+                candidate = _build_candidate(base_key, direction, idx, cluster_txs)
+                if candidate is not None:
+                    candidates.append(candidate)
 
     return candidates
 
 
 def _row_key(row: RecurringPayment) -> str:
-    return row.counterparty_iban if row.counterparty_iban else row.merchant_pattern
+    """The stable identity used to match a candidate to an existing row.
+    Prefers the persisted composite `group_key`; falls back to
+    "{base_key}|{direction}|0" for rows created before clustering existed
+    (or created directly, e.g. in tests/fixtures), which is exactly the key
+    a single-cluster candidate for that base key would produce."""
+    if row.group_key:
+        return row.group_key
+    base = row.counterparty_iban if row.counterparty_iban else row.merchant_pattern
+    direction = "income" if row.is_income else "expense"
+    return f"{base}|{direction}|0"
 
 
 def detect_recurring_payments(db: Session) -> list[RecurringCandidate]:
@@ -280,6 +409,7 @@ def upsert_recurring_payments(
             row = RecurringPayment(status="suggested")
             db.add(row)
 
+        row.group_key = candidate.group_key
         row.merchant_pattern = candidate.merchant_pattern
         row.counterparty_iban = candidate.counterparty_iban
         row.name = candidate.name
@@ -335,7 +465,10 @@ def _add_months(base: date, months: int, day: int) -> date:
 
 
 def next_expected_date(payment: RecurringPayment) -> date | None:
-    """The next occurrence date expected after `payment.anchor_date`.
+    """The next occurrence date expected after `payment.anchor_date`, in
+    calendar terms (not weekend/holiday-shifted; see
+    `app.services.cashflow_advisor` for the shifted, banking-day version
+    used for display).
 
     monthly/yearly step from `expected_day`; four_weekly steps 28 days from
     the anchor. Returns None if the cadence lacks the data needed (should
@@ -375,14 +508,25 @@ def find_salary_payment_id(db: Session) -> int | None:
 
 
 def backfill_occurrences(db: Session, payment: RecurringPayment) -> None:
-    """Rebuild `payment`'s occurrences from the full transaction history,
-    matched by the same group key used by detection. Called on confirm so a
-    just-confirmed pattern has its complete history recorded, independent of
-    whatever the last detector run happened to populate."""
-    key = _row_key(payment)
+    """Rebuild `payment`'s occurrences from the full transaction history:
+    same base group key (counterparty IBAN or normalized merchant name),
+    same direction (income/expense), and amount within
+    AMOUNT_QUALIFY_TOLERANCE of `payment.expected_amount` (the same
+    tolerance used to form the amount cluster in the first place). Called
+    on confirm so a just-confirmed pattern has its complete history
+    recorded, independent of whatever the last detector run happened to
+    populate."""
+    base_key = payment.counterparty_iban if payment.counterparty_iban else payment.merchant_pattern
+    median = abs(payment.expected_amount)
+
     transactions = db.query(Transaction).all()
     matches = [
-        tx for tx in transactions if not tx.is_internal_transfer and _group_key(tx) == key
+        tx
+        for tx in transactions
+        if not tx.is_internal_transfer
+        and _group_key(tx) == base_key
+        and (tx.bedrag > 0) == payment.is_income
+        and (median == 0 or abs(abs(tx.bedrag) - median) <= AMOUNT_QUALIFY_TOLERANCE * median)
     ]
     matches.sort(key=lambda t: t.datum)
 
@@ -429,8 +573,12 @@ def _maybe_snap_expected_amount(db: Session, row: RecurringPayment) -> None:
 def match_new_transactions(db: Session, transactions: Sequence[Transaction]) -> int:
     """Match newly-imported transactions against confirmed recurring
     patterns (spec Lifecycle paragraph, two-band ruling 2026-08-28): same
-    group key, date within +/-DATE_MATCH_WINDOW_DAYS of the expected date,
-    amount within MATCH_WIDE_BAND of expected_amount. A match appends an
+    base group key and direction, date within
+    +/-DATE_MATCH_WINDOW_DAYS of the expected date, amount within
+    MATCH_WIDE_BAND of expected_amount. A base key can have more than one
+    confirmed pattern (e.g. a salary cluster and a claims-reimbursement
+    cluster sharing an IBAN); the first confirmed row for that base key
+    whose direction/date/amount checks all pass is used. A match appends an
     occurrence and updates `anchor_date`. Within amount_tolerance, it also
     drifts `expected_amount` toward the new amount; outside tolerance (but
     still inside the wide band) expected_amount is left alone so the
@@ -443,7 +591,11 @@ def match_new_transactions(db: Session, transactions: Sequence[Transaction]) -> 
     if not confirmed:
         return 0
 
-    by_key: dict[str, RecurringPayment] = {_row_key(row): row for row in confirmed}
+    by_base_key: dict[str, list[RecurringPayment]] = {}
+    for row in confirmed:
+        base = row.counterparty_iban if row.counterparty_iban else row.merchant_pattern
+        by_base_key.setdefault(base, []).append(row)
+
     already_linked: set[int] = {
         occ.transaction_id for row in confirmed for occ in row.occurrences
     }
@@ -455,15 +607,21 @@ def match_new_transactions(db: Session, transactions: Sequence[Transaction]) -> 
         key = _group_key(tx)
         if key is None:
             continue
-        row = by_key.get(key)
+
+        row = None
+        for candidate_row in by_base_key.get(key, []):
+            if (tx.bedrag > 0) != candidate_row.is_income:
+                continue
+            expected_date = next_expected_date(candidate_row)
+            if expected_date is None:
+                continue
+            if abs((tx.datum - expected_date).days) > DATE_MATCH_WINDOW_DAYS:
+                continue
+            if amount_deviates(tx.bedrag, candidate_row.expected_amount, MATCH_WIDE_BAND):
+                continue
+            row = candidate_row
+            break
         if row is None:
-            continue
-        expected_date = next_expected_date(row)
-        if expected_date is None:
-            continue
-        if abs((tx.datum - expected_date).days) > DATE_MATCH_WINDOW_DAYS:
-            continue
-        if amount_deviates(tx.bedrag, row.expected_amount, MATCH_WIDE_BAND):
             continue
 
         db.add(

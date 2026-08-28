@@ -33,10 +33,13 @@ class TestDetectCadence:
         assert result.anchor_date == dates[-1]
 
     def test_four_weekly_drift_basic_fit_pattern(self):
-        # Every 28 days: day-of-month drifts steadily and exceeds the +/-4
-        # monthly stability tolerance across the series.
+        # Every 28 days: day-of-month drifts steadily and, over enough
+        # cycles, exceeds the +/-4 monthly stability tolerance for more
+        # than 25% of the series (cadence rules v2 allow a 75% day-stable
+        # fraction for monthly, not 100%, so this needs enough occurrences
+        # for the drift to clearly beat that bar).
         start = date(2025, 1, 3)
-        dates = [start + timedelta(days=28 * i) for i in range(5)]
+        dates = [start + timedelta(days=28 * i) for i in range(9)]
         result = rd.detect_cadence(dates)
         assert result is not None
         assert result.cadence == "four_weekly"
@@ -59,19 +62,88 @@ class TestDetectCadence:
         assert rd.detect_cadence(dates) is None
 
     def test_erratic_series_with_matching_median_gap_is_not_four_weekly(self):
-        # Median gap (27.5) falls inside the four_weekly window and the
-        # day-of-month is not stable enough for monthly, but the gaps
-        # themselves are not tightly clustered (25, 26, 29, 30 -> spread 5)
-        # and the day-of-month jumps around non-monotonically (1, 27, 26,
-        # 23, 21). This must not be misclassified as a drifting four_weekly
-        # pattern: it's just noise.
+        # Genuinely erratic gaps (26, 30, 25, 29, 60, 15, 45): even with up
+        # to 25% of gaps discounted as outliers, too many of the remaining
+        # gaps fall outside both the monthly and four_weekly windows, and
+        # the day-of-month (1, 27, 26, 23, 21, 20, 5, 19) isn't stable for
+        # 75% of dates either. This must not be misclassified as a
+        # recurring pattern: it's just noise.
         d0 = date(2025, 1, 1)
         d1 = d0 + timedelta(days=26)
         d2 = d1 + timedelta(days=30)
         d3 = d2 + timedelta(days=25)
         d4 = d3 + timedelta(days=29)
-        dates = [d0, d1, d2, d3, d4]
+        d5 = d4 + timedelta(days=60)
+        d6 = d5 + timedelta(days=15)
+        d7 = d6 + timedelta(days=45)
+        dates = [d0, d1, d2, d3, d4, d5, d6, d7]
         assert rd.detect_cadence(dates) is None
+
+
+class TestDetectCadenceRealWorldPatterns:
+    """Cadence rules v2, driven by real user data the old strict rules
+    missed: outlier-tolerant gap classification and the monthly
+    fixed-amount fallback (see spec "Recurring-payment detection",
+    cadence rules v2)."""
+
+    def test_anwb_wandering_day_fixed_amount_monthly(self):
+        # Identical amounts, wandering collection day (spread far beyond
+        # +/-4), gaps [27, 29, 30, 41, 22, 32, 30]: fails day-of-month
+        # stability but qualifies monthly via the fixed-amount fallback.
+        gaps = [27, 29, 30, 41, 22, 32, 30]
+        dates = [date(2025, 1, 1)]
+        for g in gaps:
+            dates.append(dates[-1] + timedelta(days=g))
+        amounts = [-10.70] * len(dates)
+
+        result = rd.detect_cadence(dates, amounts)
+        assert result is not None
+        assert result.cadence == "monthly"
+
+    def test_basic_fit_four_weekly_with_one_irregular_gap(self):
+        # Mostly-28-day gaps with one irregular gap (10 days): outlier
+        # tolerance drops the irregular gap and still calls four_weekly.
+        gaps = [28, 28, 28, 10, 28, 28, 28, 28]
+        dates = [date(2025, 1, 3)]
+        for g in gaps:
+            dates.append(dates[-1] + timedelta(days=g))
+        amounts = [-24.99] * len(dates)
+
+        result = rd.detect_cadence(dates, amounts)
+        assert result is not None
+        assert result.cadence == "four_weekly"
+
+    def test_fbto_monthly_with_wandering_day_but_day_stable_enough(self):
+        days = [26, 24, 24, 24, 24, 25, 24, 24, 24]
+        dates = [date(2025, 1, days[0])]
+        for i, d in enumerate(days[1:], start=2):
+            year = 2025 + (i - 1) // 12
+            month = (i - 1) % 12 + 1
+            dates.append(date(year, month, d))
+        amounts = [-151.0] * len(dates)
+
+        result = rd.detect_cadence(dates, amounts)
+        assert result is not None
+        assert result.cadence == "monthly"
+
+    def test_hollandsnieuwe_monthly_with_gaps_up_to_32(self):
+        gaps = [28, 32, 29, 31, 30, 28, 29]
+        dates = [date(2025, 1, 22)]
+        for g in gaps:
+            dates.append(dates[-1] + timedelta(days=g))
+        amounts = [-10.33] * len(dates)
+
+        result = rd.detect_cadence(dates, amounts)
+        assert result is not None
+        assert result.cadence == "monthly"
+
+    def test_spotify_monthly_survives_gap_anomaly(self):
+        dates = [date(2025, 1, 3) + timedelta(days=30 * i) for i in range(6)]
+        amounts = [-3.00] * len(dates)
+
+        result = rd.detect_cadence(dates, amounts)
+        assert result is not None
+        assert result.cadence == "monthly"
 
 
 class TestAmountsQualify:
@@ -153,6 +225,165 @@ class TestBuildCandidates:
         candidates = rd.build_candidates(db.query(Transaction).all())
         assert len(candidates) == 1
         assert candidates[0].merchant_pattern == "spotify"
+
+
+class TestAmountClusteringRealWorldPatterns:
+    """End-to-end `build_candidates` coverage for real user data the old
+    detector missed entirely: a single counterparty/merchant can carry more
+    than one recurring pattern, or one recurring pattern mixed with
+    non-recurring noise, and amount clustering must separate them."""
+
+    def test_nedap_salary_cluster_detected_despite_mixed_noise(self, db: Session):
+        # Salary near day 22, monthly, with two adjacent bonus months
+        # (holiday bonus + review payout) at a much higher amount, mixed
+        # with scattered expense-claim reimbursements (small positive,
+        # same IBAN) and scattered small debits (-5.50). Only the salary
+        # cluster should surface as a candidate.
+        iban = "NL02NEDAP000000001"
+        start = date(2025, 1, 22)
+        salary_amounts = [3109.48, 4073.78, 5034.83, 3166.17, 3252.34, 3227.34, 3166.17]
+        for i, amount in enumerate(salary_amounts):
+            make_transaction(
+                db, bedrag=amount, naam="Nedap", tegenrekening=iban,
+                datum=start + timedelta(days=30 * i), volgnummer=f"sal{i}",
+            )
+        claim_amounts = [31.96, 47.94, 52.59]
+        claim_dates = [date(2025, 3, 5), date(2025, 6, 14), date(2025, 9, 2)]
+        for i, (amount, d) in enumerate(zip(claim_amounts, claim_dates)):
+            make_transaction(
+                db, bedrag=amount, naam="Nedap", tegenrekening=iban, datum=d, volgnummer=f"claim{i}"
+            )
+        for i, d in enumerate([date(2025, 2, 3), date(2025, 4, 17), date(2025, 7, 9)]):
+            make_transaction(
+                db, bedrag=-5.50, naam="Nedap", tegenrekening=iban, datum=d, volgnummer=f"debit{i}"
+            )
+
+        from app.models import Transaction
+        candidates = rd.build_candidates(db.query(Transaction).all())
+
+        salary_candidates = [c for c in candidates if c.is_income and c.cadence == "monthly"]
+        assert len(salary_candidates) == 1
+        salary = salary_candidates[0]
+        assert salary.expected_day in range(19, 26)
+        assert 3100 <= salary.expected_amount <= 3300
+        # The claim reimbursements and small debits never form a
+        # confusingly "recurring" candidate of their own (too few
+        # occurrences, non-periodic).
+        assert not any(c.is_income and c is not salary for c in candidates)
+        assert not any(not c.is_income for c in candidates)
+
+    def test_fbto_claim_cluster_separated_from_recurring_premium(self, db: Session):
+        # Recurring -151.00 premium, monthly, mixed with scattered claim
+        # payouts of very different (also negative) amounts.
+        iban = "NL01FBTO0000000001"
+        days = [26, 24, 24, 24, 24, 25, 24, 24, 24]
+        for i, day in enumerate(days):
+            year = 2025 + i // 12
+            month = i % 12 + 1
+            make_transaction(
+                db, bedrag=-151.0, naam="FBTO", tegenrekening=iban,
+                datum=date(year, month, day), volgnummer=f"prem{i}",
+            )
+        claim_amounts = [-24.16, -214.74, -103.75]
+        claim_dates = [date(2025, 2, 10), date(2025, 5, 3), date(2025, 8, 19)]
+        for i, (amount, d) in enumerate(zip(claim_amounts, claim_dates)):
+            make_transaction(
+                db, bedrag=amount, naam="FBTO", tegenrekening=iban, datum=d, volgnummer=f"claim{i}"
+            )
+
+        from app.models import Transaction
+        candidates = rd.build_candidates(db.query(Transaction).all())
+
+        assert len(candidates) == 1
+        assert candidates[0].expected_amount == -151.0
+        assert candidates[0].cadence == "monthly"
+
+    def test_hollandsnieuwe_cluster_separated_from_topups(self, db: Session):
+        iban = "NL03HOLL0000000001"
+        gaps = [28, 32, 29, 31, 30, 28, 29]
+        d = date(2025, 1, 22)
+        dates = [d]
+        for g in gaps:
+            d = d + timedelta(days=g)
+            dates.append(d)
+        for i, dd in enumerate(dates):
+            make_transaction(
+                db, bedrag=-10.33, naam="HollandsNieuwe", tegenrekening=iban, datum=dd, volgnummer=f"m{i}"
+            )
+        for i, dd in enumerate([date(2025, 2, 5), date(2025, 2, 7), date(2025, 2, 9)]):
+            make_transaction(
+                db, bedrag=-5.00, naam="HollandsNieuwe", tegenrekening=iban, datum=dd, volgnummer=f"top{i}"
+            )
+        make_transaction(
+            db, bedrag=-20.00, naam="HollandsNieuwe", tegenrekening=iban, datum=date(2025, 5, 1), volgnummer="big"
+        )
+
+        from app.models import Transaction
+        candidates = rd.build_candidates(db.query(Transaction).all())
+
+        matching = [c for c in candidates if c.expected_amount == -10.33]
+        assert len(matching) == 1
+        assert matching[0].cadence == "monthly"
+
+    def test_basic_fit_four_weekly_separated_from_outlier_row(self, db: Session):
+        iban = "NL04BASF0000000001"
+        gaps = [28, 28, 28, 10, 28, 28, 28, 28]
+        d = date(2025, 1, 3)
+        dates = [d]
+        for g in gaps:
+            d = d + timedelta(days=g)
+            dates.append(d)
+        for i, dd in enumerate(dates):
+            make_transaction(
+                db, bedrag=-24.99, naam="Basic-Fit", tegenrekening=iban, datum=dd, volgnummer=f"m{i}"
+            )
+        make_transaction(
+            db, bedrag=-20.00, naam="Basic-Fit", tegenrekening=iban, datum=date(2025, 4, 15), volgnummer="outlier"
+        )
+
+        from app.models import Transaction
+        candidates = rd.build_candidates(db.query(Transaction).all())
+
+        matching = [c for c in candidates if c.expected_amount == -24.99]
+        assert len(matching) == 1
+        assert matching[0].cadence == "four_weekly"
+
+    def test_anwb_wandering_day_detected_via_amount_fallback(self, db: Session):
+        iban = "NL05ANWB0000000001"
+        gaps = [27, 29, 30, 41, 22, 32, 30]
+        d = date(2025, 1, 1)
+        dates = [d]
+        for g in gaps:
+            d = d + timedelta(days=g)
+            dates.append(d)
+        for i, dd in enumerate(dates):
+            make_transaction(
+                db, bedrag=-10.70, naam="ANWB", tegenrekening=iban, datum=dd, volgnummer=f"m{i}"
+            )
+
+        from app.models import Transaction
+        candidates = rd.build_candidates(db.query(Transaction).all())
+
+        assert len(candidates) == 1
+        assert candidates[0].cadence == "monthly"
+        assert candidates[0].expected_amount == -10.70
+
+    def test_spotify_monthly_survives_unrelated_large_transfer_same_person(self, db: Session):
+        dates = [date(2025, 1, 3) + timedelta(days=30 * i) for i in range(6)]
+        for i, d in enumerate(dates):
+            make_transaction(db, bedrag=-3.00, naam="M. Hameter", datum=d, volgnummer=f"sub{i}")
+        # An unrelated, much larger transfer to the same person shortly
+        # after the first subscription payment must not disrupt detection.
+        make_transaction(
+            db, bedrag=-398.63, naam="M. Hameter", datum=date(2025, 1, 6), volgnummer="transfer"
+        )
+
+        from app.models import Transaction
+        candidates = rd.build_candidates(db.query(Transaction).all())
+
+        matching = [c for c in candidates if c.expected_amount == -3.0]
+        assert len(matching) == 1
+        assert matching[0].cadence == "monthly"
 
 
 class TestUpsertRecurringPayments:
