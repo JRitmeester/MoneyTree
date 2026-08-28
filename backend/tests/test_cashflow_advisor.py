@@ -364,6 +364,30 @@ class TestAdvisor:
         assert advice.covered_total == 0.0
         assert advice.buffer_amount == 0.0
 
+    def test_anchored_advice_uses_anchor_window(self, db: Session):
+        """With anchor_payday, the sweep window starts at the anchor (a past
+        date is fine) and the stale-payday roll-forward is skipped."""
+        _confirmed(
+            db, name="Salary", expected_amount=3000, cadence="monthly",
+            expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
+        )
+        _confirmed(
+            db, name="Rent", expected_amount=-900, cadence="monthly",
+            expected_day=1, anchor_date=date(2026, 7, 1),
+        )
+
+        # today is well past the anchor; forward-looking advice would roll
+        # to the September payday, but the anchored window stays put.
+        advice = compute_advice(
+            db, buffer_pct=0.0, today=date(2026, 9, 10), anchor_payday=date(2026, 8, 21)
+        )
+
+        assert advice.payday == date(2026, 8, 21)
+        assert advice.next_payday == date(2026, 9, 22)
+        # Rent lands 2026-09-01, inside [2026-08-21, 2026-09-22).
+        assert advice.sweep_amount == 900.0
+        assert not any("has not been seen yet" in w for w in advice.warnings)
+
     def test_yearly_item_due_soon_warns(self, db: Session):
         _confirmed(
             db, name="Salary", expected_amount=3000, cadence="monthly",

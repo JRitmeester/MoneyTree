@@ -281,7 +281,20 @@ def _cluster_debits(debits: list[_Debit]) -> list[list[_Debit]]:
     return clusters
 
 
-def compute_advice(db: Session, buffer_pct: float, today: date | None = None) -> Advice:
+def compute_advice(
+    db: Session,
+    buffer_pct: float,
+    today: date | None = None,
+    *,
+    anchor_payday: date | None = None,
+) -> Advice:
+    """Transfer advice for the sweep window starting at the next payday.
+
+    With `anchor_payday` (an actual, already-shifted payday, typically the
+    date the salary really landed), the window is anchored there instead:
+    [anchor_payday, next payday after it). Anchored mode never rolls a past
+    payday forward (being in the past is the point; the salary allocator
+    uses this to plan the current pay period)."""
     today = today or date.today()
     salary = _find_salary_payment(db)
     if salary is None:
@@ -291,35 +304,40 @@ def compute_advice(db: Session, buffer_pct: float, today: date | None = None) ->
             buffer_pct=buffer_pct,
         )
 
-    raw_payday = next_expected_date(salary)
-    if raw_payday is None:
-        return Advice(
-            salary_confirmed=False,
-            message="Confirm your salary as recurring income first",
-            buffer_pct=buffer_pct,
-        )
-
     warnings: list[str] = []
 
-    # Stale payday: if the salary's next expected date has already passed
-    # (the detector hasn't matched it against a real transaction yet), roll
-    # forward by cadence until it's not in the past, and say so, rather than
-    # silently computing a window that already closed.
-    original_raw_payday = raw_payday
-    while raw_payday < today:
-        raw_payday = _next_payday_after(salary, raw_payday)
-    if raw_payday != original_raw_payday:
-        warnings.append(
-            f"Salary expected on {original_raw_payday.isoformat()} has not been seen yet"
-        )
+    if anchor_payday is not None:
+        payday = anchor_payday
+        raw_next_payday = _next_payday_after(salary, anchor_payday)
+        next_payday = _shift_for_cadence(raw_next_payday, salary.cadence, salary.is_income)
+    else:
+        raw_payday = next_expected_date(salary)
+        if raw_payday is None:
+            return Advice(
+                salary_confirmed=False,
+                message="Confirm your salary as recurring income first",
+                buffer_pct=buffer_pct,
+            )
 
-    raw_next_payday = _next_payday_after(salary, raw_payday)
+        # Stale payday: if the salary's next expected date has already passed
+        # (the detector hasn't matched it against a real transaction yet), roll
+        # forward by cadence until it's not in the past, and say so, rather than
+        # silently computing a window that already closed.
+        original_raw_payday = raw_payday
+        while raw_payday < today:
+            raw_payday = _next_payday_after(salary, raw_payday)
+        if raw_payday != original_raw_payday:
+            warnings.append(
+                f"Salary expected on {original_raw_payday.isoformat()} has not been seen yet"
+            )
 
-    # Weekend/holiday-shifted, matching the calendar view: the sweep happens
-    # on the actual banking day the salary lands (income shifts backward),
-    # not the raw expected_day.
-    payday = _shift_for_cadence(raw_payday, salary.cadence, salary.is_income)
-    next_payday = _shift_for_cadence(raw_next_payday, salary.cadence, salary.is_income)
+        raw_next_payday = _next_payday_after(salary, raw_payday)
+
+        # Weekend/holiday-shifted, matching the calendar view: the sweep happens
+        # on the actual banking day the salary lands (income shifts backward),
+        # not the raw expected_day.
+        payday = _shift_for_cadence(raw_payday, salary.cadence, salary.is_income)
+        next_payday = _shift_for_cadence(raw_next_payday, salary.cadence, salary.is_income)
 
     debit_payments = (
         db.query(RecurringPayment)

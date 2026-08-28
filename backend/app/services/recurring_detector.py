@@ -642,7 +642,19 @@ def find_salary_payment_id(db: Session) -> int | None:
         )
         .limit(1)
     ).first()
-    return row[0] if row else None
+    if row:
+        return row[0]
+
+    # No confirmed income payment has occurrences yet (e.g. just confirmed,
+    # before the first import matches one). Fall back to the most
+    # salary-like confirmed income payment: largest expected amount, then
+    # lowest id, so advice and allocation work from expected data alone.
+    return db.execute(
+        select(RecurringPayment.id)
+        .where(RecurringPayment.status == "confirmed", RecurringPayment.is_income.is_(True))
+        .order_by(func.abs(RecurringPayment.expected_amount).desc(), RecurringPayment.id.asc())
+        .limit(1)
+    ).scalar_one_or_none()
 
 
 def backfill_occurrences(db: Session, payment: RecurringPayment) -> None:
