@@ -363,8 +363,10 @@
 	async function addLineFromInput(categoryId: number, placement: 'income' | 'fixed' | 'sinking' | 'wishlist' | 'flexible') {
 		const existing = editLines.find(l => l.category_id === categoryId);
 		if (existing) {
-			if (existing.source !== 'manual') {
-				error = 'This category is managed by recurring payments / allocation buckets; edit those instead.';
+			if (existing.source === 'recurring') {
+				error = 'This category is already filled in automatically from your confirmed recurring payments (see the Recurring page). No manual line needed.';
+			} else if (existing.source === 'allocation') {
+				error = 'This category is already filled in automatically from your allocation buckets (see the Cash flow page). No manual line needed.';
 			}
 			return;
 		}
@@ -457,13 +459,22 @@
 		return line.actual <= line.budgeted * 1.05;
 	}
 
-	// Edit lines grouped
+	// Edit lines grouped. Derived lines are placed by their SOURCE, not the
+	// category's is_fixed flag: a bill derived from a confirmed recurring
+	// payment IS a fixed bill, and an allocation-derived contribution IS a
+	// savings goal, regardless of how the category happens to be flagged.
 	let editIncomeLines = $derived(editLines.filter(l => l.category_type === 'income'));
-	let editFixedLines = $derived(editLines.filter(l => l.category_type === 'expense' && l.is_fixed));
-	let editSavingsLines = $derived(editLines.filter(l => l.category_type === 'savings'));
+	let editFixedLines = $derived(editLines.filter(l =>
+		l.category_type === 'expense' && (l.source === 'recurring' || (l.source === 'manual' && l.is_fixed))
+	));
+	let editSavingsLines = $derived(editLines.filter(l =>
+		l.category_type === 'savings' || (l.source === 'allocation' && l.category_type !== 'income')
+	));
 	let editSinkingLines = $derived(editSavingsLines.filter(l => l.is_fixed));
 	let editWishListLines = $derived(editSavingsLines.filter(l => !l.is_fixed));
-	let editFlexibleLines = $derived(editLines.filter(l => l.category_type === 'expense' && !l.is_fixed));
+	let editFlexibleLines = $derived(editLines.filter(l =>
+		l.category_type === 'expense' && l.source === 'manual' && !l.is_fixed
+	));
 
 	let editTotalIncome = $derived(editIncomeLines.reduce((s, l) => s + l.amount, 0));
 	let editTotalFixed = $derived(editFixedLines.reduce((s, l) => s + l.amount, 0));

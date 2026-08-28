@@ -129,10 +129,13 @@ fields, same as previous additive changes.
 
 ## Deliberate exclusions and accepted limitations
 
-- The Income section stays manual. Salary is derivable from the confirmed
-  recurring income, but income is one number that rarely needs editing;
-  the drift pain lives in Fixed/Savings. Income derivation is a trivial
-  follow-up once this design proves itself.
+- SUPERSEDED 2026-08-28 (user feedback: an empty Income section made the
+  budget feel unfilled): income DOES derive, exactly like fixed bills,
+  from confirmed income recurring payments with a category. Additionally,
+  derived rows are placed in budget sections by their SOURCE (recurring ->
+  Fixed Bills for expenses / Income for income, allocation -> Savings
+  Goals), not by the category's is_fixed flag, which no real category had
+  set.
 - Freeze-boundary staleness: a period's derived lines are last updated by
   its last read while still open (end_date >= today). A period never
   viewed near its end keeps slightly older derived values. Accepted: the

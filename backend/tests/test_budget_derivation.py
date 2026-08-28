@@ -271,3 +271,30 @@ class TestRefreshRules:
         line = _lines(db, budget)[cat.id]
         assert line.amount == 999.0
         assert line.source == "manual"
+
+
+class TestIncomeDerivation:
+    def test_salary_derives_income_line(self, db: Session):
+        cat = _category(db, "Salaris", category_type="income", is_fixed=False)
+        _payment(
+            db, name="Salary", amount=3166.17, expected_day=22,
+            anchor=date(2026, 7, 22), is_income=True, category_id=cat.id,
+        )
+        budget = _budget(db)
+
+        refresh_derived_lines(db, budget, today=TODAY)
+        db.commit()
+
+        line = _lines(db, budget)[cat.id]
+        assert line.amount == 3166.17
+        assert line.source == "recurring"
+
+    def test_uncategorized_income_ignored(self, db: Session):
+        _payment(
+            db, name="Salary", amount=3000, expected_day=22,
+            anchor=date(2026, 7, 22), is_income=True, category_id=None,
+        )
+        budget = _budget(db)
+        refresh_derived_lines(db, budget, today=TODAY)
+        db.commit()
+        assert _lines(db, budget) == {}

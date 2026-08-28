@@ -33,12 +33,13 @@ def _buffer_pct(db: Session) -> float:
 
 
 def _fixed_targets(db: Session, budget: Budget) -> dict[int, float]:
-    """category_id -> summed absolute amount of confirmed non-income
-    recurring-payment occurrences projected into the period."""
+    """category_id -> summed absolute amount of confirmed recurring-payment
+    occurrences (expenses AND income, e.g. the salary) projected into the
+    period. Income and expense payments never share a category in practice;
+    both carry source "recurring"."""
     payments = db.execute(
         select(RecurringPayment).where(
             RecurringPayment.status == "confirmed",
-            RecurringPayment.is_income.is_(False),
             RecurringPayment.category_id.is_not(None),
         )
     ).scalars().all()
