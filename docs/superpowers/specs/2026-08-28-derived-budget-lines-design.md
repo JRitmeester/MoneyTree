@@ -96,11 +96,13 @@ line, deterministic).
   only. Derived rows are never deleted by the update endpoint (only by
   the refresh when their category stops deriving), so their row ids stay
   stable across auto-saves instead of churning delete+recreate.
-- Explicitly creating a NEW line for a category that currently derives
-  (a line for a deriving category that was not in the budget before the
-  request) returns 409: "This category is managed by recurring payments
-  / allocation buckets; edit those instead." The UI also blocks it
-  client-side in the add-line typeahead.
+- In a full-replace API a genuinely new line is indistinguishable from a
+  ride-along, so the server NEVER 409s the bulk update: it uniformly
+  ignores payload entries for deriving categories. Preventing the user
+  from adding a line for a deriving category is the client's job: the
+  add-line typeahead rejects those categories with the message "This
+  category is managed by recurring payments / allocation buckets; edit
+  those instead." 
 - `BudgetTemplate` is untouched, but `_create_from_template` skips
   template lines whose category would derive (the refresh creates the
   derived line immediately after creation).
