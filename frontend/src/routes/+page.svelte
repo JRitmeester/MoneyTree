@@ -5,10 +5,12 @@
 		formatEuro, type DashboardSummary, type CategorySpending, type MonthlyTrend, type BudgetSummary,
 		type BudgetVsActualSummary, type SavingsBalance, type RecurringNotice
 	} from '$lib/api';
+	import { extractErrorDetail } from '$lib/errors';
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import BalanceChart from '$lib/components/BalanceChart.svelte';
 	import SavingsCapacityPanel from '$lib/components/SavingsCapacityPanel.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 	import Loading from '$lib/components/Loading.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
 	import { get } from 'svelte/store';
@@ -22,6 +24,7 @@
 	let savingsBalance: SavingsBalance | null = $state(null);
 	let recurringNotices: RecurringNotice[] = $state([]);
 	let loading = $state(true);
+	let error: string | null = $state(null);
 	let dateFrom = $state(initialRange.dateFrom);
 	let dateTo = $state(initialRange.dateTo);
 
@@ -30,36 +33,41 @@
 
 	async function load() {
 		loading = true;
+		error = null;
 		expandedChildren = {};
 		const params: { date_from?: string; date_to?: string } = {};
 		if (dateFrom) params.date_from = dateFrom;
 		if (dateTo) params.date_to = dateTo;
 
-		const [s, c, t, bp, sb, notices] = await Promise.all([
-			getDashboardSummary(params),
-			getByCategory(params),
-			getMonthlyTrend(12),
-			getBudgets(),
-			getSavingsBalance(),
-			getRecurringNotices().catch(() => []),
-		]);
-		summary = s;
-		categories = c;
-		monthlyTrend = t;
-		budgetPeriods = bp;
-		savingsBalance = sb;
-		recurringNotices = notices;
+		try {
+			const [s, c, t, bp, sb, notices] = await Promise.all([
+				getDashboardSummary(params),
+				getByCategory(params),
+				getMonthlyTrend(12),
+				getBudgets(),
+				getSavingsBalance(),
+				getRecurringNotices().catch(() => []),
+			]);
+			summary = s;
+			categories = c;
+			monthlyTrend = t;
+			budgetPeriods = bp;
+			savingsBalance = sb;
+			recurringNotices = notices;
 
-		// Load BVA for the current budget period (contains today)
-		const today = new Date().toISOString().slice(0, 10);
-		const currentPeriod = bp.find(p => p.start_date <= today && p.end_date > today);
-		if (currentPeriod) {
-			bvaData = await getBudgetVsActual(currentPeriod.id);
-		} else {
-			bvaData = null;
+			// Load BVA for the current budget period (contains today)
+			const today = new Date().toISOString().slice(0, 10);
+			const currentPeriod = bp.find(p => p.start_date <= today && p.end_date > today);
+			if (currentPeriod) {
+				bvaData = await getBudgetVsActual(currentPeriod.id);
+			} else {
+				bvaData = null;
+			}
+		} catch (e) {
+			error = extractErrorDetail(e);
+		} finally {
+			loading = false;
 		}
-
-		loading = false;
 	}
 
 	$effect(() => { load(); });
@@ -169,6 +177,10 @@
 			</div>
 		{/snippet}
 	</PageHeader>
+
+	{#if error}
+		<ErrorBanner message={error} />
+	{/if}
 
 	{#if loading}
 		<Loading />
