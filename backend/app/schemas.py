@@ -232,6 +232,31 @@ class DashboardSummary(BaseModel):
     transfers_in: float = 0.0
     transfers_net: float = 0.0
     data_through: Optional[date] = None
+    ics_total: float = 0.0
+
+
+class YearReviewCategoryRow(BaseModel):
+    category_id: Optional[int]
+    name: str
+    total: float
+    previous_total: float
+    delta: float
+
+
+class YearReviewPreviousYear(BaseModel):
+    year: int
+    income: float
+    expenses: float
+    net: float
+
+
+class YearReviewOut(BaseModel):
+    year: int
+    income: float
+    expenses: float
+    net: float
+    by_root_category: list[YearReviewCategoryRow]
+    previous_year: YearReviewPreviousYear
 
 
 class CategorySpending(BaseModel):

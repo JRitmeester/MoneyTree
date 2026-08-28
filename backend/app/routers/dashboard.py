@@ -32,7 +32,11 @@ from ..schemas import (
     SavingsCapacitySummary,
     SpendingLineItem,
     SubcategorySpending,
+    YearReviewCategoryRow,
+    YearReviewOut,
+    YearReviewPreviousYear,
 )
+from ..services.ics import is_ics_text
 from ..services.recurring_detector import next_expected_date
 from ..services.transfers import savings_balance as compute_savings_balance
 
@@ -264,6 +268,12 @@ def get_summary(
     )
     net = total_income - total_expenses
 
+    ics_total = sum(
+        max(0.0, abs(tx.bedrag) - expense_offsets.get(tx.id, 0.0))
+        for tx in external
+        if tx.bedrag < 0 and is_ics_text(tx.naam, tx.merchant_name)
+    )
+
     transfers_out = sum(-tx.bedrag for tx in internal if tx.bedrag < 0)
     transfers_in = sum(tx.bedrag for tx in internal if tx.bedrag > 0)
 
@@ -288,6 +298,98 @@ def get_summary(
         transfers_in=round(transfers_in, 2),
         transfers_net=round(transfers_out - transfers_in, 2),
         data_through=data_through,
+        ics_total=round(ics_total, 2),
+    )
+
+
+def _year_bounds(year: int) -> tuple[date, date]:
+    return date(year, 1, 1), date(year, 12, 31)
+
+
+def _root_category_totals(
+    db: Session,
+    cat_id_to_cat: dict,
+    date_from: date,
+    date_to: date,
+    expense_offsets: dict[int, float],
+) -> dict[int | None, float]:
+    """Expense totals for a period, grouped by root category. Uncategorized
+    items are grouped under the `None` key rather than dropped, since the
+    year-in-review view is about completeness."""
+    totals: dict[int | None, float] = {}
+    for item in _iter_expense_items(db, date_from, date_to, expense_offsets):
+        key = None if item.category_id is None else _find_root(item.category_id, cat_id_to_cat)
+        totals[key] = totals.get(key, 0.0) + item.amount
+    return totals
+
+
+def _external_income_total(db: Session, date_from: date, date_to: date, offset_income_ids: set[int]) -> float:
+    query = (
+        select(Transaction)
+        .where(Transaction.datum >= date_from, Transaction.datum <= date_to)
+        .where(Transaction.bedrag > 0)
+        .where(Transaction.is_internal_transfer.is_(False))
+    )
+    txs = db.execute(query).scalars().all()
+    return sum(tx.bedrag for tx in txs if tx.id not in offset_income_ids)
+
+
+@router.get("/year-review", response_model=YearReviewOut)
+def get_year_review(
+    year: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Year-in-review: income/expenses/net for a year plus a per-root-category
+    rollup with the previous year's total for comparison. Uses the same
+    exclusion rules (internal transfers out, offsets netted) as the rest of
+    the dashboard's analytics."""
+    if year is None:
+        year = date.today().year
+
+    cat_id_to_cat, _ = _build_hierarchy(db)
+    expense_offsets, offset_income_ids = _offset_totals(db)
+
+    cur_from, cur_to = _year_bounds(year)
+    prev_from, prev_to = _year_bounds(year - 1)
+
+    cur_totals = _root_category_totals(db, cat_id_to_cat, cur_from, cur_to, expense_offsets)
+    prev_totals = _root_category_totals(db, cat_id_to_cat, prev_from, prev_to, expense_offsets)
+
+    cur_income = _external_income_total(db, cur_from, cur_to, offset_income_ids)
+    prev_income = _external_income_total(db, prev_from, prev_to, offset_income_ids)
+    cur_expenses = sum(cur_totals.values())
+    prev_expenses = sum(prev_totals.values())
+
+    rows = []
+    for key in set(cur_totals) | set(prev_totals):
+        total = cur_totals.get(key, 0.0)
+        previous_total = prev_totals.get(key, 0.0)
+        if key is None:
+            name = "Uncategorized"
+        else:
+            cat = cat_id_to_cat.get(key)
+            name = cat.name if cat else f"Category #{key}"
+        rows.append(YearReviewCategoryRow(
+            category_id=key,
+            name=name,
+            total=round(total, 2),
+            previous_total=round(previous_total, 2),
+            delta=round(total - previous_total, 2),
+        ))
+    rows.sort(key=lambda r: r.total, reverse=True)
+
+    return YearReviewOut(
+        year=year,
+        income=round(cur_income, 2),
+        expenses=round(cur_expenses, 2),
+        net=round(cur_income - cur_expenses, 2),
+        by_root_category=rows,
+        previous_year=YearReviewPreviousYear(
+            year=year - 1,
+            income=round(prev_income, 2),
+            expenses=round(prev_expenses, 2),
+            net=round(prev_income - prev_expenses, 2),
+        ),
     )
 
 

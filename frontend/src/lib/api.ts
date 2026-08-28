@@ -314,6 +314,36 @@ export interface DashboardSummary {
 	transfers_in: number;
 	transfers_net: number;
 	data_through: string | null;
+	ics_total: number;
+}
+
+export interface YearReviewCategoryRow {
+	category_id: number | null;
+	name: string;
+	total: number;
+	previous_total: number;
+	delta: number;
+}
+
+export interface YearReviewPreviousYear {
+	year: number;
+	income: number;
+	expenses: number;
+	net: number;
+}
+
+export interface YearReview {
+	year: number;
+	income: number;
+	expenses: number;
+	net: number;
+	by_root_category: YearReviewCategoryRow[];
+	previous_year: YearReviewPreviousYear;
+}
+
+export async function getYearReview(year?: number): Promise<YearReview> {
+	const qs = year !== undefined ? `?year=${year}` : '';
+	return request(`/api/dashboard/year-review${qs}`);
 }
 
 export interface CategorySpending {

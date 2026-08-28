@@ -209,6 +209,13 @@
 					{/if}
 				</div>
 			{/if}
+			{#if summary.ics_total !== 0}
+				<div class="card info">
+					<div class="card-value">{formatEuro(summary.ics_total)}</div>
+					<div class="card-label">Credit card (ICS)</div>
+					<div class="card-detail">spending not itemized here</div>
+				</div>
+			{/if}
 			<div class="card info">
 				<div class="card-value">{summary.transaction_count}</div>
 				<div class="card-label">Transactions</div>
