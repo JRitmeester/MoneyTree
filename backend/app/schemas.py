@@ -217,6 +217,77 @@ class CategoryMergeCounts(BaseModel):
     budget_templates: int
     category_mappings: int
     children: int
+    allocation_buckets: int
+
+
+# --- Allocation buckets ---
+
+
+class AllocationBucketBase(BaseModel):
+    """Shared validation for create/update: trimmed non-blank name and a
+    value range depending on rule_type (fixed euros > 0; percent 0-100]."""
+
+    @staticmethod
+    def _validate_rule(rule_type: str, value: float) -> None:
+        if rule_type not in ("fixed", "percent"):
+            raise ValueError("rule_type must be 'fixed' or 'percent'")
+        if rule_type == "fixed" and value <= 0:
+            raise ValueError("Fixed amount must be greater than 0")
+        if rule_type == "percent" and not 0 < value <= 100:
+            raise ValueError("Percentage must be between 0 and 100")
+
+
+class AllocationBucketCreate(AllocationBucketBase):
+    name: str = Field(min_length=1, max_length=100)
+    rule_type: str
+    value: float
+    category_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _check(self):
+        stripped = self.name.strip()
+        if not stripped:
+            raise ValueError("Bucket name must not be blank")
+        self.name = stripped
+        self._validate_rule(self.rule_type, self.value)
+        return self
+
+
+class AllocationBucketUpdate(AllocationBucketBase):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    rule_type: Optional[str] = None
+    value: Optional[float] = None
+    category_id: Optional[int] = None
+    is_active: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.name is not None:
+            stripped = self.name.strip()
+            if not stripped:
+                raise ValueError("Bucket name must not be blank")
+            self.name = stripped
+        # rule_type/value cross-validation against the existing row happens
+        # in the router, where the unchanged half is known.
+        if self.rule_type is not None and self.rule_type not in ("fixed", "percent"):
+            raise ValueError("rule_type must be 'fixed' or 'percent'")
+        return self
+
+
+class AllocationBucketOrderUpdate(BaseModel):
+    ids: list[int]
+
+
+class AllocationBucketOut(BaseModel):
+    id: int
+    name: str
+    rule_type: str
+    value: float
+    position: int
+    category_id: Optional[int] = None
+    is_active: bool
+
+    model_config = {"from_attributes": True}
 
 
 # --- Dashboard ---

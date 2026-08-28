@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..auth import require_auth
 from ..database import get_db
 from ..models import (
-    BudgetLine, BudgetTemplate, Category, CategoryMapping, LineItem, Transaction,
+    AllocationBucket, BudgetLine, BudgetTemplate, Category, CategoryMapping, LineItem, Transaction,
 )
 from ..schemas import CategoryCreate, CategoryMergeCounts, CategoryOut, CategoryUpdate
 from ..services.category_merge import apply_category_merge, count_category_references, is_descendant
@@ -183,6 +183,15 @@ def delete_category(category_id: int, db: Session = Depends(get_db)):
 
     if cat.children:
         raise HTTPException(status_code=409, detail="Category has children, delete them first")
+
+    # Allocation-bucket links never block deletion: a bucket's category link
+    # is a soft preference, so it is cleared instead (spec: salary
+    # allocation design, "Data model").
+    db.execute(
+        AllocationBucket.__table__.update()
+        .where(AllocationBucket.category_id == category_id)
+        .values(category_id=None)
+    )
 
     reference_counts = [
         (_count(db, Transaction, category_id), "transaction"),

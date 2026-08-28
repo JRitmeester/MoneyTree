@@ -279,6 +279,23 @@ class OwnAccount(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class AllocationBucket(Base):
+    """A configured destination for part of each salary (e.g. long-term
+    savings, investing). fixed buckets take a set euro amount; percent
+    buckets take a share of what remains after bills and fixed buckets.
+    Plan-only: nothing is tracked against buckets yet."""
+    __tablename__ = "allocation_buckets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    rule_type: Mapped[str] = mapped_column(String(10), nullable=False)  # "fixed" | "percent"
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class IncidentalLabel(Base):
     """Groups related one-off transactions across categories, e.g. a holiday
     or a house move, so incidental spending can be explained per event."""

@@ -23,6 +23,7 @@ from .routers import (
     category_mappings,
     dashboard,
     debug,
+    allocation_buckets,
     incidental_labels,
     line_items,
     own_accounts,
@@ -95,6 +96,7 @@ app.include_router(line_items.router)
 app.include_router(categories.router)
 app.include_router(dashboard.router)
 app.include_router(incidental_labels.router)
+app.include_router(allocation_buckets.router)
 app.include_router(budget.router)
 app.include_router(budget_template.router)
 app.include_router(category_mappings.router)

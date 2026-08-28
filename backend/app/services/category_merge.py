@@ -9,7 +9,7 @@ constraint is never violated.
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import BudgetLine, BudgetTemplate, Category, CategoryMapping, LineItem, Transaction
+from ..models import AllocationBucket, BudgetLine, BudgetTemplate, Category, CategoryMapping, LineItem, Transaction
 
 
 def _count(db: Session, model, value: int, column: str = "category_id") -> int:
@@ -37,6 +37,7 @@ def count_category_references(db: Session, category_id: int) -> dict:
         "budget_lines": _count(db, BudgetLine, category_id),
         "budget_templates": _count(db, BudgetTemplate, category_id),
         "category_mappings": _count(db, CategoryMapping, category_id),
+        "allocation_buckets": _count(db, AllocationBucket, category_id),
         "children": _count(db, Category, category_id, column="parent_id"),
     }
 
@@ -71,6 +72,11 @@ def apply_category_merge(db: Session, source: Category, target: Category) -> Non
     db.execute(
         CategoryMapping.__table__.update()
         .where(CategoryMapping.category_id == source_id)
+        .values(category_id=target_id)
+    )
+    db.execute(
+        AllocationBucket.__table__.update()
+        .where(AllocationBucket.category_id == source_id)
         .values(category_id=target_id)
     )
     db.execute(
