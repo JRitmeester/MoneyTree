@@ -6,6 +6,7 @@
 	} from '$lib/api';
 	import { extractErrorDetail } from '$lib/errors';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import SalaryAllocationCard from '$lib/components/SalaryAllocationCard.svelte';
 	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 	import Loading from '$lib/components/Loading.svelte';
 
@@ -233,6 +234,8 @@
 				{/if}
 			</div>
 		{/if}
+
+		<SalaryAllocationCard />
 
 		<div class="section">
 			<div class="calendar-header">

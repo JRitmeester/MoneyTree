@@ -1193,6 +1193,81 @@ export async function getCashflowAdvice(): Promise<CashflowAdvice> {
 	return request('/api/cashflow/advice');
 }
 
+export interface AllocationBucket {
+	id: number;
+	name: string;
+	rule_type: 'fixed' | 'percent';
+	value: number;
+	position: number;
+	category_id: number | null;
+	is_active: boolean;
+}
+
+export interface SalaryAllocationLine {
+	bucket_id: number;
+	name: string;
+	rule_type: string;
+	value: number;
+	amount: number;
+	category_id: number | null;
+	category_name: string | null;
+	shortfall: boolean;
+}
+
+export interface SalaryAllocation {
+	salary_confirmed: boolean;
+	message: string | null;
+	payday: string | null;
+	basis: 'actual' | 'expected' | null;
+	salary_amount: number | null;
+	bills_pot: number;
+	kept_in_checking: number;
+	free_to_spend: number;
+	lines: SalaryAllocationLine[];
+	warnings: string[];
+}
+
+export async function getSalaryAllocation(): Promise<SalaryAllocation> {
+	return request('/api/cashflow/allocation');
+}
+
+export async function listAllocationBuckets(): Promise<AllocationBucket[]> {
+	return request('/api/allocation-buckets');
+}
+
+export async function createAllocationBucket(data: {
+	name: string;
+	rule_type: string;
+	value: number;
+	category_id?: number | null;
+}): Promise<AllocationBucket> {
+	return request('/api/allocation-buckets', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateAllocationBucket(
+	id: number,
+	data: Partial<{
+		name: string;
+		rule_type: string;
+		value: number;
+		category_id: number | null;
+		is_active: boolean;
+	}>
+): Promise<AllocationBucket> {
+	return request(`/api/allocation-buckets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function deleteAllocationBucket(id: number): Promise<void> {
+	return request(`/api/allocation-buckets/${id}`, { method: 'DELETE' });
+}
+
+export async function reorderAllocationBuckets(ids: number[]): Promise<AllocationBucket[]> {
+	return request('/api/allocation-buckets/order', {
+		method: 'PUT',
+		body: JSON.stringify({ ids })
+	});
+}
+
 export interface CashflowSettings {
 	buffer_pct: number;
 }
