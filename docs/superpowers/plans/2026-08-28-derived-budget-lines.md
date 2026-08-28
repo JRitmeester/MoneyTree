@@ -33,7 +33,7 @@
 
 ### Task 2: Budget router integration
 
-**Files:** `backend/app/routers/budget.py`; `backend/app/schemas.py` (`BudgetLineOut` gains `source: str = "manual"`). Tests: extend `backend/tests/test_budget*.py` (find the existing file names first) with a new class.
+**Files:** `backend/app/routers/budget.py`; `backend/app/schemas.py` (`BudgetLineOut` gains `source: str = "manual"`). Tests: new `backend/tests/test_budget_api.py` (no budget test file exists yet; cover the new behavior, not a retrofit of the whole router).
 
 **Contract (spec "API and validation"):** `get_budget`, `list_budgets`, `create_budget` (after `_create_from_template`), and `update_budget` call `refresh_derived_lines` (list: only for budgets with `end_date >= today`) and commit. `_create_from_template` skips template lines whose category would currently derive (compute the deriving-category set via the service; expose a helper `deriving_category_ids(db, budget) -> dict[int, str]` from Task 1 if cleaner). `update_budget` restructure: delete only lines with `source == "manual"`; ignore payload entries whose category is currently deriving (never 409 for them); re-add remaining manual lines; then refresh. Derived row ids stay stable across updates (assert in test). `update_template=true` keeps existing behavior for manual categories; entries for deriving categories are skipped there too. `_budget_to_out` passes `source` through.
 
