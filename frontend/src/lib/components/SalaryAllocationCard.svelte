@@ -128,57 +128,57 @@
 		{/if}
 
 		{#if !editMode}
+			<div class="waterfall">
+				<div class="row muted">
+					<span class="row-name">Recurring bills pot
+						<span class="caption">covers bills until next payday</span>
+					</span>
+					<span class="row-amount">{formatEuro(allocation.bills_pot)}</span>
+				</div>
+				{#if allocation.kept_in_checking > 0}
+					<div class="row muted">
+						<span class="row-name">Kept in checking for imminent bills</span>
+						<span class="row-amount">{formatEuro(allocation.kept_in_checking)}</span>
+					</div>
+				{/if}
+				<div class="row subtotal">
+					<span class="row-name">Left to allocate
+						<span class="caption">salary minus the rows above</span>
+					</span>
+					<span class="row-amount">
+						{formatEuro(Math.max(0, (allocation.salary_amount ?? 0) - allocation.bills_pot - allocation.kept_in_checking))}
+					</span>
+				</div>
+				{#each allocation.lines as line (line.bucket_id)}
+					<div class="row" class:shortfall={line.shortfall}>
+						<span class="row-name">
+							{line.name}
+							<span class="caption">{ruleCaption(line)}</span>
+							{#if line.category_name}
+								<span class="caption category">→ {line.category_name}</span>
+							{/if}
+							{#if line.shortfall}
+								<span class="shortfall-note">not fully funded</span>
+							{/if}
+						</span>
+						<span class="row-amount">{formatEuro(line.amount)}</span>
+					</div>
+				{/each}
+				<div class="row total">
+					<span class="row-name">Free to spend</span>
+					<span class="row-amount">{formatEuro(allocation.free_to_spend)}</span>
+				</div>
+			</div>
+
 			{#if buckets.length === 0}
 				<p class="empty-note">
-					Divide each salary deliberately: after the recurring bills pot, send
-					fixed amounts or percentages of what remains to savings goals,
-					investing, or anything else, and see what is genuinely free to spend.
+					Divide the "left to allocate" amount deliberately: send fixed amounts
+					or percentages of it to savings goals, investing, or anything else,
+					and see what is genuinely free to spend.
 				</p>
 				<button class="add-first" onclick={() => { editMode = true; showDraft = true; }}>
 					Add your first bucket
 				</button>
-			{:else}
-				<div class="waterfall">
-					<div class="row muted">
-						<span class="row-name">Recurring bills pot
-							<span class="caption">covers bills until next payday</span>
-						</span>
-						<span class="row-amount">{formatEuro(allocation.bills_pot)}</span>
-					</div>
-					{#if allocation.kept_in_checking > 0}
-						<div class="row muted">
-							<span class="row-name">Kept in checking for imminent bills</span>
-							<span class="row-amount">{formatEuro(allocation.kept_in_checking)}</span>
-						</div>
-					{/if}
-					<div class="row subtotal">
-						<span class="row-name">Left to allocate
-							<span class="caption">salary minus the rows above</span>
-						</span>
-						<span class="row-amount">
-							{formatEuro(Math.max(0, (allocation.salary_amount ?? 0) - allocation.bills_pot - allocation.kept_in_checking))}
-						</span>
-					</div>
-					{#each allocation.lines as line (line.bucket_id)}
-						<div class="row" class:shortfall={line.shortfall}>
-							<span class="row-name">
-								{line.name}
-								<span class="caption">{ruleCaption(line)}</span>
-								{#if line.category_name}
-									<span class="caption category">→ {line.category_name}</span>
-								{/if}
-								{#if line.shortfall}
-									<span class="shortfall-note">not fully funded</span>
-								{/if}
-							</span>
-							<span class="row-amount">{formatEuro(line.amount)}</span>
-						</div>
-					{/each}
-					<div class="row total">
-						<span class="row-name">Free to spend</span>
-						<span class="row-amount">{formatEuro(allocation.free_to_spend)}</span>
-					</div>
-				</div>
 			{/if}
 
 			{#if allocation.warnings.length > 0}
