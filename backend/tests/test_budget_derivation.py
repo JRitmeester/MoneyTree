@@ -298,3 +298,43 @@ class TestIncomeDerivation:
         refresh_derived_lines(db, budget, today=TODAY)
         db.commit()
         assert _lines(db, budget) == {}
+
+
+class TestIntentBasedSavings:
+    def test_tight_month_still_derives_full_bucket_intent(self, db: Session):
+        """Spec amendment (user choice A, 2026-08-28): budget savings lines
+        show the PLAN (configured bucket values), not the waterfall's
+        clipped outcome. A salary too small to fund a bucket still derives
+        the full intended contribution; the shortfall story lives on the
+        cash-flow card."""
+        _salary(db, occurrence=(date(2026, 8, 21), 500.0))
+        cat_a = _category(db, "Noodfonds", category_type="savings")
+        cat_b = _category(db, "Autofonds", category_type="savings")
+        _bucket(db, name="Nood", rule_type="fixed", value=400, category_id=cat_a.id)
+        _bucket(db, name="Auto", rule_type="fixed", value=300, category_id=cat_b.id, position=1)
+        budget = _budget(db)
+
+        refresh_derived_lines(db, budget, today=TODAY)
+        db.commit()
+
+        lines = _lines(db, budget)
+        assert lines[cat_a.id].amount == 400.0
+        assert lines[cat_b.id].amount == 300.0
+
+    def test_percent_intent_uses_post_fixed_base_unclipped(self, db: Session):
+        """Percent intent = share of (salary - bills pot - kept - all fixed
+        buckets at full value), floored at zero."""
+        _salary(db, occurrence=(date(2026, 8, 21), 2000.0))
+        cat_f = _category(db, "Noodfonds", category_type="savings")
+        cat_p = _category(db, "Lange termijn", category_type="savings")
+        _bucket(db, name="Nood", rule_type="fixed", value=500, category_id=cat_f.id)
+        _bucket(db, name="LT", rule_type="percent", value=50, category_id=cat_p.id, position=1)
+        budget = _budget(db)
+
+        refresh_derived_lines(db, budget, today=TODAY)
+        db.commit()
+
+        lines = _lines(db, budget)
+        assert lines[cat_f.id].amount == 500.0
+        # (2000 - 0 bills - 500 fixed) * 50% = 750
+        assert lines[cat_p.id].amount == 750.0

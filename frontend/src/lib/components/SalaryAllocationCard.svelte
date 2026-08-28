@@ -2,7 +2,7 @@
 	import {
 		getSalaryAllocation, listAllocationBuckets,
 		createAllocationBucket, updateAllocationBucket, deleteAllocationBucket,
-		reorderAllocationBuckets, formatEuro,
+		reorderAllocationBuckets, formatEuro, getSavingsCapacity,
 		type SalaryAllocation, type AllocationBucket
 	} from '$lib/api';
 	import { extractErrorDetail } from '$lib/errors';
@@ -20,6 +20,16 @@
 	let draftValue: number | null = $state(null);
 	let draftCategoryId: number | null = $state(null);
 	let showDraft = $state(false);
+	let structuralCapacity: number | null = $state(null);
+
+	// Sizing guide for the bucket editor: what history says is sustainably
+	// available (income minus ALL structural spending, incidentals excluded).
+	$effect(() => {
+		if (!editMode || structuralCapacity !== null) return;
+		getSavingsCapacity(6)
+			.then((cap) => (structuralCapacity = cap.trailing_6_structural))
+			.catch(() => {});
+	});
 
 	async function load() {
 		try {
@@ -202,6 +212,16 @@
 				</div>
 			{/if}
 		{:else}
+			{#if structuralCapacity !== null}
+				{@const bucketTotal = buckets.filter((b) => b.is_active && b.rule_type === 'fixed').reduce((sum, b) => sum + b.value, 0)}
+				<p class="sizing-guide" class:over={bucketTotal > Math.max(0, structuralCapacity)}>
+					Sizing guide: over the last 6 months, about
+					<strong>{formatEuro(Math.max(0, structuralCapacity))}</strong>/month was
+					structurally free after all spending. Your fixed buckets total
+					<strong>{formatEuro(bucketTotal)}</strong>; keeping that at or below the
+					free amount makes the plan sustainable.
+				</p>
+			{/if}
 			<div class="edit-list">
 				{#each buckets as bucket, i (bucket.id)}
 					<div class="edit-row" class:paused={!bucket.is_active}>
@@ -457,5 +477,20 @@
 			min-width: 44px;
 		}
 		.edit-row { row-gap: 0.4rem; }
+	}
+
+	.sizing-guide {
+		font-size: 0.85rem;
+		color: var(--color-text-muted);
+		background: var(--color-warn-bg-green, #f0fdf4);
+		border: 1px solid var(--color-accent);
+		border-radius: var(--radius-sm);
+		padding: 0.6rem 0.9rem;
+		margin: 0 0 0.9rem;
+		max-width: 46rem;
+	}
+	.sizing-guide.over {
+		background: var(--color-warn-bg-amber);
+		border-color: var(--color-amber);
 	}
 </style>

@@ -20,9 +20,8 @@ from ..models import (
     AllocationBucket, AppSetting, Budget, BudgetLine, Category,
     RecurringPayment, RecurringPaymentOccurrence,
 )
-from .cashflow_advisor import DEFAULT_BUFFER_PCT, occurrences_in_range
+from .cashflow_advisor import DEFAULT_BUFFER_PCT, compute_advice, occurrences_in_range
 from .recurring_detector import find_salary_payment_id
-from .salary_allocator import compute_allocation_at
 
 logger = logging.getLogger(__name__)
 
@@ -87,29 +86,47 @@ def _paydays_in_period(db: Session, budget: Budget) -> list[tuple[date, float]]:
 
 
 def _savings_targets(db: Session, budget: Budget) -> dict[int, float]:
-    """category_id -> summed derived contribution from active, linked
-    allocation buckets over the period's payday(s)."""
-    has_linked_bucket = db.execute(
-        select(AllocationBucket.id).where(
-            AllocationBucket.is_active.is_(True),
-            AllocationBucket.category_id.is_not(None),
-        ).limit(1)
-    ).scalar_one_or_none()
-    if has_linked_bucket is None:
+    """category_id -> summed INTENDED contribution from active, linked
+    allocation buckets over the period's payday(s).
+
+    Intent, not outcome (user decision 2026-08-28): the budget is a plan
+    document, so fixed buckets derive their full configured value even in
+    a month whose salary cannot fund them; the shortfall story is told on
+    the cash-flow card. Percent buckets derive their share of the
+    post-bills, post-fixed base (floored at zero), which is their intent
+    by definition."""
+    buckets = db.execute(
+        select(AllocationBucket)
+        .where(AllocationBucket.is_active.is_(True))
+        .order_by(AllocationBucket.position, AllocationBucket.id)
+    ).scalars().all()
+    if not any(b.category_id is not None for b in buckets):
         return {}
 
+    import math
+
     buffer_pct = _buffer_pct(db)
+    total_fixed = sum(b.value for b in buckets if b.rule_type == "fixed")
+
     targets: dict[int, float] = {}
     for payday, salary_amount in _paydays_in_period(db, budget):
         try:
-            allocation = compute_allocation_at(db, buffer_pct, payday, salary_amount)
+            advice = compute_advice(db, buffer_pct, anchor_payday=payday)
+            earmarked = (advice.sweep_amount or 0.0) + advice.keep_in_checking
         except Exception:
             logger.exception("Skipping savings derivation for payday %s", payday)
             continue
-        for line in allocation.lines:
-            if line.category_id is not None and line.amount > 0:
-                targets[line.category_id] = round(
-                    targets.get(line.category_id, 0.0) + line.amount, 2
+        percent_base = max(0.0, salary_amount - earmarked - total_fixed)
+        for bucket in buckets:
+            if bucket.category_id is None:
+                continue
+            if bucket.rule_type == "fixed":
+                amount = bucket.value
+            else:
+                amount = math.floor(percent_base * bucket.value / 100 * 100 + 1e-9) / 100
+            if amount > 0:
+                targets[bucket.category_id] = round(
+                    targets.get(bucket.category_id, 0.0) + amount, 2
                 )
     return targets
 
