@@ -1229,6 +1229,12 @@ export interface SalaryAllocationLine {
 	shortfall: boolean;
 }
 
+export interface SalaryAllocationBillsItem {
+	name: string;
+	date: string;
+	amount: number;
+}
+
 export interface SalaryAllocation {
 	salary_confirmed: boolean;
 	message: string | null;
@@ -1237,7 +1243,9 @@ export interface SalaryAllocation {
 	salary_amount: number | null;
 	bills_pot: number;
 	kept_in_checking: number;
+	bills_buffer_amount: number;
 	free_to_spend: number;
+	bills_items: SalaryAllocationBillsItem[];
 	lines: SalaryAllocationLine[];
 	warnings: string[];
 }

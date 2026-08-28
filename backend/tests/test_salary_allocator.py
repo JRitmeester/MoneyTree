@@ -192,3 +192,21 @@ class TestWaterfall:
         result = compute_allocation(db, buffer_pct=0.0, today=date(2026, 8, 25))
         assert result.lines[0].category_name == "Sparen > Lange termijn"
         assert result.lines[0].category_id == child.id
+
+
+class TestBillsBreakdown:
+    def test_allocation_exposes_anchored_bills_items(self, db: Session):
+        _salary(db, occurrence=(date(2026, 8, 21), 3200.0))
+        _bill(db, name="Rent", amount=-900, day=1)
+
+        result = compute_allocation(db, buffer_pct=10.0, today=date(2026, 8, 25))
+
+        assert len(result.bills_items) == 1
+        item = result.bills_items[0]
+        assert item.name == "Rent"
+        assert item.date == date(2026, 9, 1)
+        assert item.amount == 900.0
+        assert result.bills_buffer_amount == 90.0
+        # items + buffer == bills_pot + kept_in_checking
+        total = sum(i.amount for i in result.bills_items) + result.bills_buffer_amount
+        assert round(total, 2) == round(result.bills_pot + result.kept_in_checking, 2)

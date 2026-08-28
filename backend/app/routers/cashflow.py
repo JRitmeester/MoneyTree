@@ -11,6 +11,7 @@ from ..models import AppSetting, RecurringPayment, RecurringPaymentOccurrence
 from ..schemas import (
     CashflowAdviceOut,
     SalaryAllocationOut,
+    SalaryAllocationBillsItemOut,
     SalaryAllocationLineOut,
     CashflowCalendarDayOut,
     CashflowCalendarItemOut,
@@ -177,7 +178,12 @@ def get_allocation(db: Session = Depends(get_db)):
         salary_amount=allocation.salary_amount,
         bills_pot=allocation.bills_pot,
         kept_in_checking=allocation.kept_in_checking,
+        bills_buffer_amount=allocation.bills_buffer_amount,
         free_to_spend=allocation.free_to_spend,
+        bills_items=[
+            SalaryAllocationBillsItemOut(name=i.name, date=i.date, amount=i.amount)
+            for i in allocation.bills_items
+        ],
         lines=[
             SalaryAllocationLineOut(
                 bucket_id=l.bucket_id,

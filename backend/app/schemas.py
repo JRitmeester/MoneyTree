@@ -301,6 +301,12 @@ class SalaryAllocationLineOut(BaseModel):
     shortfall: bool = False
 
 
+class SalaryAllocationBillsItemOut(BaseModel):
+    name: str
+    date: date
+    amount: float
+
+
 class SalaryAllocationOut(BaseModel):
     salary_confirmed: bool
     message: Optional[str] = None
@@ -309,7 +315,9 @@ class SalaryAllocationOut(BaseModel):
     salary_amount: Optional[float] = None
     bills_pot: float = 0.0
     kept_in_checking: float = 0.0
+    bills_buffer_amount: float = 0.0
     free_to_spend: float = 0.0
+    bills_items: list[SalaryAllocationBillsItemOut] = Field(default_factory=list)
     lines: list[SalaryAllocationLineOut] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 

@@ -44,6 +44,16 @@ class AllocationLine:
 
 
 @dataclass(frozen=True)
+class BillsItem:
+    """One expected bill inside the anchored period, for the UI's
+    'which bills are reserved for' breakdown."""
+
+    name: str
+    date: date
+    amount: float
+
+
+@dataclass(frozen=True)
 class SalaryAllocation:
     salary_confirmed: bool
     message: str | None = None
@@ -52,7 +62,9 @@ class SalaryAllocation:
     salary_amount: float | None = None
     bills_pot: float = 0.0
     kept_in_checking: float = 0.0
+    bills_buffer_amount: float = 0.0
     free_to_spend: float = 0.0
+    bills_items: list[BillsItem] = field(default_factory=list)
     lines: list[AllocationLine] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -145,6 +157,10 @@ def compute_allocation_at(
     advice = compute_advice(db, buffer_pct, today=today, anchor_payday=anchor)
     bills_pot = round(advice.sweep_amount or 0.0, 2)
     kept_in_checking = round(advice.keep_in_checking, 2)
+    bills_items = [
+        BillsItem(name=i.name, date=i.date, amount=i.amount) for i in advice.sweep_items
+    ]
+    bills_buffer_amount = round(advice.buffer_amount, 2)
 
     buckets = db.execute(
         select(AllocationBucket)
@@ -191,7 +207,9 @@ def compute_allocation_at(
             salary_amount=salary_amount,
             bills_pot=bills_pot,
             kept_in_checking=kept_in_checking,
+            bills_buffer_amount=bills_buffer_amount,
             free_to_spend=0.0,
+            bills_items=bills_items,
             lines=lines,
             warnings=warnings,
         )
@@ -230,7 +248,9 @@ def compute_allocation_at(
         salary_amount=salary_amount,
         bills_pot=bills_pot,
         kept_in_checking=kept_in_checking,
+        bills_buffer_amount=bills_buffer_amount,
         free_to_spend=free_to_spend,
+        bills_items=bills_items,
         lines=lines,
         warnings=warnings,
     )

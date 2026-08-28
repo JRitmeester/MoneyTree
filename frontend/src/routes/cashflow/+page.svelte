@@ -1,6 +1,6 @@
 <script lang="ts">
 	import {
-		getCashflowCalendar, getCashflowAdvice, getCashflowSettings, updateCashflowSettings,
+		getCashflowCalendar, getCashflowAdvice,
 		formatEuro,
 		type CashflowCalendar, type CashflowAdvice
 	} from '$lib/api';
@@ -15,9 +15,6 @@
 	let advice: CashflowAdvice | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
-
-	let bufferPct = $state(10);
-	let bufferSaving = $state(false);
 
 	function startOfMonth(d: Date): Date {
 		return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -41,14 +38,12 @@
 		loading = true;
 		error = null;
 		try {
-			const [calendarResult, adviceResult, settingsResult] = await Promise.all([
+			const [calendarResult, adviceResult] = await Promise.all([
 				getCashflowCalendar(monthKey(monthDate)),
-				getCashflowAdvice(),
-				getCashflowSettings()
+				getCashflowAdvice()
 			]);
 			calendar = calendarResult;
 			advice = adviceResult;
-			bufferPct = settingsResult.buffer_pct;
 		} catch (e) {
 			error = extractErrorDetail(e);
 		} finally {
@@ -64,20 +59,6 @@
 
 	function nextMonth() {
 		monthDate = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
-	}
-
-	async function saveBufferPct() {
-		bufferSaving = true;
-		error = null;
-		try {
-			const result = await updateCashflowSettings(bufferPct);
-			bufferPct = result.buffer_pct;
-			advice = await getCashflowAdvice();
-		} catch (e) {
-			error = extractErrorDetail(e);
-		} finally {
-			bufferSaving = false;
-		}
 	}
 
 	// Build a 7-column week grid for the current month, padded with leading
@@ -124,155 +105,31 @@
 			<a href="/recurring" class="confirm-link">Go to Recurring</a>
 		</div>
 	{:else}
-		{#if advice}
-			<div class="section advice-card">
-				<h2>Payday transfer plan</h2>
-				<p class="explainer">
-					On payday, move this amount from checking to savings: it covers every
-					recurring bill until your next salary, plus a safety buffer.
-				</p>
-				<div class="advice-grid">
-					<div class="advice-item">
-						<span class="advice-label">Move to savings on {advice.payday ? fmtDate(advice.payday) : ''}</span>
-						<span class="advice-value">{formatEuro(advice.sweep_amount ?? 0)}</span>
-					</div>
-					{#if advice.keep_in_checking > 0}
-						<div class="advice-item">
-							<span class="advice-label">Keep in checking</span>
-							<span class="advice-value muted-value">{formatEuro(advice.keep_in_checking)}</span>
-						</div>
-					{/if}
-					<div class="advice-item buffer-item">
-						<span class="advice-label">Safety buffer</span>
-						<span class="buffer-input-row">
-							<input
-								type="number"
-								min="0"
-								max="100"
-								step="1"
-								bind:value={bufferPct}
-								onblur={saveBufferPct}
-								onkeydown={(e) => { if (e.key === 'Enter') saveBufferPct(); }}
-								disabled={bufferSaving}
-							/>
-							<span>%</span>
-						</span>
-					</div>
-				</div>
-
-				{#if advice.sweep_items.length > 0}
-					<details class="calc-details">
-						<summary>How this amount is calculated</summary>
-						<table class="calc-table">
+		{#if advice && (advice.yearly_due.length > 0 || advice.warnings.length > 0)}
+			<div class="section">
+				<div class="warning-box">
+					<h3>Heads up</h3>
+					{#if advice.yearly_due.length > 0}
+						<p class="warning-intro">Yearly payments due within 30 days:</p>
+						<table class="mini-table">
 							<tbody>
-								{#each advice.sweep_items as item (item.name + item.date)}
-									<tr class:kept={item.kept_in_checking}>
-										<td class="calc-date">{fmtDate(item.date)}</td>
-										<td class="calc-name">{item.name}</td>
-										<td class="calc-amount">
-											{formatEuro(item.amount)}
-											{#if item.kept_in_checking}
-												<span class="kept-note">stays in checking</span>
-											{/if}
-										</td>
+								{#each advice.yearly_due as item (item.name + item.date)}
+									<tr>
+										<td>{item.name}</td>
+										<td class="nowrap">{fmtDate(item.date)}</td>
 									</tr>
 								{/each}
-								<tr class="calc-subtotal">
-									<td colspan="2">Bills covered from savings</td>
-									<td class="calc-amount">{formatEuro(advice.covered_total)}</td>
-								</tr>
-								<tr>
-									<td colspan="2">Safety buffer ({advice.buffer_pct}%)</td>
-									<td class="calc-amount">{formatEuro(advice.buffer_amount)}</td>
-								</tr>
-								<tr class="calc-total">
-									<td colspan="2">Total to savings</td>
-									<td class="calc-amount">{formatEuro(advice.sweep_amount ?? 0)}</td>
-								</tr>
-								{#if advice.keep_in_checking > 0}
-									<tr class="calc-note">
-										<td colspan="2">Stays in checking (debits right after payday)</td>
-										<td class="calc-amount">{formatEuro(advice.keep_in_checking)}</td>
-									</tr>
-								{/if}
-								{#if advice.standing_buffer > 0}
-									<tr class="calc-note">
-										<td colspan="2">Of which standing buffer for small 4-weekly payments</td>
-										<td class="calc-amount">{formatEuro(advice.standing_buffer)}</td>
-									</tr>
-								{/if}
 							</tbody>
 						</table>
-					</details>
-				{/if}
-
-				{#if advice.return_transfers.length > 0}
-					<h3>Then move back to checking</h3>
-					<p class="explainer">
-						Transfers you make yourself, from savings back to checking, so each
-						bill cluster is funded two business days before it is withdrawn.
-					</p>
-					<table class="mini-table">
-						<thead>
-							<tr><th>Date</th><th>Amount</th><th>Covers</th></tr>
-						</thead>
-						<tbody>
-							{#each advice.return_transfers as transfer (transfer.date + transfer.cadence + transfer.covers.join())}
-								<tr>
-									<td class="nowrap">{fmtDate(transfer.date)}</td>
-									<td class="num">{formatEuro(transfer.amount)}</td>
-									<td>{transfer.covers.join(', ')}</td>
-								</tr>
+					{/if}
+					{#if advice.warnings.length > 0}
+						<ul class="warning-list">
+							{#each advice.warnings as warning (warning)}
+								<li>{warning}</li>
 							{/each}
-						</tbody>
-					</table>
-				{/if}
-
-				{#if advice.pre_payday_debits.length > 0 || advice.yearly_due.length > 0 || advice.warnings.length > 0}
-					<div class="warning-box">
-						<h3>Heads up</h3>
-						{#if advice.pre_payday_debits.length > 0}
-							<p class="warning-intro">
-								These bills land in the week before payday, so last month's
-								transfer must still cover them:
-							</p>
-							<table class="mini-table">
-								<thead>
-									<tr><th>Creditor</th><th>Due</th><th>Days before payday</th></tr>
-								</thead>
-								<tbody>
-									{#each advice.pre_payday_debits as debit (debit.name + debit.date)}
-										<tr>
-											<td>{debit.name}</td>
-											<td class="nowrap">{fmtDate(debit.date)}</td>
-											<td class="num">{debit.days_before}</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						{/if}
-						{#if advice.yearly_due.length > 0}
-							<p class="warning-intro">Yearly payments due within 30 days:</p>
-							<table class="mini-table">
-								<tbody>
-									{#each advice.yearly_due as item (item.name + item.date)}
-										<tr>
-											<td>{item.name}</td>
-											<td class="nowrap">{fmtDate(item.date)}</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						{/if}
-						{#if advice.warnings.length > 0}
-							<ul class="warning-list">
-								{#each advice.warnings as warning (warning)}
-									<li>{warning}</li>
-								{/each}
-							</ul>
-						{/if}
-					</div>
-				{/if}
+						</ul>
+					{/if}
+				</div>
 			</div>
 		{/if}
 
@@ -360,64 +217,8 @@
 		font-weight: 600;
 	}
 
-	.advice-grid {
-		display: flex;
-		gap: 2rem;
-		flex-wrap: wrap;
-	}
-	.advice-item {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-	}
-	.advice-label { font-size: 0.8rem; color: var(--color-text-muted); }
-	.advice-value { font-size: 1.4rem; font-weight: 700; color: var(--color-text); }
-	.buffer-input-row {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-	}
-	.buffer-input-row input {
-		width: 4.5rem;
-		padding: 0.3rem 0.5rem;
-		border: 1px solid var(--color-border);
-		border-radius: 4px;
-		font-size: 1rem;
-	}
 
-	.explainer {
-		font-size: 0.85rem;
-		color: var(--color-text-muted);
-		margin: 0 0 1rem;
-		max-width: 46rem;
-	}
-	h3 + .explainer { margin-top: 0.25rem; }
 
-	.calc-details {
-		margin-top: 1rem;
-		font-size: 0.85rem;
-	}
-	.calc-details summary {
-		cursor: pointer;
-		color: var(--color-accent);
-		font-weight: 600;
-		user-select: none;
-	}
-	.calc-table {
-		margin-top: 0.75rem;
-		border-collapse: collapse;
-		min-width: 22rem;
-	}
-	.calc-table td {
-		padding: 0.25rem 0.75rem 0.25rem 0;
-		border-bottom: 1px solid #f0f0f0;
-	}
-	.calc-date { color: var(--color-text-muted); white-space: nowrap; }
-	.calc-amount { text-align: right; white-space: nowrap; }
-	.calc-table tr.kept .calc-name { color: var(--color-text-muted); }
-	.kept-note { color: var(--color-text-faint); font-style: italic; }
-	.calc-subtotal td { border-top: 2px solid var(--color-border); font-weight: 600; }
-	.calc-total td { font-weight: 700; border-bottom: none; }
 
 	.warning-list {
 		list-style: none;
@@ -427,25 +228,10 @@
 		flex-direction: column;
 		gap: 0.4rem;
 	}
-	.muted-value { color: var(--color-text-muted); }
-	.calc-note td {
-		color: var(--color-text-muted);
-		font-size: 0.8rem;
-		border-bottom: none;
-	}
 	.mini-table {
 		border-collapse: collapse;
 		font-size: 0.85rem;
 		margin-top: 0.25rem;
-	}
-	.mini-table th {
-		text-align: left;
-		font-size: 0.7rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--color-text-faint);
-		padding: 0 1.25rem 0.25rem 0;
 	}
 	.mini-table td {
 		padding: 0.3rem 1.25rem 0.3rem 0;
@@ -453,7 +239,6 @@
 		vertical-align: baseline;
 	}
 	.mini-table tr:last-child td { border-bottom: none; }
-	.mini-table .num { font-variant-numeric: tabular-nums; text-align: right; }
 	.mini-table .nowrap { white-space: nowrap; }
 	.warning-intro {
 		font-size: 0.85rem;
@@ -582,10 +367,7 @@
 			gap: 0.15rem;
 			font-size: 0.85rem;
 		}
-		.buffer-input-row input {
-			min-height: 44px;
-		}
-		.nav-button {
+			.nav-button {
 			min-width: 44px;
 			min-height: 44px;
 		}

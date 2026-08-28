@@ -3,13 +3,17 @@
 		getSalaryAllocation, listAllocationBuckets,
 		createAllocationBucket, updateAllocationBucket, deleteAllocationBucket,
 		reorderAllocationBuckets, formatEuro, getSavingsCapacity,
-		type SalaryAllocation, type AllocationBucket
+		getCashflowAdvice, updateCashflowSettings,
+		type SalaryAllocation, type AllocationBucket, type CashflowAdvice
 	} from '$lib/api';
 	import { extractErrorDetail } from '$lib/errors';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 
 	let allocation: SalaryAllocation | null = $state(null);
+	let advice: CashflowAdvice | null = $state(null);
 	let buckets: AllocationBucket[] = $state([]);
+	let bufferPct = $state(10);
+	let bufferSaving = $state(false);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let rowErrors: Record<number, string> = $state({});
@@ -33,12 +37,15 @@
 
 	async function load() {
 		try {
-			const [allocationResult, bucketsResult] = await Promise.all([
+			const [allocationResult, bucketsResult, adviceResult] = await Promise.all([
 				getSalaryAllocation(),
-				listAllocationBuckets()
+				listAllocationBuckets(),
+				getCashflowAdvice()
 			]);
 			allocation = allocationResult;
 			buckets = bucketsResult;
+			advice = adviceResult;
+			bufferPct = adviceResult.buffer_pct;
 			error = null;
 		} catch (e) {
 			error = extractErrorDetail(e);
@@ -53,6 +60,18 @@
 
 	function fmtDate(iso: string): string {
 		return new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+	}
+
+	async function saveBufferPct() {
+		bufferSaving = true;
+		try {
+			await updateCashflowSettings(bufferPct);
+			await load();
+		} catch (e) {
+			error = extractErrorDetail(e);
+		} finally {
+			bufferSaving = false;
+		}
 	}
 
 	function ruleCaption(line: { rule_type: string; value: number }): string {
@@ -150,20 +169,14 @@
 					</thead>
 					<tbody>
 						<tr class="muted">
-							<td class="col-name" colspan="3">Recurring bills pot
-								<span class="caption">covers bills until next payday</span>
+							<td class="col-name" colspan="3">Reserved for bills until next payday
+								<span class="caption">stays in checking; bills are paid from it</span>
 							</td>
-							<td class="col-amount">{formatEuro(allocation.bills_pot)}</td>
+							<td class="col-amount">{formatEuro(allocation.bills_pot + allocation.kept_in_checking)}</td>
 						</tr>
-						{#if allocation.kept_in_checking > 0}
-							<tr class="muted">
-								<td class="col-name" colspan="3">Kept in checking for imminent bills</td>
-								<td class="col-amount">{formatEuro(allocation.kept_in_checking)}</td>
-							</tr>
-						{/if}
 						<tr class="subtotal">
 							<td class="col-name" colspan="3">Left to allocate
-								<span class="caption">salary minus the rows above</span>
+								<span class="caption">salary minus the reserved bills</span>
 							</td>
 							<td class="col-amount">
 								{formatEuro(Math.max(0, (allocation.salary_amount ?? 0) - allocation.bills_pot - allocation.kept_in_checking))}
@@ -189,6 +202,49 @@
 					</tbody>
 				</table>
 			</div>
+
+			{#if allocation.bills_items.length > 0}
+				<details class="calc-details">
+					<summary>Which bills are reserved for</summary>
+					<table class="calc-table">
+						<tbody>
+							{#each allocation.bills_items as item (item.name + item.date)}
+								<tr>
+									<td class="calc-date">{fmtDate(item.date)}</td>
+									<td>{item.name}</td>
+									<td class="calc-amount">{formatEuro(item.amount)}</td>
+								</tr>
+							{/each}
+							<tr class="calc-subtotal">
+								<td colspan="2">Bills total</td>
+								<td class="calc-amount">{formatEuro(allocation.bills_items.reduce((sum, i) => sum + i.amount, 0))}</td>
+							</tr>
+							<tr>
+								<td colspan="2">
+									Safety buffer
+									<span class="buffer-inline">
+										<input
+											type="number"
+											min="0"
+											max="100"
+											step="1"
+											bind:value={bufferPct}
+											onblur={saveBufferPct}
+											onkeydown={(e) => { if (e.key === 'Enter') saveBufferPct(); }}
+											disabled={bufferSaving}
+										/>%
+									</span>
+								</td>
+								<td class="calc-amount">{formatEuro(allocation.bills_buffer_amount)}</td>
+							</tr>
+							<tr class="calc-total">
+								<td colspan="2">Total reserved</td>
+								<td class="calc-amount">{formatEuro(allocation.bills_pot + allocation.kept_in_checking)}</td>
+							</tr>
+						</tbody>
+					</table>
+				</details>
+			{/if}
 
 			{#if buckets.length === 0}
 				<p class="empty-note">
@@ -492,5 +548,36 @@
 	.sizing-guide.over {
 		background: var(--color-warn-bg-amber);
 		border-color: var(--color-amber);
+	}
+
+	.calc-details {
+		margin-top: 0.75rem;
+		font-size: 0.85rem;
+	}
+	.calc-details summary {
+		cursor: pointer;
+		color: var(--color-accent);
+		font-weight: 600;
+		user-select: none;
+	}
+	.calc-table {
+		margin-top: 0.75rem;
+		border-collapse: collapse;
+		min-width: 22rem;
+	}
+	.calc-table td {
+		padding: 0.25rem 0.75rem 0.25rem 0;
+		border-bottom: 1px solid #f0f0f0;
+	}
+	.calc-date { color: var(--color-text-muted); white-space: nowrap; }
+	.calc-amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+	.calc-subtotal td { border-top: 2px solid var(--color-border); font-weight: 600; }
+	.calc-total td { font-weight: 700; border-bottom: none; }
+	.buffer-inline input {
+		width: 3.5rem;
+		padding: 0.15rem 0.35rem;
+		border: 1px solid var(--color-border);
+		border-radius: 4px;
+		margin-left: 0.5rem;
 	}
 </style>
