@@ -188,6 +188,10 @@ class BudgetLine(Base):
         Integer, ForeignKey("categories.id"), nullable=False
     )
     amount: Mapped[float] = mapped_column(Float, nullable=False)
+    # "manual" | "recurring" | "allocation": non-manual rows are
+    # system-maintained by services/budget_derivation.py and read-only
+    # for the user.
+    source: Mapped[str] = mapped_column(String(20), default="manual", nullable=False)
 
     budget: Mapped["Budget"] = relationship(back_populates="lines")
     category: Mapped["Category"] = relationship()

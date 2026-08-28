@@ -78,6 +78,9 @@ def _unconfirmed() -> SalaryAllocation:
 
 
 def compute_allocation(db: Session, buffer_pct: float, today: date | None = None) -> SalaryAllocation:
+    """Allocation plan for the current pay period: anchored to the salary
+    most recently received (actual amount), else the upcoming expected
+    payday. Delegates the waterfall itself to `compute_allocation_at`."""
     today = today or date.today()
 
     salary_id = find_salary_payment_id(db)
@@ -115,6 +118,29 @@ def compute_allocation(db: Session, buffer_pct: float, today: date | None = None
             f"This plan is based on the salary received on {anchor.isoformat()}; "
             "a newer salary may not be imported yet"
         )
+
+    return compute_allocation_at(
+        db, buffer_pct, anchor, salary_amount,
+        today=today, basis=basis, extra_warnings=warnings,
+    )
+
+
+def compute_allocation_at(
+    db: Session,
+    buffer_pct: float,
+    anchor: date,
+    salary_amount: float,
+    *,
+    today: date | None = None,
+    basis: str = "actual",
+    extra_warnings: list[str] | None = None,
+) -> SalaryAllocation:
+    """The allocation waterfall for an arbitrary payday and salary amount.
+    Used by `compute_allocation` for the current pay period and by budget
+    derivation for any period's payday(s)."""
+    today = today or date.today()
+    warnings: list[str] = list(extra_warnings or [])
+    salary_amount = round(abs(salary_amount), 2)
 
     advice = compute_advice(db, buffer_pct, today=today, anchor_payday=anchor)
     bills_pot = round(advice.sweep_amount or 0.0, 2)
