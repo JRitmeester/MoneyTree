@@ -196,7 +196,9 @@ def delete_everything(db: Session = Depends(get_db)):
     db.execute(delete(Category))
     db.execute(delete(AllocationBucket))
     db.execute(delete(OwnAccount))
-    db.execute(delete(AppSetting))
+    # Keep the account usable after a data wipe: auth_* settings
+    # (first-run credentials) survive; everything else goes.
+    db.execute(delete(AppSetting).where(AppSetting.key.notlike("auth_%")))
 
     db.commit()
     return {"ok": True}
