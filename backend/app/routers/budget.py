@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
+from ..services.budget_derivation import deriving_category_ids, refresh_derived_lines
 from ..models import Budget, BudgetLine, BudgetTemplate, Category, LineItem, Receipt, Transaction
 from ..services.sync_events import EVENT_BUDGET_DELETE, record_event
 from ..schemas import (
@@ -21,13 +22,18 @@ router = APIRouter(prefix="/api/budgets", tags=["budgets"], dependencies=[Depend
 
 
 def _create_from_template(db: Session, start_date: date, end_date: date) -> Budget:
-    """Create a budget period from the template."""
+    """Create a budget period from the template. Template lines for
+    categories that currently derive are skipped: the derived-line refresh
+    creates those authoritatively right after creation."""
     budget = Budget(start_date=start_date, end_date=end_date)
     db.add(budget)
     db.flush()
 
+    skip = set(deriving_category_ids(db, budget))
     templates = db.execute(select(BudgetTemplate)).scalars().all()
     for t in templates:
+        if t.category_id in skip:
+            continue
         db.add(BudgetLine(
             budget_id=budget.id,
             category_id=t.category_id,
@@ -120,6 +126,7 @@ def _budget_to_out(budget: Budget, db: Session) -> BudgetOut:
             is_overridden=is_overridden,
             template_amount=template_amount,
             balance=balances.get(line.category_id, 0.0),
+            source=line.source,
         ))
 
     return BudgetOut(
@@ -154,6 +161,14 @@ def list_budgets(db: Session = Depends(get_db)):
     budgets = db.execute(
         select(Budget).order_by(Budget.start_date.desc())
     ).scalars().all()
+    today = date.today()
+    refreshed = False
+    for b in budgets:
+        if b.end_date >= today:
+            refresh_derived_lines(db, b, today=today)
+            refreshed = True
+    if refreshed:
+        db.commit()
     return [
         BudgetSummary(
             id=b.id,
@@ -193,6 +208,9 @@ def create_budget(data: BudgetCreate, db: Session = Depends(get_db)):
     else:
         budget = _create_from_template(db, data.start_date, data.end_date)
 
+    refresh_derived_lines(db, budget)
+    db.commit()
+    db.refresh(budget)
     return _budget_to_out(budget, db)
 
 
@@ -202,6 +220,8 @@ def get_budget(budget_id: int, db: Session = Depends(get_db)):
     budget = db.get(Budget, budget_id)
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
+    refresh_derived_lines(db, budget)
+    db.commit()
     return _budget_to_out(budget, db)
 
 
@@ -217,13 +237,21 @@ def update_budget(
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
 
-    # Delete existing lines
+    # The page's auto-save sends the full line set back, derived lines
+    # included. Derived rows are system-owned: they are never deleted here
+    # (ids stay stable) and payload entries for deriving categories are
+    # ignored; the refresh below recomputes them authoritatively.
+    deriving = set(deriving_category_ids(db, budget))
+
+    # Replace MANUAL lines only.
     for line in list(budget.lines):
-        db.delete(line)
+        if line.source == "manual":
+            db.delete(line)
     db.flush()
 
-    # Add new lines
     for line_data in data.lines:
+        if line_data.category_id in deriving:
+            continue
         cat = db.get(Category, line_data.category_id)
         if not cat:
             raise HTTPException(
@@ -235,6 +263,8 @@ def update_budget(
             category_id=line_data.category_id,
             amount=line_data.amount,
         ))
+    db.flush()
+    refresh_derived_lines(db, budget)
 
     # Optionally update template
     if update_template:
@@ -243,6 +273,8 @@ def update_budget(
             db.delete(t)
         db.flush()
         for line_data in data.lines:
+            if line_data.category_id in deriving:
+                continue
             db.add(BudgetTemplate(
                 category_id=line_data.category_id,
                 amount=line_data.amount,

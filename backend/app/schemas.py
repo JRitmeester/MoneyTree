@@ -438,6 +438,7 @@ class BudgetLineOut(BaseModel):
     category_type: str
     is_fixed: bool
     amount: float
+    source: str = "manual"
     is_overridden: bool = False
     template_amount: float = 0.0
     balance: float = 0.0
