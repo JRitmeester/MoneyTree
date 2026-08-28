@@ -1241,7 +1241,11 @@ export async function createAllocationBucket(data: {
 	value: number;
 	category_id?: number | null;
 }): Promise<AllocationBucket> {
-	return request('/api/allocation-buckets', { method: 'POST', body: JSON.stringify(data) });
+	return request('/api/allocation-buckets', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data)
+	});
 }
 
 export async function updateAllocationBucket(
@@ -1254,7 +1258,11 @@ export async function updateAllocationBucket(
 		is_active: boolean;
 	}>
 ): Promise<AllocationBucket> {
-	return request(`/api/allocation-buckets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+	return request(`/api/allocation-buckets/${id}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data)
+	});
 }
 
 export async function deleteAllocationBucket(id: number): Promise<void> {
@@ -1264,6 +1272,7 @@ export async function deleteAllocationBucket(id: number): Promise<void> {
 export async function reorderAllocationBuckets(ids: number[]): Promise<AllocationBucket[]> {
 	return request('/api/allocation-buckets/order', {
 		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ids })
 	});
 }
