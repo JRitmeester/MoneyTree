@@ -128,14 +128,20 @@
 			<div class="section advice-card">
 				<h2>Payday transfer plan</h2>
 				<p class="explainer">
-					On payday, move this amount from checking to savings. It covers every
-					recurring bill expected before your next salary, plus a safety buffer.
+					On payday, move this amount from checking to savings: it covers every
+					recurring bill until your next salary, plus a safety buffer.
 				</p>
 				<div class="advice-grid">
 					<div class="advice-item">
 						<span class="advice-label">Move to savings on {advice.payday ? fmtDate(advice.payday) : ''}</span>
 						<span class="advice-value">{formatEuro(advice.sweep_amount ?? 0)}</span>
 					</div>
+					{#if advice.keep_in_checking > 0}
+						<div class="advice-item">
+							<span class="advice-label">Keep in checking</span>
+							<span class="advice-value muted-value">{formatEuro(advice.keep_in_checking)}</span>
+						</div>
+					{/if}
 					<div class="advice-item buffer-item">
 						<span class="advice-label">Safety buffer</span>
 						<span class="buffer-input-row">
@@ -183,52 +189,88 @@
 									<td colspan="2">Total to savings</td>
 									<td class="calc-amount">{formatEuro(advice.sweep_amount ?? 0)}</td>
 								</tr>
+								{#if advice.keep_in_checking > 0}
+									<tr class="calc-note">
+										<td colspan="2">Stays in checking (debits right after payday)</td>
+										<td class="calc-amount">{formatEuro(advice.keep_in_checking)}</td>
+									</tr>
+								{/if}
+								{#if advice.standing_buffer > 0}
+									<tr class="calc-note">
+										<td colspan="2">Of which standing buffer for small 4-weekly payments</td>
+										<td class="calc-amount">{formatEuro(advice.standing_buffer)}</td>
+									</tr>
+								{/if}
 							</tbody>
 						</table>
 					</details>
 				{/if}
 
-				{#if advice.keep_in_checking > 0}
-					<p class="keep-in-checking">
-						Keep {formatEuro(advice.keep_in_checking)} in checking: those debits hit too
-						soon after payday for a transfer back from savings to arrive in time.
-					</p>
-				{/if}
-
-				{#if advice.standing_buffer > 0}
-					<p class="standing-buffer">
-						Small 4-weekly payments ({formatEuro(advice.standing_buffer)}) are included
-						in the amount above; no separate transfer needed for them.
-					</p>
-				{/if}
-
 				{#if advice.return_transfers.length > 0}
 					<h3>Then move back to checking</h3>
 					<p class="explainer">
-						These are transfers for you to make yourself, from savings back to
-						checking, timed so each bill cluster is funded two business days before
-						the money is withdrawn. They are derived from your confirmed recurring
-						payments on the Recurring page.
+						Transfers you make yourself, from savings back to checking, so each
+						bill cluster is funded two business days before it is withdrawn.
 					</p>
-					<ul class="transfer-list">
-						{#each advice.return_transfers as transfer (transfer.date + transfer.cadence + transfer.covers.join())}
-							<li>
-								<span class="transfer-date">{fmtDate(transfer.date)}</span>
-								<span class="transfer-amount">{formatEuro(transfer.amount)}</span>
-								<span class="transfer-covers">for {transfer.covers.join(', ')}</span>
-							</li>
-						{/each}
-					</ul>
+					<table class="mini-table">
+						<thead>
+							<tr><th>Date</th><th>Amount</th><th>Covers</th></tr>
+						</thead>
+						<tbody>
+							{#each advice.return_transfers as transfer (transfer.date + transfer.cadence + transfer.covers.join())}
+								<tr>
+									<td class="nowrap">{fmtDate(transfer.date)}</td>
+									<td class="num">{formatEuro(transfer.amount)}</td>
+									<td>{transfer.covers.join(', ')}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
 				{/if}
 
-				{#if advice.warnings.length > 0}
+				{#if advice.pre_payday_debits.length > 0 || advice.yearly_due.length > 0 || advice.warnings.length > 0}
 					<div class="warning-box">
 						<h3>Heads up</h3>
-						<ul class="warning-list">
-							{#each advice.warnings as warning (warning)}
-								<li>{warning}</li>
-							{/each}
-						</ul>
+						{#if advice.pre_payday_debits.length > 0}
+							<p class="warning-intro">
+								These bills land in the week before payday, so last month's
+								transfer must still cover them:
+							</p>
+							<table class="mini-table">
+								<thead>
+									<tr><th>Creditor</th><th>Due</th><th>Days before payday</th></tr>
+								</thead>
+								<tbody>
+									{#each advice.pre_payday_debits as debit (debit.name + debit.date)}
+										<tr>
+											<td>{debit.name}</td>
+											<td class="nowrap">{fmtDate(debit.date)}</td>
+											<td class="num">{debit.days_before}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						{/if}
+						{#if advice.yearly_due.length > 0}
+							<p class="warning-intro">Yearly payments due within 30 days:</p>
+							<table class="mini-table">
+								<tbody>
+									{#each advice.yearly_due as item (item.name + item.date)}
+										<tr>
+											<td>{item.name}</td>
+											<td class="nowrap">{fmtDate(item.date)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						{/if}
+						{#if advice.warnings.length > 0}
+							<ul class="warning-list">
+								{#each advice.warnings as warning (warning)}
+									<li>{warning}</li>
+								{/each}
+							</ul>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -377,7 +419,7 @@
 	.calc-subtotal td { border-top: 2px solid var(--color-border); font-weight: 600; }
 	.calc-total td { font-weight: 700; border-bottom: none; }
 
-	.transfer-list, .warning-list {
+	.warning-list {
 		list-style: none;
 		padding: 0;
 		margin: 0;
@@ -385,20 +427,39 @@
 		flex-direction: column;
 		gap: 0.4rem;
 	}
-	.transfer-list li {
-		display: flex;
-		gap: 0.75rem;
-		align-items: baseline;
-		font-size: 0.9rem;
+	.muted-value { color: var(--color-text-muted); }
+	.calc-note td {
+		color: var(--color-text-muted);
+		font-size: 0.8rem;
+		border-bottom: none;
 	}
-	.transfer-date { font-weight: 600; }
-	.transfer-amount { color: var(--color-text); }
-	.transfer-covers { color: var(--color-text-muted); font-size: 0.85rem; }
-	.keep-in-checking, .standing-buffer {
+	.mini-table {
+		border-collapse: collapse;
 		font-size: 0.85rem;
-		color: #444;
-		margin: 0.5rem 0 0;
+		margin-top: 0.25rem;
 	}
+	.mini-table th {
+		text-align: left;
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--color-text-faint);
+		padding: 0 1.25rem 0.25rem 0;
+	}
+	.mini-table td {
+		padding: 0.3rem 1.25rem 0.3rem 0;
+		border-bottom: 1px solid #f0f0f0;
+		vertical-align: baseline;
+	}
+	.mini-table tr:last-child td { border-bottom: none; }
+	.mini-table .num { font-variant-numeric: tabular-nums; text-align: right; }
+	.mini-table .nowrap { white-space: nowrap; }
+	.warning-intro {
+		font-size: 0.85rem;
+		margin: 0.5rem 0 0.25rem;
+	}
+	.warning-box .mini-table td { border-bottom-color: #fde68a; }
 	.warning-box {
 		margin-top: 1.25rem;
 		background: var(--color-warn-bg-amber);

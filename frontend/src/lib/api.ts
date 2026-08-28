@@ -1174,6 +1174,17 @@ export interface CashflowSweepItem {
 	kept_in_checking: boolean;
 }
 
+export interface CashflowPrePaydayDebit {
+	name: string;
+	date: string;
+	days_before: number;
+}
+
+export interface CashflowYearlyDue {
+	name: string;
+	date: string;
+}
+
 export interface CashflowAdvice {
 	salary_confirmed: boolean;
 	message: string | null;
@@ -1187,6 +1198,8 @@ export interface CashflowAdvice {
 	buffer_amount: number;
 	sweep_items: CashflowSweepItem[];
 	return_transfers: CashflowReturnTransfer[];
+	pre_payday_debits: CashflowPrePaydayDebit[];
+	yearly_due: CashflowYearlyDue[];
 	warnings: string[];
 }
 

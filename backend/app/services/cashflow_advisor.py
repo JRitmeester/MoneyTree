@@ -217,6 +217,22 @@ class SweepItem:
 
 
 @dataclass(frozen=True)
+class PrePaydayDebit:
+    """A debit landing in the week before payday: the previous sweep will
+    not have covered it, so it needs money already in checking."""
+
+    name: str
+    date: date
+    days_before: int
+
+
+@dataclass(frozen=True)
+class YearlyDue:
+    name: str
+    date: date
+
+
+@dataclass(frozen=True)
 class Advice:
     salary_confirmed: bool
     message: str | None = None
@@ -230,6 +246,8 @@ class Advice:
     buffer_amount: float = 0.0
     sweep_items: list[SweepItem] = field(default_factory=list)
     return_transfers: list[ReturnTransfer] = field(default_factory=list)
+    pre_payday_debits: list[PrePaydayDebit] = field(default_factory=list)
+    yearly_due: list[YearlyDue] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -425,17 +443,19 @@ def compute_advice(
     ]
 
     # Pre-payday debits: land in the days just before this payday, so the
-    # previous sweep won't have covered them.
+    # previous sweep won't have covered them. Structured so the UI can
+    # render them as a table instead of prose.
+    pre_payday_debits: list[PrePaydayDebit] = []
     pre_payday_start = payday - timedelta(days=PRE_PAYDAY_WARNING_DAYS)
     for payment in debit_payments:
         for d in occurrences_in_range(payment, pre_payday_start, payday, shift_weekend=True):
-            days_before = (payday - d).days
-            warnings.append(
-                f"{payment.name} is due on {d.isoformat()}, {days_before} day(s) before payday "
-                f"on {payday.isoformat()}"
+            pre_payday_debits.append(
+                PrePaydayDebit(name=payment.name, date=d, days_before=(payday - d).days)
             )
+    pre_payday_debits.sort(key=lambda p: p.date)
 
     # Yearly items due soon.
+    yearly_due: list[YearlyDue] = []
     for payment in debit_payments:
         if payment.cadence != "yearly":
             continue
@@ -443,7 +463,8 @@ def compute_advice(
         if expected is not None:
             expected = shift_expected_date(expected, payment.cadence, payment.is_income)
         if expected is not None and 0 <= (expected - today).days <= YEARLY_DUE_SOON_DAYS:
-            warnings.append(f"{payment.name} (yearly) is due on {expected.isoformat()}")
+            yearly_due.append(YearlyDue(name=payment.name, date=expected))
+    yearly_due.sort(key=lambda y: y.date)
 
     for notice in compute_notices(db, today=today):
         if notice["type"] == "amount_changed":
@@ -461,5 +482,7 @@ def compute_advice(
         buffer_amount=buffer_amount,
         sweep_items=sweep_items,
         return_transfers=return_transfers,
+        pre_payday_debits=pre_payday_debits,
+        yearly_due=yearly_due,
         warnings=warnings,
     )

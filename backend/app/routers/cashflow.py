@@ -16,7 +16,9 @@ from ..schemas import (
     CashflowCalendarItemOut,
     CashflowCalendarOut,
     CashflowPeriodOut,
+    CashflowPrePaydayDebitOut,
     CashflowReturnTransferOut,
+    CashflowYearlyDueOut,
     CashflowSettingsOut,
     CashflowSettingsUpdate,
     CashflowSweepItemOut,
@@ -150,6 +152,13 @@ def get_advice(db: Session = Depends(get_db)):
                 date=t.date, amount=t.amount, cadence=t.cadence, covers=t.covers
             )
             for t in advice.return_transfers
+        ],
+        pre_payday_debits=[
+            CashflowPrePaydayDebitOut(name=d.name, date=d.date, days_before=d.days_before)
+            for d in advice.pre_payday_debits
+        ],
+        yearly_due=[
+            CashflowYearlyDueOut(name=y.name, date=y.date) for y in advice.yearly_due
         ],
         warnings=advice.warnings,
     )

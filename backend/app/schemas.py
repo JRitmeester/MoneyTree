@@ -758,6 +758,17 @@ class CashflowSweepItemOut(BaseModel):
     kept_in_checking: bool
 
 
+class CashflowPrePaydayDebitOut(BaseModel):
+    name: str
+    date: date
+    days_before: int
+
+
+class CashflowYearlyDueOut(BaseModel):
+    name: str
+    date: date
+
+
 class CashflowAdviceOut(BaseModel):
     salary_confirmed: bool
     message: Optional[str] = None
@@ -771,6 +782,8 @@ class CashflowAdviceOut(BaseModel):
     buffer_amount: float = 0.0
     sweep_items: list[CashflowSweepItemOut] = Field(default_factory=list)
     return_transfers: list[CashflowReturnTransferOut] = Field(default_factory=list)
+    pre_payday_debits: list[CashflowPrePaydayDebitOut] = Field(default_factory=list)
+    yearly_due: list[CashflowYearlyDueOut] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
 

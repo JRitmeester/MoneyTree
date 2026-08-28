@@ -204,8 +204,11 @@ class TestAdvisor:
         # into the standing buffer instead.
         assert not any("Streaming" in t.covers for t in advice.return_transfers)
 
-        # Pre-payday debit warning fires for the Credit card on the 20th.
-        assert any("Credit card" in w and "before payday" in w for w in advice.warnings)
+        # Pre-payday debit fires for the Credit card on the 20th, as
+        # structured data (rendered as a table in the UI).
+        credit_card = next(d for d in advice.pre_payday_debits if d.name == "Credit card")
+        assert credit_card.date == date(2026, 8, 20)
+        assert credit_card.days_before == 1
 
     def test_return_transfer_never_precedes_payday(self, db: Session):
         """Critical fix: a debit landing within ~2 business days after
@@ -402,7 +405,8 @@ class TestAdvisor:
             expected_day=15, anchor_date=date(2025, 8, 15),
         )
         advice = compute_advice(db, buffer_pct=10.0, today=today)
-        matching = [w for w in advice.warnings if "Car insurance" in w and "yearly" in w]
+        matching = [y for y in advice.yearly_due if y.name == "Car insurance"]
         assert len(matching) == 1
-        assert "2026-08-17" in matching[0]
-        assert "2026-08-15" not in matching[0]
+        # The weekend-shifted date (Monday 2026-08-17), not the raw 15th,
+        # since that is when the debit will actually hit.
+        assert matching[0].date == date(2026, 8, 17)

@@ -128,46 +128,56 @@
 		{/if}
 
 		{#if !editMode}
-			<div class="waterfall">
-				<div class="row muted">
-					<span class="row-name">Recurring bills pot
-						<span class="caption">covers bills until next payday</span>
-					</span>
-					<span class="row-amount">{formatEuro(allocation.bills_pot)}</span>
-				</div>
-				{#if allocation.kept_in_checking > 0}
-					<div class="row muted">
-						<span class="row-name">Kept in checking for imminent bills</span>
-						<span class="row-amount">{formatEuro(allocation.kept_in_checking)}</span>
-					</div>
-				{/if}
-				<div class="row subtotal">
-					<span class="row-name">Left to allocate
-						<span class="caption">salary minus the rows above</span>
-					</span>
-					<span class="row-amount">
-						{formatEuro(Math.max(0, (allocation.salary_amount ?? 0) - allocation.bills_pot - allocation.kept_in_checking))}
-					</span>
-				</div>
-				{#each allocation.lines as line (line.bucket_id)}
-					<div class="row" class:shortfall={line.shortfall}>
-						<span class="row-name">
-							{line.name}
-							<span class="caption">{ruleCaption(line)}</span>
-							{#if line.category_name}
-								<span class="caption category">→ {line.category_name}</span>
-							{/if}
-							{#if line.shortfall}
-								<span class="shortfall-note">not fully funded</span>
-							{/if}
-						</span>
-						<span class="row-amount">{formatEuro(line.amount)}</span>
-					</div>
-				{/each}
-				<div class="row total">
-					<span class="row-name">Free to spend</span>
-					<span class="row-amount">{formatEuro(allocation.free_to_spend)}</span>
-				</div>
+			<div class="waterfall-scroll">
+				<table class="waterfall">
+					<thead>
+						<tr>
+							<th class="col-name"></th>
+							<th class="col-rule">Rule</th>
+							<th class="col-goal">Goal</th>
+							<th class="col-amount">Amount</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr class="muted">
+							<td class="col-name" colspan="3">Recurring bills pot
+								<span class="caption">covers bills until next payday</span>
+							</td>
+							<td class="col-amount">{formatEuro(allocation.bills_pot)}</td>
+						</tr>
+						{#if allocation.kept_in_checking > 0}
+							<tr class="muted">
+								<td class="col-name" colspan="3">Kept in checking for imminent bills</td>
+								<td class="col-amount">{formatEuro(allocation.kept_in_checking)}</td>
+							</tr>
+						{/if}
+						<tr class="subtotal">
+							<td class="col-name" colspan="3">Left to allocate
+								<span class="caption">salary minus the rows above</span>
+							</td>
+							<td class="col-amount">
+								{formatEuro(Math.max(0, (allocation.salary_amount ?? 0) - allocation.bills_pot - allocation.kept_in_checking))}
+							</td>
+						</tr>
+						{#each allocation.lines as line (line.bucket_id)}
+							<tr class:shortfall={line.shortfall}>
+								<td class="col-name">
+									{line.name}
+									{#if line.shortfall}
+										<span class="shortfall-note">not fully funded</span>
+									{/if}
+								</td>
+								<td class="col-rule">{line.rule_type === 'fixed' ? '€ fixed' : `${line.value}%`}</td>
+								<td class="col-goal">{line.category_name ?? '—'}</td>
+								<td class="col-amount">{formatEuro(line.amount)}</td>
+							</tr>
+						{/each}
+						<tr class="total">
+							<td class="col-name" colspan="3">Free to spend</td>
+							<td class="col-amount">{formatEuro(allocation.free_to_spend)}</td>
+						</tr>
+					</tbody>
+				</table>
 			</div>
 
 			{#if buckets.length === 0}
@@ -317,28 +327,48 @@
 		max-width: 46rem;
 	}
 
-	.waterfall { display: flex; flex-direction: column; }
-	.row {
-		display: flex;
-		justify-content: space-between;
-		align-items: baseline;
-		gap: 1rem;
-		padding: 0.45rem 0;
-		border-bottom: 1px solid #f0f0f0;
+	.waterfall-scroll { overflow-x: auto; }
+	.waterfall {
+		width: 100%;
+		border-collapse: collapse;
 		font-size: 0.95rem;
 	}
-	.row.muted .row-name, .row.muted .row-amount { color: var(--color-text-muted); }
-	.row.total { border-bottom: none; font-weight: 700; }
-	.row.subtotal {
+	.waterfall th {
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--color-text-faint);
+		text-align: left;
+		padding: 0 0.75rem 0.35rem 0;
+	}
+	.waterfall th.col-amount { text-align: right; padding-right: 0; }
+	.waterfall td {
+		padding: 0.45rem 0.75rem 0.45rem 0;
+		border-bottom: 1px solid #f0f0f0;
+		vertical-align: baseline;
+	}
+	.col-rule, .col-goal {
+		font-size: 0.85rem;
+		color: var(--color-text-muted);
+		white-space: nowrap;
+	}
+	td.col-goal { white-space: normal; }
+	.col-amount {
+		text-align: right;
+		white-space: nowrap;
+		font-variant-numeric: tabular-nums;
+		padding-right: 0;
+	}
+	tr.muted td { color: var(--color-text-muted); }
+	tr.total td { border-bottom: none; font-weight: 700; }
+	tr.subtotal td {
 		font-weight: 600;
 		border-top: 2px solid var(--color-border);
 		background: var(--color-warn-bg-green, #f0fdf4);
 	}
-	.row.shortfall { background: var(--color-warn-bg-amber); }
-	.row-name { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
-	.row-amount { white-space: nowrap; font-variant-numeric: tabular-nums; }
-	.caption { font-size: 0.75rem; color: var(--color-text-faint); }
-	.caption.category { color: var(--color-text-muted); }
+	tr.shortfall td { background: var(--color-warn-bg-amber); }
+	.caption { font-size: 0.75rem; color: var(--color-text-faint); margin-left: 0.5rem; }
 	.shortfall-note {
 		font-size: 0.75rem;
 		color: var(--color-amber);
