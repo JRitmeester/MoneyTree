@@ -10,6 +10,8 @@ from ..database import get_db
 from ..models import AppSetting, RecurringPayment, RecurringPaymentOccurrence
 from ..schemas import (
     CashflowAdviceOut,
+    SalaryAllocationOut,
+    SalaryAllocationLineOut,
     CashflowCalendarDayOut,
     CashflowCalendarItemOut,
     CashflowCalendarOut,
@@ -25,6 +27,7 @@ from ..services.cashflow_advisor import (
     project_calendar_month,
 )
 from ..services.recurring_detector import find_salary_payment_id
+from ..services.salary_allocator import compute_allocation
 
 router = APIRouter(prefix="/api/cashflow", tags=["cashflow"], dependencies=[Depends(require_auth)])
 
@@ -149,6 +152,37 @@ def get_advice(db: Session = Depends(get_db)):
             for t in advice.return_transfers
         ],
         warnings=advice.warnings,
+    )
+
+
+@router.get("/allocation", response_model=SalaryAllocationOut)
+def get_allocation(db: Session = Depends(get_db)):
+    """The salary allocation plan for the current pay period. See spec
+    "Salary Allocation Plan", section "GET /api/cashflow/allocation"."""
+    allocation = compute_allocation(db, get_buffer_pct(db))
+    return SalaryAllocationOut(
+        salary_confirmed=allocation.salary_confirmed,
+        message=allocation.message,
+        payday=allocation.payday,
+        basis=allocation.basis,
+        salary_amount=allocation.salary_amount,
+        bills_pot=allocation.bills_pot,
+        kept_in_checking=allocation.kept_in_checking,
+        free_to_spend=allocation.free_to_spend,
+        lines=[
+            SalaryAllocationLineOut(
+                bucket_id=l.bucket_id,
+                name=l.name,
+                rule_type=l.rule_type,
+                value=l.value,
+                amount=l.amount,
+                category_id=l.category_id,
+                category_name=l.category_name,
+                shortfall=l.shortfall,
+            )
+            for l in allocation.lines
+        ],
+        warnings=allocation.warnings,
     )
 
 

@@ -290,6 +290,30 @@ class AllocationBucketOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SalaryAllocationLineOut(BaseModel):
+    bucket_id: int
+    name: str
+    rule_type: str
+    value: float
+    amount: float
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
+    shortfall: bool = False
+
+
+class SalaryAllocationOut(BaseModel):
+    salary_confirmed: bool
+    message: Optional[str] = None
+    payday: Optional[date] = None
+    basis: Optional[str] = None
+    salary_amount: Optional[float] = None
+    bills_pot: float = 0.0
+    kept_in_checking: float = 0.0
+    free_to_spend: float = 0.0
+    lines: list[SalaryAllocationLineOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 # --- Dashboard ---
 
 

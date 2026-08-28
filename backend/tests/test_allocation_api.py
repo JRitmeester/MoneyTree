@@ -167,3 +167,54 @@ class TestLifecycle:
         _create(client, name="A", rule_type="fixed", value=10)
         assert client.delete("/api/settings/everything").status_code == 200
         assert db.query(AllocationBucket).count() == 0
+
+
+class TestAllocationEndpoint:
+    def _setup_salary(self, db: Session):
+        from datetime import date
+
+        from app.models import RecurringPayment, RecurringPaymentOccurrence
+        from .conftest import make_transaction
+
+        payment = RecurringPayment(
+            merchant_pattern="Salary", name="Salary", expected_amount=3000,
+            cadence="monthly", expected_day=22, anchor_date=date(2026, 7, 22),
+            status="confirmed", is_income=True,
+        )
+        db.add(payment)
+        db.flush()
+        tx = make_transaction(db, bedrag=3200.0, datum=date(2026, 8, 21), naam="Salary")
+        db.add(RecurringPaymentOccurrence(
+            recurring_payment_id=payment.id, transaction_id=tx.id,
+            amount=3200.0, date=date(2026, 8, 21),
+        ))
+        db.commit()
+
+    def test_unconfirmed_shape(self, client):
+        body = client.get("/api/cashflow/allocation").json()
+        assert body["salary_confirmed"] is False
+        assert body["message"] == "Confirm your salary as recurring income first"
+        assert body["lines"] == []
+        assert body["salary_amount"] is None
+
+    def test_confirmed_with_buckets(self, client, db: Session):
+        self._setup_salary(db)
+        _create(client, name="Investing", rule_type="fixed", value=300)
+        _create(client, name="Long-term", rule_type="percent", value=50)
+
+        body = client.get("/api/cashflow/allocation").json()
+        assert body["salary_confirmed"] is True
+        assert body["basis"] == "actual"
+        assert body["payday"] == "2026-08-21"
+        assert body["salary_amount"] == 3200.0
+        names = [l["name"] for l in body["lines"]]
+        assert names == ["Investing", "Long-term"]
+        assert body["lines"][0]["amount"] == 300.0
+        assert body["free_to_spend"] > 0
+
+    def test_confirmed_without_buckets(self, client, db: Session):
+        self._setup_salary(db)
+        body = client.get("/api/cashflow/allocation").json()
+        assert body["salary_confirmed"] is True
+        assert body["lines"] == []
+        assert body["free_to_spend"] == body["salary_amount"]
