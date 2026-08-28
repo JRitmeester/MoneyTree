@@ -164,10 +164,9 @@
 										<td class="calc-date">{fmtDate(item.date)}</td>
 										<td class="calc-name">{item.name}</td>
 										<td class="calc-amount">
+											{formatEuro(item.amount)}
 											{#if item.kept_in_checking}
 												<span class="kept-note">stays in checking</span>
-											{:else}
-												{formatEuro(item.amount)}
 											{/if}
 										</td>
 									</tr>
