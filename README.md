@@ -77,10 +77,9 @@ only genuinely flexible categories are typed by hand.
 balance history, recent months); Insights shows the year in review with
 per-category comparisons against last year and amortized yearly costs.
 
-**8. Sync.** Settings > Sync exports everything you've created (categories,
-budgets, labels, buckets, receipts, all of it) as one JSON file and imports
-it elsewhere, with a preview of what would change. This is how a second
-device or a fresh install catches up.
+Aside from the flow: Settings > Sync exports everything you've created as
+one JSON file and imports it elsewhere with a preview, for moving between
+devices or seeding a fresh install.
 
 ## Development
 
