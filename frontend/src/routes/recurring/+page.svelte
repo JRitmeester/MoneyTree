@@ -253,6 +253,11 @@
 										{#if payment.is_income}
 											<span class="badge income">income</span>
 										{/if}
+										{#if payment.category_id === null}
+											<button class="badge no-category" onclick={() => startEdit(payment)}>
+												no category
+											</button>
+										{/if}
 									</span>
 									<span class="row-detail">
 										{formatEuro(payment.expected_amount)} &middot; {cadenceLabel(payment)}
@@ -294,6 +299,13 @@
 			{#if confirmed.length === 0}
 				<p class="muted">No confirmed recurring payments yet.</p>
 			{:else}
+				{@const unlinkedCount = confirmed.filter((p) => p.category_id === null).length}
+				{#if unlinkedCount > 0}
+					<p class="unlinked-banner">
+						{unlinkedCount} recurring payment{unlinkedCount === 1 ? '' : 's'} have no
+						category yet, so the budget cannot derive them.
+					</p>
+				{/if}
 				<div class="row-list">
 					{#each confirmed as payment (payment.id)}
 						{@const rowNotices = noticesFor(payment.id)}
@@ -304,6 +316,11 @@
 										{payment.name}
 										{#if payment.is_income}
 											<span class="badge income">income</span>
+										{/if}
+										{#if payment.category_id === null}
+											<button class="badge no-category" onclick={() => startEdit(payment)}>
+												no category
+											</button>
 										{/if}
 									</span>
 									<span class="row-detail">
@@ -553,5 +570,26 @@
 		.row-actions {
 			flex-wrap: wrap;
 		}
+	}
+
+	.unlinked-banner {
+		font-size: 0.85rem;
+		color: var(--color-amber);
+		background: var(--color-warn-bg-amber);
+		border: 1px solid #facc15;
+		border-radius: var(--radius-sm);
+		padding: 0.5rem 0.75rem;
+		margin: 0 0 0.75rem;
+	}
+	.badge.no-category {
+		background: var(--color-warn-bg-amber);
+		color: var(--color-amber);
+		border: 1px solid #facc15;
+		cursor: pointer;
+		font: inherit;
+		font-size: 0.7rem;
+	}
+	@media (max-width: 480px) {
+		.badge.no-category { min-height: 44px; }
 	}
 </style>

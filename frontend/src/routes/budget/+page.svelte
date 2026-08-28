@@ -41,7 +41,7 @@
 	let savingDates = $state(false);
 
 	// Edit state
-	let editLines: { category_id: number; category_name: string; category_type: string; is_fixed: boolean; amount: number; balance: number }[] = $state([]);
+	let editLines: { category_id: number; category_name: string; category_type: string; is_fixed: boolean; amount: number; balance: number; source: string }[] = $state([]);
 	let addIncomeId: number | null = $state(null);
 	let addFixedId: number | null = $state(null);
 	let addSinkingId: number | null = $state(null);
@@ -339,6 +339,7 @@
 			is_fixed: line.is_fixed,
 			amount: line.amount,
 			balance: line.balance ?? 0,
+			source: line.source ?? 'manual',
 		}));
 		addIncomeId = null;
 		addFixedId = null;
@@ -360,7 +361,13 @@
 	}
 
 	async function addLineFromInput(categoryId: number, placement: 'income' | 'fixed' | 'sinking' | 'wishlist' | 'flexible') {
-		if (editLines.some(l => l.category_id === categoryId)) return;
+		const existing = editLines.find(l => l.category_id === categoryId);
+		if (existing) {
+			if (existing.source !== 'manual') {
+				error = 'This category is managed by recurring payments / allocation buckets; edit those instead.';
+			}
+			return;
+		}
 
 		categories = await getCategories();
 		const flat = flatCategories(categories);
@@ -386,6 +393,7 @@
 			is_fixed: newFixed,
 			amount: 0,
 			balance: 0,
+			source: 'manual' as const,
 		}];
 
 		if (placement === 'income') addIncomeId = null;
@@ -718,13 +726,25 @@
 					<span class="cat-name tree-name">{node.name}</span>
 					{#if node.categoryId !== null}
 						{@const idx = editLines.findIndex(l => l.category_id === node.categoryId)}
-						<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount}
-							onblur={handleAmountBlur} onkeydown={handleAmountKeydown}
-							onclick={(e) => e.stopPropagation()} />
+						{#if editLines[idx].source !== 'manual'}
+							<span class="derived-amount" onclick={(e) => e.stopPropagation()} role="none">{formatEuro(editLines[idx].amount)}</span>
+							<a
+								class="source-badge"
+								href={editLines[idx].source === 'recurring' ? '/recurring' : '/cashflow'}
+								title="Edit the recurring payment / allocation bucket to change this"
+								onclick={(e) => e.stopPropagation()}
+							>from {editLines[idx].source}</a>
+						{:else}
+							<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount}
+								onblur={handleAmountBlur} onkeydown={handleAmountKeydown}
+								onclick={(e) => e.stopPropagation()} />
+						{/if}
 						{#if showBalance && editLines[idx].balance > 0}
 							<span class="balance-badge">{formatEuro(editLines[idx].balance)}</span>
 						{/if}
-						<button class="remove-line-btn" onclick={(e) => { e.stopPropagation(); removeBudgetLine(idx); }} title="Remove">&times;</button>
+						{#if editLines[idx].source === 'manual'}
+							<button class="remove-line-btn" onclick={(e) => { e.stopPropagation(); removeBudgetLine(idx); }} title="Remove">&times;</button>
+						{/if}
 					{:else}
 						<span class="tree-total">{formatEuro(node.total)}</span>
 					{/if}
@@ -740,12 +760,23 @@
 				{@const idx = editLines.findIndex(l => l.category_id === node.categoryId)}
 				<div class="tree-row tree-leaf" style="padding-left: {0.5 + depth * 1.25}rem">
 					<span class="cat-name tree-name">{node.name}</span>
-					<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount}
-						onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
+					{#if editLines[idx].source !== 'manual'}
+						<span class="derived-amount">{formatEuro(editLines[idx].amount)}</span>
+						<a
+							class="source-badge"
+							href={editLines[idx].source === 'recurring' ? '/recurring' : '/cashflow'}
+							title="Edit the recurring payment / allocation bucket to change this"
+						>from {editLines[idx].source}</a>
+					{:else}
+						<input type="number" step="0.01" min="0" bind:value={editLines[idx].amount}
+							onblur={handleAmountBlur} onkeydown={handleAmountKeydown} />
+					{/if}
 					{#if showBalance && editLines[idx].balance > 0}
 						<span class="balance-badge">{formatEuro(editLines[idx].balance)}</span>
 					{/if}
-					<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
+					{#if editLines[idx].source === 'manual'}
+						<button class="remove-line-btn" onclick={() => removeBudgetLine(idx)} title="Remove">&times;</button>
+					{/if}
 				</div>
 			{/if}
 		{/snippet}
@@ -1779,4 +1810,21 @@
 			margin: -0.6rem 0;
 		}
 	}
+
+	.derived-amount {
+		font-variant-numeric: tabular-nums;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+	.source-badge {
+		font-size: 0.7rem;
+		padding: 0.1rem 0.45rem;
+		border-radius: 999px;
+		background: var(--color-warn-bg-green, #f0fdf4);
+		border: 1px solid var(--color-accent);
+		color: var(--color-accent);
+		white-space: nowrap;
+		text-decoration: none;
+	}
+	.source-badge:hover { background: #dcfce7; }
 </style>

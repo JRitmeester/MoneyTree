@@ -610,6 +610,7 @@ export interface BudgetLine {
 	is_overridden: boolean;
 	template_amount: number;
 	balance: number;
+	source: 'manual' | 'recurring' | 'allocation';
 }
 
 export interface BudgetSummary {
