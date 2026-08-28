@@ -206,6 +206,7 @@ def list_transactions(
     category_id: int | None = None,
     search: str | None = None,
     has_receipt: bool | None = None,
+    incidental_label_id: int | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
@@ -217,6 +218,8 @@ def list_transactions(
         query = query.where(Transaction.datum >= date_from)
     if date_to:
         query = query.where(Transaction.datum <= date_to)
+    if incidental_label_id is not None:
+        query = query.where(Transaction.incidental_label_id == incidental_label_id)
     if category_id is not None:
         # Collect the selected category and all its descendants
         cat_ids = _collect_descendant_ids(db, category_id)

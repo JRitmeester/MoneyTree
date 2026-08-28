@@ -196,3 +196,27 @@ class TestSingleTransactionLabel:
         body = resp.json()
         assert body["is_incidental"] is False
         assert body["incidental_label_id"] is None
+
+
+class TestLabelFilter:
+    def test_transactions_filter_by_label(self, client, db: Session):
+        label = IncidentalLabel(name="Vakantie")
+        db.add(label)
+        db.flush()
+        labeled = make_transaction(db, bedrag=-50.0)
+        labeled.is_incidental = True
+        labeled.incidental_label_id = label.id
+        unlabeled = make_transaction(db, bedrag=-30.0)
+        unlabeled.is_incidental = True
+        make_transaction(db, bedrag=-10.0)
+        db.commit()
+
+        body = client.get(f"/api/transactions?incidental_label_id={label.id}").json()
+        assert body["total"] == 1
+        assert body["items"][0]["id"] == labeled.id
+
+    def test_unknown_label_returns_empty(self, client, db: Session):
+        make_transaction(db, bedrag=-10.0)
+        db.commit()
+        body = client.get("/api/transactions?incidental_label_id=9999").json()
+        assert body["total"] == 0

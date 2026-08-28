@@ -113,6 +113,7 @@ export async function getTransactions(params: {
 	category_id?: number;
 	search?: string;
 	has_receipt?: boolean;
+	incidental_label_id?: number;
 } = {}): Promise<TransactionListResponse> {
 	const qs = new URLSearchParams();
 	for (const [k, v] of Object.entries(params)) {
