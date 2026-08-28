@@ -92,6 +92,10 @@ line, deterministic).
   entries for categories that currently derive are silently ignored
   (the refresh recomputes them authoritatively in the same request).
   This keeps the existing frontend save flow working unmodified.
+- The bulk update's delete-missing-lines behavior applies to MANUAL rows
+  only. Derived rows are never deleted by the update endpoint (only by
+  the refresh when their category stops deriving), so their row ids stay
+  stable across auto-saves instead of churning delete+recreate.
 - Explicitly creating a NEW line for a category that currently derives
   (a line for a deriving category that was not in the budget before the
   request) returns 409: "This category is managed by recurring payments
@@ -120,6 +124,23 @@ fields, same as previous additive changes.
   of source).
 - Add-line typeahead in Fixed/Savings sections rejects categories that
   currently derive, surfacing the 409 message inline.
+
+## Deliberate exclusions and accepted limitations
+
+- The Income section stays manual. Salary is derivable from the confirmed
+  recurring income, but income is one number that rarely needs editing;
+  the drift pain lives in Fixed/Savings. Income derivation is a trivial
+  follow-up once this design proves itself.
+- Freeze-boundary staleness: a period's derived lines are last updated by
+  its last read while still open (end_date >= today). A period never
+  viewed near its end keeps slightly older derived values. Accepted: the
+  alternative (refreshing recently-ended periods) reopens the
+  history-rewriting problem this design exists to prevent.
+- Upgrade moment: the first read of the current period after this ships
+  adopts existing manual Fixed/Savings lines whose categories derive,
+  overwriting their amounts with the recurring/bucket truth in one
+  predictable step. The badges explain where the numbers now come from.
+  A test asserts the adoption happens exactly once (idempotent after).
 
 ## Coverage nudge (Recurring page)
 
