@@ -151,6 +151,14 @@
 							<span class="row-amount">{formatEuro(allocation.kept_in_checking)}</span>
 						</div>
 					{/if}
+					<div class="row subtotal">
+						<span class="row-name">Left to allocate
+							<span class="caption">salary minus the rows above</span>
+						</span>
+						<span class="row-amount">
+							{formatEuro(Math.max(0, (allocation.salary_amount ?? 0) - allocation.bills_pot - allocation.kept_in_checking))}
+						</span>
+					</div>
 					{#each allocation.lines as line (line.bucket_id)}
 						<div class="row" class:shortfall={line.shortfall}>
 							<span class="row-name">
@@ -321,6 +329,11 @@
 	}
 	.row.muted .row-name, .row.muted .row-amount { color: var(--color-text-muted); }
 	.row.total { border-bottom: none; font-weight: 700; }
+	.row.subtotal {
+		font-weight: 600;
+		border-top: 2px solid var(--color-border);
+		background: var(--color-warn-bg-green, #f0fdf4);
+	}
 	.row.shortfall { background: var(--color-warn-bg-amber); }
 	.row-name { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
 	.row-amount { white-space: nowrap; font-variant-numeric: tabular-nums; }
