@@ -20,8 +20,8 @@ from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.models import RecurringPayment
-from app.services.recurring_detector import (
+from ..models import RecurringPayment
+from .recurring_detector import (
     compute_notices,
     find_salary_payment_id,
     next_expected_date,

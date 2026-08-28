@@ -22,9 +22,9 @@ from typing import Iterable, Sequence
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import RecurringPayment, RecurringPaymentOccurrence, Transaction
-from app.services.merchant import normalize_merchant_name
-from app.services.nl_holidays import (
+from ..models import RecurringPayment, RecurringPaymentOccurrence, Transaction
+from .merchant import normalize_merchant_name
+from .nl_holidays import (
     shift_backward_to_business_day,
     shift_forward_to_business_day,
 )
