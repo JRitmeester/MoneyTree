@@ -4,6 +4,7 @@
 	import { extractErrorDetail } from '$lib/errors';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+	import Loading from '$lib/components/Loading.svelte';
 
 	let year = $state(new Date().getFullYear());
 	let review: YearReview | null = $state(null);
@@ -49,7 +50,7 @@
 	{/if}
 
 	{#if loading}
-		<p class="muted">Loading...</p>
+		<Loading />
 	{:else if review}
 		<div class="section">
 			<div class="year-header">
@@ -128,6 +129,11 @@
 				</table>
 			{/if}
 		</div>
+	{:else}
+		<div class="empty-state">
+			<p>No data for {year} yet.</p>
+			<a href="/import">Import transactions</a> to see your year in review.
+		</div>
 	{/if}
 </div>
 
@@ -135,6 +141,7 @@
 	.insights-page { max-width: 900px; }
 	h2 { margin: 0; font-size: 1.1rem; }
 	.muted { color: var(--color-text-faint); font-style: italic; }
+.empty-state { text-align: center; padding: 3rem; color: var(--color-text-muted); }
 
 	.section {
 		background: var(--color-card-bg);

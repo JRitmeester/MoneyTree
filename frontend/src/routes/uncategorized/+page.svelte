@@ -11,6 +11,7 @@
 	import { extractErrorDetail } from '$lib/errors';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+	import Loading from '$lib/components/Loading.svelte';
 
 	let groups: UncategorizedGroup[] = $state([]);
 	let loading = $state(true);
@@ -261,7 +262,7 @@
 	<PageHeader title="Uncategorized" />
 
 	{#if loading}
-		<p class="muted">Loading...</p>
+		<Loading />
 	{:else if groups.length === 0}
 		<div class="empty">
 			<p>All transactions are categorized.</p>
@@ -417,8 +418,7 @@
 	.page { max-width: 900px; }
 	.subtitle { margin: 0 0 1.5rem; color: var(--color-text-muted); font-size: 0.9rem; }
 	.date-filter-row { margin-bottom: 0.75rem; }
-	.muted { color: var(--color-text-faint); font-style: italic; }
-
+	
 	.empty {
 		background: var(--color-card-bg);
 		border-radius: var(--radius-md);

@@ -8,6 +8,7 @@
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import { extractErrorDetail } from '$lib/errors';
 	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+import Loading from '$lib/components/Loading.svelte';
 
 	let categories: Category[] = $state([]);
 	let mappings: CategoryMapping[] = $state([]);
@@ -310,10 +311,10 @@
 {/if}
 
 {#if loading}
-	<div class="loading">Loading...</div>
+	<Loading />
 {:else}
 	{#if categories.length === 0}
-		<p class="muted">No categories yet. Import a CSV to seed bank categories.</p>
+		<p class="muted">No categories yet. <a href="/import">Import a CSV</a> to seed bank categories.</p>
 	{:else}
 		<div class="tree">
 			{#snippet catNode(cat: Category, depth: number)}
@@ -503,8 +504,7 @@
 		white-space: nowrap;
 	}
 	.add-root-btn:hover { background: #1b4332; }
-	.loading { text-align: center; padding: 3rem; color: var(--color-text-muted); }
-	.muted { color: var(--color-text-faint); font-style: italic; }
+		.muted { color: var(--color-text-faint); font-style: italic; }
 
 	.tree {
 		background: var(--color-card-bg);

@@ -9,6 +9,7 @@
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+	import Loading from '$lib/components/Loading.svelte';
 
 	let suggested: RecurringPayment[] = $state([]);
 	let confirmed: RecurringPayment[] = $state([]);
@@ -229,7 +230,7 @@
 	{/if}
 
 	{#if loading}
-		<p class="muted">Loading...</p>
+		<Loading />
 	{:else}
 		<section class="section">
 			<h2>Suggested</h2>
@@ -239,6 +240,7 @@
 					<button class="rescan-button" onclick={rescan} disabled={rescanning}>
 						{rescanning ? 'Rescanning...' : 'Rescan'}
 					</button>
+					<a href="/import">Import transactions</a>
 				</div>
 			{:else}
 				<div class="row-list">

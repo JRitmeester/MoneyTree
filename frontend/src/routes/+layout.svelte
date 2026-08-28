@@ -1,7 +1,40 @@
 <script lang="ts">
 	import '$lib/styles/tokens.css';
+	import { page } from '$app/state';
 
 	let { children, data } = $props();
+
+	const navGroups = [
+		{
+			label: 'Overview',
+			links: [
+				{ href: '/', label: 'Dashboard' },
+				{ href: '/insights', label: 'Insights' }
+			]
+		},
+		{
+			label: 'Money',
+			links: [
+				{ href: '/transactions', label: 'Transactions' },
+				{ href: '/uncategorized', label: 'Uncategorized' },
+				{ href: '/recurring', label: 'Recurring' },
+				{ href: '/cashflow', label: 'Cash flow' },
+				{ href: '/budget', label: 'Budget' }
+			]
+		},
+		{
+			label: 'Records',
+			links: [
+				{ href: '/receipts', label: 'Receipts' },
+				{ href: '/categories', label: 'Categories' },
+				{ href: '/import', label: 'Import' }
+			]
+		}
+	];
+
+	function isActive(href: string): boolean {
+		return href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
+	}
 </script>
 
 <svelte:head>
@@ -15,18 +48,20 @@
 	{#if data?.username}
 		<nav>
 			<a href="/" class="brand">MoneyTree</a>
-			<div class="links">
-				<a href="/budget">Budget</a>
-				<a href="/transactions">Transactions</a>
-				<a href="/recurring">Recurring</a>
-				<a href="/cashflow">Cash flow</a>
-				<a href="/insights">Insights</a>
-				<a href="/receipts">Receipts</a>
-				<a href="/categories">Categories</a>
-				<a href="/uncategorized">Uncategorized</a>
-				<a href="/import">Import</a>
-				<a href="/settings">Settings</a>
+			<div class="groups">
+				{#each navGroups as group (group.label)}
+					<div class="group">
+						{#each group.links as link (link.href)}
+							<a href={link.href} aria-current={isActive(link.href) ? 'page' : undefined}>
+								{link.label}
+							</a>
+						{/each}
+					</div>
+				{/each}
 			</div>
+			<a href="/settings" class="settings-link" aria-current={isActive('/settings') ? 'page' : undefined}>
+				Settings
+			</a>
 		</nav>
 	{/if}
 	<main>
@@ -60,19 +95,45 @@
 		font-weight: 700;
 		color: white;
 		text-decoration: none;
+		flex-shrink: 0;
 	}
-	.links {
+	.groups {
 		display: flex;
-		gap: 1rem;
+		align-items: center;
+		gap: 1.5rem;
 		flex: 1;
 	}
-	.links a {
+	.group {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding-left: 1.5rem;
+		border-left: 1px solid rgba(255, 255, 255, 0.25);
+	}
+	.group:first-child {
+		padding-left: 0;
+		border-left: none;
+	}
+	.groups a,
+	.settings-link {
 		color: rgba(255, 255, 255, 0.85);
 		text-decoration: none;
 		font-size: 0.9rem;
+		padding: 0.25rem 0;
+		border-bottom: 2px solid transparent;
 	}
-	.links a:hover {
+	.groups a:hover,
+	.settings-link:hover {
 		color: white;
+	}
+	.groups a[aria-current='page'],
+	.settings-link[aria-current='page'] {
+		color: white;
+		font-weight: 600;
+		border-bottom-color: white;
+	}
+	.settings-link {
+		flex-shrink: 0;
 	}
 	main {
 		max-width: 1200px;

@@ -9,6 +9,7 @@
 	import BalanceChart from '$lib/components/BalanceChart.svelte';
 	import SavingsCapacityPanel from '$lib/components/SavingsCapacityPanel.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import Loading from '$lib/components/Loading.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
 	import { get } from 'svelte/store';
 
@@ -170,7 +171,7 @@
 	</PageHeader>
 
 	{#if loading}
-		<div class="loading">Loading...</div>
+		<Loading />
 	{:else if summary}
 		<div class="summary-cards">
 			<div class="card income">
@@ -232,7 +233,7 @@
 			<div class="section">
 				<h2>Spending by Category</h2>
 				{#if categories.length === 0}
-					<p class="muted">No expense data yet.</p>
+					<p class="muted">No expense data yet. <a href="/import">Import transactions</a> to get started.</p>
 				{:else}
 					<div class="category-list">
 						{#each categories as cat}
@@ -289,7 +290,7 @@
 			<div class="section">
 				<h2>Monthly Trend</h2>
 				{#if monthlyTrend.length === 0}
-					<p class="muted">No data yet. Import transactions first.</p>
+					<p class="muted">No data yet. <a href="/import">Import transactions</a> first.</p>
 				{:else}
 					<div class="trend-table">
 						<div class="trend-header">
@@ -323,7 +324,6 @@
 
 <style>
 	.dashboard { max-width: 100%; }
-	.loading { text-align: center; padding: 3rem; color: var(--color-text-muted); }
 
 	.header-filter {
 		display: flex;

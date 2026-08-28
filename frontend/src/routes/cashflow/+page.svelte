@@ -7,6 +7,7 @@
 	import { extractErrorDetail } from '$lib/errors';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+	import Loading from '$lib/components/Loading.svelte';
 
 	let monthDate = $state(startOfMonth(new Date()));
 	let calendar: CashflowCalendar | null = $state(null);
@@ -111,7 +112,7 @@
 	{/if}
 
 	{#if loading}
-		<p class="muted">Loading...</p>
+		<Loading />
 	{:else if advice && !advice.salary_confirmed}
 		<div class="section empty-state">
 			<p>{advice.message}.</p>
@@ -216,8 +217,7 @@
 	.cashflow-page { max-width: 1000px; }
 	h2 { margin: 0 0 1rem; font-size: 1.1rem; }
 	h3 { margin: 1rem 0 0.5rem; font-size: 0.95rem; }
-	.muted { color: var(--color-text-faint); font-style: italic; }
-
+	
 	.section {
 		background: var(--color-card-bg);
 		padding: 1.5rem;

@@ -8,6 +8,7 @@
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import { buildBudgetTree, buildBvaTree, type BudgetTreeNode, type BvaTreeNode } from '$lib/buildBudgetTree';
 	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+	import Loading from '$lib/components/Loading.svelte';
 
 	// --- State ---
 	let allPeriods: BudgetSummary[] = $state([]);
@@ -688,7 +689,7 @@
 	</div>
 
 	{#if loading}
-		<div class="loading">Loading...</div>
+		<Loading />
 	{:else if error}
 		<ErrorBanner message={error} />
 	{:else if !currentPeriod}
@@ -1404,8 +1405,7 @@
 	}
 
 	/* Loading */
-	.loading { text-align: center; padding: 3rem; color: var(--color-text-muted); }
-
+	
 	/* Colors */
 	.income-text { color: var(--color-income); }
 	.expense-text { color: var(--color-expense); }

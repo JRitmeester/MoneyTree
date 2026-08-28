@@ -14,6 +14,7 @@
 	import UndoBar from '$lib/components/UndoBar.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+import Loading from '$lib/components/Loading.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
 	import { get } from 'svelte/store';
 
@@ -307,7 +308,12 @@
 {/if}
 
 {#if loading}
-	<div class="loading">Loading...</div>
+	<Loading />
+{:else if transactions.length === 0}
+	<div class="empty-state">
+		<p>No transactions found.</p>
+		<a href="/import">Import a bank export</a> to get started.
+	</div>
 {:else}
 	<div class="table-wrap">
 		<table>
@@ -425,7 +431,7 @@
 		color: var(--color-text-muted);
 		margin-bottom: 0.5rem;
 	}
-	.loading {
+	.empty-state {
 		text-align: center;
 		padding: 3rem;
 		color: var(--color-text-muted);

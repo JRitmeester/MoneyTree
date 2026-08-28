@@ -2,6 +2,7 @@
 	import { getReceipts, formatDate, formatEuro, imageUrl, type Receipt } from '$lib/api';
 	import { goto } from '$app/navigation';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import Loading from '$lib/components/Loading.svelte';
 
 	let receipts: Receipt[] = $state([]);
 	let loading = $state(true);
@@ -38,7 +39,7 @@
 </div>
 
 {#if loading}
-	<div class="loading">Loading...</div>
+	<Loading />
 {:else if receipts.length === 0}
 	<div class="empty">
 		<p>No receipts yet.</p>
@@ -108,7 +109,7 @@
 		align-items: center;
 		gap: 0.5rem;
 	}
-	.loading, .empty {
+	.empty {
 		text-align: center;
 		padding: 3rem;
 		color: var(--color-text-muted);
