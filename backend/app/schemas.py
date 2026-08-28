@@ -654,6 +654,14 @@ class CashflowReturnTransferOut(BaseModel):
     covers: list[str]
 
 
+class CashflowSweepItemOut(BaseModel):
+    name: str
+    date: date
+    amount: float
+    cadence: str
+    kept_in_checking: bool
+
+
 class CashflowAdviceOut(BaseModel):
     salary_confirmed: bool
     message: Optional[str] = None
@@ -663,6 +671,9 @@ class CashflowAdviceOut(BaseModel):
     keep_in_checking: float = 0.0
     standing_buffer: float = 0.0
     buffer_pct: float
+    covered_total: float = 0.0
+    buffer_amount: float = 0.0
+    sweep_items: list[CashflowSweepItemOut] = Field(default_factory=list)
     return_transfers: list[CashflowReturnTransferOut] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 

@@ -205,6 +205,18 @@ class ReturnTransfer:
 
 
 @dataclass(frozen=True)
+class SweepItem:
+    """One expected debit in the sweep window, exposed so the UI can show
+    the full calculation behind the sweep amount."""
+
+    name: str
+    date: date
+    amount: float  # absolute
+    cadence: str
+    kept_in_checking: bool
+
+
+@dataclass(frozen=True)
 class Advice:
     salary_confirmed: bool
     message: str | None = None
@@ -214,6 +226,9 @@ class Advice:
     keep_in_checking: float = 0.0
     standing_buffer: float = 0.0
     buffer_pct: float = DEFAULT_BUFFER_PCT
+    covered_total: float = 0.0
+    buffer_amount: float = 0.0
+    sweep_items: list[SweepItem] = field(default_factory=list)
     return_transfers: list[ReturnTransfer] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -347,6 +362,7 @@ def compute_advice(db: Session, buffer_pct: float, today: date | None = None) ->
 
     return_transfers: list[ReturnTransfer] = []
     keep_in_checking_total = 0.0
+    kept_debit_ids: set[int] = set()
     for cluster in chosen:
         earliest = min(d.date for d in cluster)
         total = sum(d.amount for d in cluster)
@@ -370,9 +386,25 @@ def compute_advice(db: Session, buffer_pct: float, today: date | None = None) ->
             # don't move this money out at all, keep it in checking instead.
             keep_in_checking_total += total
             sweep_total -= total
+            kept_debit_ids.update(id(d) for d in cluster)
     return_transfers.sort(key=lambda t: t.date)
 
+    covered_total = round(sweep_total, 2)
     sweep_amount = round(sweep_total * (1 + buffer_pct / 100), 2)
+    # Derived as a difference so covered_total + buffer_amount always equals
+    # the displayed sweep_amount exactly, independent of rounding.
+    buffer_amount = round(sweep_amount - covered_total, 2)
+
+    sweep_items = [
+        SweepItem(
+            name=d.name,
+            date=d.date,
+            amount=round(d.amount, 2),
+            cadence=d.cadence,
+            kept_in_checking=id(d) in kept_debit_ids,
+        )
+        for d in sorted(window_debits, key=lambda d: d.date)
+    ]
 
     # Pre-payday debits: land in the days just before this payday, so the
     # previous sweep won't have covered them.
@@ -407,6 +439,9 @@ def compute_advice(db: Session, buffer_pct: float, today: date | None = None) ->
         keep_in_checking=round(keep_in_checking_total, 2),
         standing_buffer=round(standing_buffer_total, 2),
         buffer_pct=buffer_pct,
+        covered_total=covered_total,
+        buffer_amount=buffer_amount,
+        sweep_items=sweep_items,
         return_transfers=return_transfers,
         warnings=warnings,
     )

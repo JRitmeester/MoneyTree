@@ -32,6 +32,10 @@
 		return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 	}
 
+	function fmtDate(iso: string): string {
+		return new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+	}
+
 	async function load() {
 		loading = true;
 		error = null;
@@ -121,14 +125,18 @@
 	{:else}
 		{#if advice}
 			<div class="section advice-card">
-				<h2>Transfer advice</h2>
+				<h2>Payday transfer plan</h2>
+				<p class="explainer">
+					On payday, move this amount from checking to savings. It covers every
+					recurring bill expected before your next salary, plus a safety buffer.
+				</p>
 				<div class="advice-grid">
 					<div class="advice-item">
-						<span class="advice-label">Sweep on payday ({advice.payday})</span>
+						<span class="advice-label">Move to savings on {advice.payday ? fmtDate(advice.payday) : ''}</span>
 						<span class="advice-value">{formatEuro(advice.sweep_amount ?? 0)}</span>
 					</div>
 					<div class="advice-item buffer-item">
-						<span class="advice-label">Buffer</span>
+						<span class="advice-label">Safety buffer</span>
 						<span class="buffer-input-row">
 							<input
 								type="number"
@@ -145,25 +153,67 @@
 					</div>
 				</div>
 
+				{#if advice.sweep_items.length > 0}
+					<details class="calc-details">
+						<summary>How this amount is calculated</summary>
+						<table class="calc-table">
+							<tbody>
+								{#each advice.sweep_items as item (item.name + item.date)}
+									<tr class:kept={item.kept_in_checking}>
+										<td class="calc-date">{fmtDate(item.date)}</td>
+										<td class="calc-name">{item.name}</td>
+										<td class="calc-amount">
+											{#if item.kept_in_checking}
+												<span class="kept-note">stays in checking</span>
+											{:else}
+												{formatEuro(item.amount)}
+											{/if}
+										</td>
+									</tr>
+								{/each}
+								<tr class="calc-subtotal">
+									<td colspan="2">Bills covered from savings</td>
+									<td class="calc-amount">{formatEuro(advice.covered_total)}</td>
+								</tr>
+								<tr>
+									<td colspan="2">Safety buffer ({advice.buffer_pct}%)</td>
+									<td class="calc-amount">{formatEuro(advice.buffer_amount)}</td>
+								</tr>
+								<tr class="calc-total">
+									<td colspan="2">Total to savings</td>
+									<td class="calc-amount">{formatEuro(advice.sweep_amount ?? 0)}</td>
+								</tr>
+							</tbody>
+						</table>
+					</details>
+				{/if}
+
 				{#if advice.keep_in_checking > 0}
 					<p class="keep-in-checking">
-						Keep {formatEuro(advice.keep_in_checking)} in checking at sweep time for debits due right after payday.
+						Keep {formatEuro(advice.keep_in_checking)} in checking: those debits hit too
+						soon after payday for a transfer back from savings to arrive in time.
 					</p>
 				{/if}
 
 				{#if advice.standing_buffer > 0}
 					<p class="standing-buffer">
-						Standing buffer for small 4-weekly payments: {formatEuro(advice.standing_buffer)}
-						(included in the sweep, no separate transfer)
+						Small 4-weekly payments ({formatEuro(advice.standing_buffer)}) are included
+						in the amount above; no separate transfer needed for them.
 					</p>
 				{/if}
 
 				{#if advice.return_transfers.length > 0}
-					<h3>Return transfers</h3>
+					<h3>Then move back to checking</h3>
+					<p class="explainer">
+						These are transfers for you to make yourself, from savings back to
+						checking, timed so each bill cluster is funded two business days before
+						the money is withdrawn. They are derived from your confirmed recurring
+						payments on the Recurring page.
+					</p>
 					<ul class="transfer-list">
 						{#each advice.return_transfers as transfer (transfer.date + transfer.cadence + transfer.covers.join())}
 							<li>
-								<span class="transfer-date">{transfer.date}</span>
+								<span class="transfer-date">{fmtDate(transfer.date)}</span>
 								<span class="transfer-amount">{formatEuro(transfer.amount)}</span>
 								<span class="transfer-covers">for {transfer.covers.join(', ')}</span>
 							</li>
@@ -172,12 +222,14 @@
 				{/if}
 
 				{#if advice.warnings.length > 0}
-					<h3>Warnings</h3>
-					<ul class="warning-list">
-						{#each advice.warnings as warning (warning)}
-							<li>{warning}</li>
-						{/each}
-					</ul>
+					<div class="warning-box">
+						<h3>Heads up</h3>
+						<ul class="warning-list">
+							{#each advice.warnings as warning (warning)}
+								<li>{warning}</li>
+							{/each}
+						</ul>
+					</div>
 				{/if}
 			</div>
 		{/if}
@@ -200,7 +252,11 @@
 							{#if cell.day}
 								<div class="day-number">{cell.day}</div>
 								{#each cell.items as item}
-									<div class="day-item" class:income={item.is_income}>
+									<div
+										class="day-item"
+										class:income={item.is_income}
+										title="{item.name} {formatEuro(item.amount)}"
+									>
 										{item.name} {formatEuro(item.amount)}
 									</div>
 								{/each}
@@ -285,6 +341,40 @@
 		font-size: 1rem;
 	}
 
+	.explainer {
+		font-size: 0.85rem;
+		color: var(--color-text-muted);
+		margin: 0 0 1rem;
+		max-width: 46rem;
+	}
+	h3 + .explainer { margin-top: 0.25rem; }
+
+	.calc-details {
+		margin-top: 1rem;
+		font-size: 0.85rem;
+	}
+	.calc-details summary {
+		cursor: pointer;
+		color: var(--color-accent);
+		font-weight: 600;
+		user-select: none;
+	}
+	.calc-table {
+		margin-top: 0.75rem;
+		border-collapse: collapse;
+		min-width: 22rem;
+	}
+	.calc-table td {
+		padding: 0.25rem 0.75rem 0.25rem 0;
+		border-bottom: 1px solid #f0f0f0;
+	}
+	.calc-date { color: var(--color-text-muted); white-space: nowrap; }
+	.calc-amount { text-align: right; white-space: nowrap; }
+	.calc-table tr.kept .calc-name { color: var(--color-text-muted); }
+	.kept-note { color: var(--color-text-faint); font-style: italic; }
+	.calc-subtotal td { border-top: 2px solid var(--color-border); font-weight: 600; }
+	.calc-total td { font-weight: 700; border-bottom: none; }
+
 	.transfer-list, .warning-list {
 		list-style: none;
 		padding: 0;
@@ -307,9 +397,27 @@
 		color: #444;
 		margin: 0.5rem 0 0;
 	}
+	.warning-box {
+		margin-top: 1.25rem;
+		background: var(--color-warn-bg-amber);
+		border: 1px solid #facc15;
+		border-left: 4px solid var(--color-amber);
+		border-radius: var(--radius-sm);
+		padding: 0.75rem 1rem;
+	}
+	.warning-box h3 {
+		margin: 0 0 0.5rem;
+		color: var(--color-amber);
+	}
 	.warning-list li {
 		font-size: 0.85rem;
-		color: var(--color-amber);
+		color: var(--color-text);
+		line-height: 1.4;
+	}
+	.warning-list li + li {
+		margin-top: 0.25rem;
+		padding-top: 0.25rem;
+		border-top: 1px solid #fde68a;
 	}
 
 	.calendar-header {
@@ -329,7 +437,9 @@
 
 	.weekday-row, .week-row {
 		display: grid;
-		grid-template-columns: repeat(7, 1fr);
+		/* minmax(0, 1fr) keeps all seven columns exactly equal: long item
+		   names truncate inside their cell instead of widening the column. */
+		grid-template-columns: repeat(7, minmax(0, 1fr));
 		gap: 0.35rem;
 	}
 	.weekday-row { margin: 1rem 0 0.35rem; }
@@ -341,6 +451,8 @@
 	.week-row { margin-bottom: 0.35rem; }
 	.day-cell {
 		min-height: 4.5rem;
+		min-width: 0;
+		overflow: hidden;
 		border: 1px solid #eee;
 		border-radius: var(--radius-sm);
 		padding: 0.35rem;

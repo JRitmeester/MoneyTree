@@ -323,6 +323,47 @@ class TestAdvisor:
         # sweep: no money is silently lost by not getting a transfer.
         assert advice.sweep_amount == round((500 + 400 + 100) * 1.1, 2)
 
+    def test_breakdown_items_and_totals_add_up(self, db: Session):
+        """The advice exposes the full calculation: every debit in the
+        window as a line item, which ones are kept in checking, the covered
+        total, and the buffer amount, such that
+        covered_total + buffer_amount == sweep_amount."""
+        _confirmed(
+            db, name="Salary", expected_amount=3000, cadence="monthly",
+            expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
+        )
+        _confirmed(
+            db, name="Rent", expected_amount=-900, cadence="monthly",
+            expected_day=1, anchor_date=date(2026, 7, 1),
+        )
+        # Lands 2026-08-24, too close after payday (2026-08-21) for the
+        # 2-business-day rule: kept in checking, excluded from the sweep.
+        _confirmed(
+            db, name="Gym", expected_amount=-40, cadence="monthly",
+            expected_day=24, anchor_date=date(2026, 7, 24),
+        )
+
+        advice = compute_advice(db, buffer_pct=10.0, today=date(2026, 8, 20))
+
+        items = {i.name: i for i in advice.sweep_items}
+        assert set(items) == {"Rent", "Gym"}
+        assert items["Rent"].kept_in_checking is False
+        assert items["Rent"].amount == 900.0
+        assert items["Rent"].date == date(2026, 9, 1)
+        assert items["Gym"].kept_in_checking is True
+
+        assert advice.keep_in_checking == 40.0
+        assert advice.covered_total == 900.0
+        assert advice.buffer_amount == 90.0
+        assert advice.sweep_amount == 990.0
+        assert advice.covered_total + advice.buffer_amount == advice.sweep_amount
+
+    def test_breakdown_empty_without_salary(self, db: Session):
+        advice = compute_advice(db, buffer_pct=10.0)
+        assert advice.sweep_items == []
+        assert advice.covered_total == 0.0
+        assert advice.buffer_amount == 0.0
+
     def test_yearly_item_due_soon_warns(self, db: Session):
         _confirmed(
             db, name="Salary", expected_amount=3000, cadence="monthly",

@@ -17,6 +17,7 @@ from ..schemas import (
     CashflowReturnTransferOut,
     CashflowSettingsOut,
     CashflowSettingsUpdate,
+    CashflowSweepItemOut,
 )
 from ..services.cashflow_advisor import (
     DEFAULT_BUFFER_PCT,
@@ -129,6 +130,18 @@ def get_advice(db: Session = Depends(get_db)):
         keep_in_checking=advice.keep_in_checking,
         standing_buffer=advice.standing_buffer,
         buffer_pct=advice.buffer_pct,
+        covered_total=advice.covered_total,
+        buffer_amount=advice.buffer_amount,
+        sweep_items=[
+            CashflowSweepItemOut(
+                name=i.name,
+                date=i.date,
+                amount=i.amount,
+                cadence=i.cadence,
+                kept_in_checking=i.kept_in_checking,
+            )
+            for i in advice.sweep_items
+        ],
         return_transfers=[
             CashflowReturnTransferOut(
                 date=t.date, amount=t.amount, cadence=t.cadence, covers=t.covers

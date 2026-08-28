@@ -1165,6 +1165,14 @@ export interface CashflowReturnTransfer {
 	covers: string[];
 }
 
+export interface CashflowSweepItem {
+	name: string;
+	date: string;
+	amount: number;
+	cadence: string;
+	kept_in_checking: boolean;
+}
+
 export interface CashflowAdvice {
 	salary_confirmed: boolean;
 	message: string | null;
@@ -1174,6 +1182,9 @@ export interface CashflowAdvice {
 	keep_in_checking: number;
 	standing_buffer: number;
 	buffer_pct: number;
+	covered_total: number;
+	buffer_amount: number;
+	sweep_items: CashflowSweepItem[];
 	return_transfers: CashflowReturnTransfer[];
 	warnings: string[];
 }
