@@ -157,26 +157,26 @@
 	.presets {
 		display: flex;
 		gap: 0;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		overflow: hidden;
 	}
 	.preset-btn {
 		padding: 0.4rem 0.6rem;
-		background: white;
+		background: var(--color-card-bg);
 		border: none;
 		border-right: 1px solid #eee;
 		cursor: pointer;
 		font-size: 0.8rem;
 		font-weight: 500;
-		color: #666;
+		color: var(--color-text-muted);
 		transition: all 0.15s;
 	}
 	.preset-btn:last-child { border-right: none; }
-	.preset-btn:hover:not(:disabled) { background: #f5f5f5; color: #1a1a1a; }
+	.preset-btn:hover:not(:disabled) { background: #f5f5f5; color: var(--color-text); }
 	.preset-btn:disabled { opacity: 0.4; cursor: default; }
 	.preset-btn.active {
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 	}
 	.date-inputs {
@@ -186,9 +186,9 @@
 	}
 	.date-inputs input {
 		padding: 0.4rem 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.85rem;
 	}
-	.separator { color: #999; font-size: 0.85rem; }
+	.separator { color: var(--color-text-faint); font-size: 0.85rem; }
 </style>

@@ -7,6 +7,7 @@
 	} from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import { buildBudgetTree, buildBvaTree, type BudgetTreeNode, type BvaTreeNode } from '$lib/buildBudgetTree';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	// --- State ---
 	let allPeriods: BudgetSummary[] = $state([]);
@@ -689,7 +690,7 @@
 	{#if loading}
 		<div class="loading">Loading...</div>
 	{:else if error}
-		<div class="error">{error}</div>
+		<ErrorBanner message={error} />
 	{:else if !currentPeriod}
 		<!-- No periods exist yet -->
 		<div class="onboarding">
@@ -890,7 +891,7 @@
 					<div class="card-label">Net</div>
 				</div>
 				<div class="card">
-					<div class="card-value" style="color: #2d6a4f">{bvaData.savings_rate.toFixed(1)}%</div>
+					<div class="card-value" style="color: var(--color-accent)">{bvaData.savings_rate.toFixed(1)}%</div>
 					<div class="card-label">Savings Rate</div>
 				</div>
 			</div>
@@ -1200,21 +1201,21 @@
 	}
 	.period-selector h1 {
 		margin: 0;
-		color: #1a1a1a;
+		color: var(--color-text);
 		min-width: 260px;
 		text-align: center;
 		font-size: 1.4rem;
 	}
 	.nav-btn {
-		background: white;
-		border: 2px solid #e5e7eb;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border: 2px solid var(--color-border-light);
+		border-radius: var(--radius-md);
 		padding: 0.5rem 0.75rem;
 		cursor: pointer;
 		font-size: 1.1rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 	}
-	.nav-btn:hover:not(:disabled) { background: #f0fdf4; border-color: #2d6a4f; }
+	.nav-btn:hover:not(:disabled) { background: var(--color-warn-bg-green); border-color: var(--color-accent); }
 	.nav-btn:disabled { opacity: 0.3; cursor: default; }
 	.actions { display: flex; gap: 0.5rem; }
 
@@ -1222,17 +1223,17 @@
 	.btn {
 		padding: 0.5rem 1.25rem;
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.9rem;
 	}
-	.btn.primary { background: #2d6a4f; color: white; }
+	.btn.primary { background: var(--color-accent); color: white; }
 	.btn.primary:hover { background: #1b4332; }
 	.btn.primary:disabled { opacity: 0.5; cursor: default; }
-	.btn.secondary { background: white; color: #2d6a4f; border: 2px solid #2d6a4f; }
-	.btn.secondary:hover { background: #f0fdf4; }
-	.btn.danger-text { background: none; color: #999; border: none; font-size: 0.8rem; }
-	.btn.danger-text:hover { color: #dc2626; }
+	.btn.secondary { background: var(--color-card-bg); color: var(--color-accent); border: 2px solid var(--color-accent); }
+	.btn.secondary:hover { background: var(--color-warn-bg-green); }
+	.btn.danger-text { background: none; color: var(--color-text-faint); border: none; font-size: 0.8rem; }
+	.btn.danger-text:hover { color: var(--color-expense); }
 	.btn.small { padding: 0.4rem 0.75rem; font-size: 0.85rem; }
 	.btn.large { padding: 0.75rem 2rem; font-size: 1rem; }
 
@@ -1244,12 +1245,12 @@
 	}
 	.inline-date-edit input[type="date"] {
 		padding: 0.35rem 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.85rem;
 	}
-	.inline-date-edit input[type="date"]:focus { outline: none; border-color: #2d6a4f; }
-	.inline-date-edit .separator { color: #999; font-size: 0.85rem; }
+	.inline-date-edit input[type="date"]:focus { outline: none; border-color: var(--color-accent); }
+	.inline-date-edit .separator { color: var(--color-text-faint); font-size: 0.85rem; }
 	.edit-dates-btn {
 		background: none;
 		border: none;
@@ -1259,7 +1260,7 @@
 		padding: 0.25rem;
 		line-height: 1;
 	}
-	.edit-dates-btn:hover { color: #2d6a4f; }
+	.edit-dates-btn:hover { color: var(--color-accent); }
 
 	/* Wizard modal */
 	.wizard-backdrop {
@@ -1272,7 +1273,7 @@
 		z-index: 100;
 	}
 	.wizard-modal {
-		background: white;
+		background: var(--color-card-bg);
 		border-radius: 12px;
 		width: 90%;
 		max-width: 600px;
@@ -1285,9 +1286,9 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 1.25rem 1.5rem;
-		border-bottom: 1px solid #e5e7eb;
+		border-bottom: 1px solid var(--color-border-light);
 	}
-	.wizard-header h2 { margin: 0; font-size: 1.15rem; color: #1a1a1a; }
+	.wizard-header h2 { margin: 0; font-size: 1.15rem; color: var(--color-text); }
 	.wizard-close {
 		background: none;
 		border: none;
@@ -1296,13 +1297,13 @@
 		color: #9ca3af;
 		line-height: 1;
 	}
-	.wizard-close:hover { color: #1a1a1a; }
+	.wizard-close:hover { color: var(--color-text); }
 	.wizard-body {
 		padding: 1.5rem;
 		overflow-y: auto;
 		flex: 1;
 	}
-	.wizard-desc { margin: 0 0 1.25rem; color: #666; font-size: 0.9rem; line-height: 1.5; }
+	.wizard-desc { margin: 0 0 1.25rem; color: var(--color-text-muted); font-size: 0.9rem; line-height: 1.5; }
 	.wizard-dates {
 		display: flex;
 		gap: 1.5rem;
@@ -1313,20 +1314,20 @@
 		flex-direction: column;
 		gap: 0.3rem;
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 		flex: 1;
 		min-width: 150px;
 	}
 	.wizard-dates input[type="date"] {
 		padding: 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.9rem;
 	}
-	.wizard-dates input[type="date"]:focus { outline: none; border-color: #2d6a4f; }
+	.wizard-dates input[type="date"]:focus { outline: none; border-color: var(--color-accent); }
 	.wizard-footer {
 		padding: 1rem 1.5rem;
-		border-top: 1px solid #e5e7eb;
+		border-top: 1px solid var(--color-border-light);
 		display: flex;
 		justify-content: flex-end;
 		gap: 0.5rem;
@@ -1340,14 +1341,14 @@
 	.ws-item {
 		flex: 1;
 		min-width: 100px;
-		background: #f9fafb;
+		background: var(--color-bg-faint);
 		padding: 0.6rem 0.75rem;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		text-align: center;
 	}
-	.ws-label { display: block; font-size: 0.7rem; color: #666; }
+	.ws-label { display: block; font-size: 0.7rem; color: var(--color-text-muted); }
 	.ws-value { display: block; font-size: 1rem; font-weight: 700; margin-top: 0.1rem; }
-	.wizard-body h3 { margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #1a1a1a; }
+	.wizard-body h3 { margin: 1rem 0 0.5rem; font-size: 0.95rem; color: var(--color-text); }
 	.wizard-body h3:first-of-type { margin-top: 0; }
 	.wizard-lines { font-size: 0.9rem; }
 	.wizard-line-row {
@@ -1355,18 +1356,18 @@
 		align-items: center;
 		gap: 0.5rem;
 		padding: 0.4rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 	}
 	.wizard-line-row .cat-name { flex: 1; font-weight: 500; }
 	.wizard-line-row input[type="number"] {
 		width: 110px;
 		padding: 0.35rem 0.5rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		font-size: 0.9rem;
 		text-align: right;
 	}
-	.wizard-line-row input[type="number"]:focus { outline: none; border-color: #2d6a4f; }
+	.wizard-line-row input[type="number"]:focus { outline: none; border-color: var(--color-accent); }
 	.actual-toggle {
 		display: flex;
 		align-items: center;
@@ -1374,14 +1375,14 @@
 		cursor: pointer;
 		white-space: nowrap;
 	}
-	.actual-toggle input[type="checkbox"] { accent-color: #2d6a4f; }
-	.actual-label { font-size: 0.75rem; color: #666; }
+	.actual-toggle input[type="checkbox"] { accent-color: var(--color-accent); }
+	.actual-label { font-size: 0.75rem; color: var(--color-text-muted); }
 
 	/* Tab bar */
 	.tab-bar {
 		display: flex;
 		gap: 0;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--color-border-light);
 		margin-bottom: 1.5rem;
 	}
 	.tab {
@@ -1391,29 +1392,28 @@
 		cursor: pointer;
 		font-size: 0.95rem;
 		font-weight: 500;
-		color: #666;
+		color: var(--color-text-muted);
 		border-bottom: 3px solid transparent;
 		margin-bottom: -2px;
 		transition: color 0.15s, border-color 0.15s;
 	}
-	.tab:hover { color: #2d6a4f; }
+	.tab:hover { color: var(--color-accent); }
 	.tab.active {
-		color: #2d6a4f;
-		border-bottom-color: #2d6a4f;
+		color: var(--color-accent);
+		border-bottom-color: var(--color-accent);
 	}
 
-	/* Loading & Error */
-	.loading { text-align: center; padding: 3rem; color: #666; }
-	.error { background: #fef2f2; color: #dc2626; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+	/* Loading */
+	.loading { text-align: center; padding: 3rem; color: var(--color-text-muted); }
 
 	/* Colors */
-	.income-text { color: #16a34a; }
-	.expense-text { color: #dc2626; }
-	.positive { color: #16a34a !important; }
-	.negative { color: #dc2626 !important; }
-	.unallocated-zero { color: #16a34a !important; }
+	.income-text { color: var(--color-income); }
+	.expense-text { color: var(--color-expense); }
+	.positive { color: var(--color-income) !important; }
+	.negative { color: var(--color-expense) !important; }
+	.unallocated-zero { color: var(--color-income) !important; }
 	.unallocated-nonzero { color: #f59e0b !important; }
-	.muted { color: #999; font-style: italic; }
+	.muted { color: var(--color-text-faint); font-style: italic; }
 
 	/* Budget grid layout */
 	.budget-grid {
@@ -1425,24 +1425,24 @@
 
 	/* Section cards */
 	.section {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 1.25rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 	}
-	h2 { margin: 0 0 1rem; font-size: 1.1rem; color: #1a1a1a; }
+	h2 { margin: 0 0 1rem; font-size: 1.1rem; color: var(--color-text); }
 
 	/* Subtotal rows */
 	.subtotal-row {
 		display: flex;
 		justify-content: space-between;
 		padding: 0.75rem 0;
-		border-top: 2px solid #e5e7eb;
+		border-top: 2px solid var(--color-border-light);
 		margin-top: 0.5rem;
 		font-weight: 600;
 		font-size: 0.95rem;
 	}
 	.subtotal-row.highlight {
-		background: #f9fafb;
+		background: var(--color-bg-faint);
 		padding: 0.75rem;
 		margin: 0.5rem -1.5rem -1.5rem;
 		border-radius: 0 0 8px 8px;
@@ -1454,7 +1454,7 @@
 	.edit-row {
 		display: flex;
 		padding: 0.4rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		align-items: center;
 		gap: 0.5rem;
 	}
@@ -1462,12 +1462,12 @@
 	.edit-row input[type="number"] {
 		width: 80px;
 		padding: 0.35rem 0.5rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		font-size: 0.9rem;
 		text-align: right;
 	}
-	.edit-row input[type="number"]:focus { outline: none; border-color: #2d6a4f; }
+	.edit-row input[type="number"]:focus { outline: none; border-color: var(--color-accent); }
 	.remove-line-btn {
 		background: none;
 		border: none;
@@ -1478,7 +1478,7 @@
 		line-height: 1;
 		flex-shrink: 0;
 	}
-	.remove-line-btn:hover { color: #dc2626; }
+	.remove-line-btn:hover { color: var(--color-expense); }
 	.add-row { border-bottom: none; }
 
 	/* Tree view */
@@ -1487,7 +1487,7 @@
 		align-items: center;
 		gap: 0.5rem;
 		padding: 0.4rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 	}
 	.tree-parent {
 		background: none;
@@ -1498,33 +1498,33 @@
 		border-radius: 4px;
 		font-size: inherit;
 	}
-	.tree-parent:hover { background: #f9fafb; }
+	.tree-parent:hover { background: var(--color-bg-faint); }
 	.tree-leaf { font-size: inherit; }
 	.tree-toggle {
 		display: inline-block;
 		width: 1em;
 		font-size: 0.65rem;
-		color: #999;
+		color: var(--color-text-faint);
 		flex-shrink: 0;
 	}
 	.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.tree-total {
 		font-size: 0.85rem;
-		color: #999;
+		color: var(--color-text-faint);
 		font-variant-numeric: tabular-nums;
 		white-space: nowrap;
 	}
 	.tree-row input[type="number"] {
 		width: 80px;
 		padding: 0.35rem 0.5rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		font-size: 0.9rem;
 		text-align: right;
 	}
-	.tree-row input[type="number"]:focus { outline: none; border-color: #2d6a4f; }
+	.tree-row input[type="number"]:focus { outline: none; border-color: var(--color-accent); }
 	.edit-table .children-panel {
-		border-left: 3px solid #2d6a4f;
+		border-left: 3px solid var(--color-accent);
 		margin-bottom: 0.15rem;
 	}
 
@@ -1540,8 +1540,8 @@
 	.savings-column {
 		display: flex;
 		flex-direction: column;
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		padding: 1.25rem;
 	}
 	.savings-column .section {
@@ -1554,7 +1554,7 @@
 		margin-bottom: 0;
 	}
 	.savings-subtotal {
-		border-top: 2px solid #e5e7eb;
+		border-top: 2px solid var(--color-border-light);
 		padding-top: 0.75rem;
 		margin-top: 1.25rem;
 	}
@@ -1562,7 +1562,7 @@
 	/* Balance badge */
 	.balance-badge {
 		font-size: 0.75rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		background: #ecfdf5;
 		padding: 0.15rem 0.4rem;
 		border-radius: 4px;
@@ -1580,7 +1580,7 @@
 		padding: 3rem 1rem;
 	}
 	.onboarding-card {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 3rem;
 		border-radius: 12px;
 		text-align: center;
@@ -1592,7 +1592,7 @@
 		color: #1b4332;
 	}
 	.onboarding-card p {
-		color: #666;
+		color: var(--color-text-muted);
 		margin-bottom: 1.5rem;
 		line-height: 1.5;
 	}
@@ -1605,13 +1605,13 @@
 		margin-bottom: 1.5rem;
 	}
 	.card {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 1.25rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		text-align: center;
 	}
 	.card-value { font-size: 1.35rem; font-weight: 700; }
-	.card-label { font-size: 0.8rem; color: #666; margin-top: 0.25rem; }
+	.card-label { font-size: 0.8rem; color: var(--color-text-muted); margin-top: 0.25rem; }
 
 	/* Budget vs Actual tables */
 	.bva-table { font-size: 0.9rem; }
@@ -1619,26 +1619,26 @@
 		display: grid;
 		grid-template-columns: 2fr 1fr 1fr 1.2fr 1.5fr;
 		padding: 0.5rem 0;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--color-border-light);
 		font-weight: 600;
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.bva-row {
 		display: grid;
 		grid-template-columns: 2fr 1fr 1fr 1.2fr 1.5fr;
 		padding: 0.6rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		align-items: center;
 	}
-	.bva-row.over-budget { background: #fef2f2; }
+	.bva-row.over-budget { background: var(--color-warn-bg-red); }
 	.right { text-align: right; }
 	.cat-name { font-weight: 500; }
 
 	.bar-col { padding-left: 0.75rem; }
 	.bar-bg {
 		height: 8px;
-		background: #e5e7eb;
+		background: var(--color-border-light);
 		border-radius: 4px;
 		position: relative;
 	}
@@ -1647,9 +1647,9 @@
 		border-radius: 4px;
 		transition: width 0.3s;
 	}
-	.income-bar { background: #16a34a; }
-	.expense-bar-ok { background: #2d6a4f; }
-	.expense-bar-over { background: #dc2626; }
+	.income-bar { background: var(--color-income); }
+	.expense-bar-ok { background: var(--color-accent); }
+	.expense-bar-over { background: var(--color-expense); }
 
 	/* 4-column variant (fixed bills, sinking funds, saving goals) */
 	.bva-table-fixed .bva-header,
@@ -1657,13 +1657,13 @@
 	.bva-table-fixed a.bva-row-link {
 		grid-template-columns: 3fr 1fr 1fr 1fr;
 	}
-	.check-ok { color: #16a34a; font-size: 1.2rem; font-weight: bold; }
-	.check-warn { color: #dc2626; font-size: 1.2rem; font-weight: bold; }
-	.balance-text { color: #2d6a4f; font-size: 0.85rem; }
+	.check-ok { color: var(--color-income); font-size: 1.2rem; font-weight: bold; }
+	.check-warn { color: var(--color-expense); font-size: 1.2rem; font-weight: bold; }
+	.balance-text { color: var(--color-accent); font-size: 0.85rem; }
 
 	/* Section subtotals */
 	.bva-subtotal {
-		border-top: 2px solid #e5e7eb;
+		border-top: 2px solid var(--color-border-light);
 		border-bottom: none;
 		font-weight: 700;
 		padding-top: 0.75rem;
@@ -1678,13 +1678,13 @@
 		transition: background-color 0.1s;
 	}
 	.bva-row-link:hover {
-		background-color: #f0fdf4;
+		background-color: var(--color-warn-bg-green);
 	}
 	a.bva-row-link {
 		display: grid;
 		grid-template-columns: 2fr 1fr 1fr 1.2fr 1.5fr;
 		padding: 0.6rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		align-items: center;
 	}
 
@@ -1700,9 +1700,9 @@
 		font-weight: 500;
 		color: inherit;
 	}
-	.bva-row-parent:hover { background: #f9fafb; }
+	.bva-row-parent:hover { background: var(--color-bg-faint); }
 	.bva-children {
-		border-left: 3px solid #2d6a4f;
+		border-left: 3px solid var(--color-accent);
 		margin-left: 0.5rem;
 		margin-bottom: 0.15rem;
 	}
@@ -1713,7 +1713,7 @@
 		top: -2px;
 		bottom: -2px;
 		width: 2px;
-		background: #1a1a1a;
+		background: var(--color-text);
 		border-radius: 1px;
 		opacity: 0.5;
 		pointer-events: none;
@@ -1733,7 +1733,7 @@
 		border-left: 3px solid #f59e0b;
 	}
 	.unmapped-desc {
-		color: #666;
+		color: var(--color-text-muted);
 		font-size: 0.85rem;
 		margin: 0 0 0.75rem;
 	}
@@ -1742,12 +1742,12 @@
 		justify-content: space-between;
 		padding: 0.5rem 0;
 		font-size: 0.9rem;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 	}
 	.unmapped-link {
 		display: inline-block;
 		margin-top: 0.75rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		font-size: 0.85rem;
 		text-decoration: none;
 	}

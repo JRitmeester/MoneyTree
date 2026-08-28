@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { importCsv, linkReceipt, formatEuro, type ImportResult, type MatchCandidate } from '$lib/api';
 	import { extractErrorDetail } from '$lib/errors';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let file: File | null = $state(null);
 	let loading = $state(false);
@@ -68,7 +70,7 @@
 	}
 </script>
 
-<h1>Import Transactions</h1>
+<PageHeader title="Import Transactions" />
 
 <input type="file" accept=".csv" bind:this={fileInputEl} onchange={handleFileChange} class="file-input-hidden" />
 
@@ -107,7 +109,7 @@
 </div>
 
 {#if error}
-	<div class="error">{error}</div>
+	<ErrorBanner message={error} />
 {/if}
 
 {#if result}
@@ -184,8 +186,6 @@
 {/if}
 
 <style>
-	h1 { color: #1a1a1a; }
-
 	.file-input-hidden {
 		position: absolute;
 		width: 0;
@@ -204,7 +204,7 @@
 		min-height: 220px;
 		margin: 1.5rem 0 1rem;
 		padding: 2.5rem 2rem;
-		background: white;
+		background: var(--color-card-bg);
 		border: 2px dashed #ccc;
 		border-radius: 12px;
 		cursor: pointer;
@@ -212,26 +212,26 @@
 		text-align: center;
 	}
 	.drop-zone:hover {
-		border-color: #2d6a4f;
-		background: #f0fdf4;
+		border-color: var(--color-accent);
+		background: var(--color-warn-bg-green);
 	}
 	.drop-zone.dragging {
-		border-color: #2d6a4f;
-		background: #f0fdf4;
+		border-color: var(--color-accent);
+		background: var(--color-warn-bg-green);
 		border-style: solid;
 	}
 	.drop-zone.has-file {
-		border-color: #16a34a;
+		border-color: var(--color-income);
 		border-style: solid;
-		background: #f0fdf4;
+		background: var(--color-warn-bg-green);
 	}
 	.drop-icon {
 		font-size: 2.5rem;
-		color: #999;
+		color: var(--color-text-faint);
 		line-height: 1;
 	}
 	.drop-zone.has-file .drop-icon {
-		color: #16a34a;
+		color: var(--color-income);
 	}
 	.drop-text {
 		font-size: 1.05rem;
@@ -241,11 +241,11 @@
 	.drop-filename {
 		font-size: 1.05rem;
 		font-weight: 600;
-		color: #1a1a1a;
+		color: var(--color-text);
 	}
 	.drop-hint {
 		font-size: 0.8rem;
-		color: #999;
+		color: var(--color-text-faint);
 	}
 
 	.import-options {
@@ -262,41 +262,41 @@
 		gap: 0.6rem;
 		cursor: pointer;
 		padding: 0.75rem 1rem;
-		background: white;
-		border-radius: 8px;
-		border: 1px solid #e5e7eb;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--color-border-light);
 		flex: 1;
 		min-width: 250px;
 	}
 	.option-label:hover {
-		border-color: #2d6a4f;
+		border-color: var(--color-accent);
 	}
 	.option-label input[type="checkbox"] {
 		margin-top: 0.15rem;
 		width: 18px;
 		height: 18px;
 		flex-shrink: 0;
-		accent-color: #2d6a4f;
+		accent-color: var(--color-accent);
 	}
 	.option-text {
 		display: flex;
 		flex-direction: column;
 		font-size: 0.95rem;
 		font-weight: 500;
-		color: #1a1a1a;
+		color: var(--color-text);
 	}
 	.option-desc {
 		font-size: 0.8rem;
 		font-weight: 400;
-		color: #999;
+		color: var(--color-text-faint);
 		margin-top: 0.15rem;
 	}
 	.import-btn {
 		padding: 0.65rem 2rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 1rem;
 		font-weight: 500;
@@ -312,10 +312,10 @@
 
 	button {
 		padding: 0.5rem 1.5rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.95rem;
 	}
@@ -324,17 +324,10 @@
 		cursor: not-allowed;
 	}
 
-	.error {
-		padding: 1rem;
-		background: #fef2f2;
-		color: #dc2626;
-		border-radius: 8px;
-		margin: 1rem 0;
-	}
 	.result {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 1.5rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		margin-top: 1.5rem;
 	}
 	.stats {
@@ -350,17 +343,17 @@
 	.stat .value {
 		font-size: 2rem;
 		font-weight: 700;
-		color: #2d6a4f;
+		color: var(--color-accent);
 	}
 	.stat .label {
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	h3 { margin-top: 1.5rem; }
 	.match-card {
-		background: #f9fafb;
+		background: var(--color-bg-faint);
 		padding: 1rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		margin: 0.75rem 0;
 		border-left: 4px solid #f59e0b;
 	}
@@ -374,7 +367,7 @@
 	}
 	.match-label {
 		font-size: 0.75rem;
-		color: #999;
+		color: var(--color-text-faint);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 	}
@@ -383,12 +376,12 @@
 		font-size: 0.95rem;
 	}
 	.match-amount {
-		color: #666;
+		color: var(--color-text-muted);
 		font-size: 0.9rem;
 	}
 	.match-arrow {
 		font-size: 1.25rem;
-		color: #999;
+		color: var(--color-text-faint);
 	}
 	.match-footer {
 		display: flex;
@@ -396,11 +389,11 @@
 		align-items: center;
 		margin-top: 0.75rem;
 		padding-top: 0.75rem;
-		border-top: 1px solid #e5e7eb;
+		border-top: 1px solid var(--color-border-light);
 	}
 	.confidence {
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.match-actions {
 		display: flex;
@@ -408,25 +401,25 @@
 	}
 	.confirm-btn {
 		padding: 0.35rem 1rem;
-		background: #16a34a;
+		background: var(--color-income);
 		font-size: 0.85rem;
 	}
 	.reject-btn {
 		padding: 0.35rem 1rem;
-		background: white;
-		color: #666;
-		border: 1px solid #ddd;
+		background: var(--color-card-bg);
+		color: var(--color-text-muted);
+		border: 1px solid var(--color-border);
 		font-size: 0.85rem;
 	}
 	.all-resolved {
-		color: #16a34a;
+		color: var(--color-income);
 		font-weight: 500;
 	}
 	.link {
 		display: inline-block;
 		margin-top: 1rem;
 		margin-right: 1rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		font-weight: 600;
 	}
 	.categorize-link {
@@ -437,7 +430,7 @@
 		background: #fef3c7;
 		color: #92400e;
 		border: 1px solid #f59e0b;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		font-weight: 600;
 	}
 </style>

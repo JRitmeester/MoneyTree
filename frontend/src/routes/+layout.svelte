@@ -1,4 +1,6 @@
 <script lang="ts">
+	import '$lib/styles/tokens.css';
+
 	let { children, data } = $props();
 </script>
 
@@ -37,7 +39,7 @@
 		margin: 0;
 		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 		background: #f5f5f5;
-		color: #1a1a1a;
+		color: var(--color-text);
 	}
 	:global(*, *::before, *::after) {
 		box-sizing: border-box;
@@ -46,7 +48,7 @@
 		min-height: 100vh;
 	}
 	nav {
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		padding: 0.75rem 1.5rem;
 		display: flex;

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getReceipts, formatDate, formatEuro, imageUrl, type Receipt } from '$lib/api';
 	import { goto } from '$app/navigation';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	let receipts: Receipt[] = $state([]);
 	let loading = $state(true);
@@ -23,10 +24,11 @@
 	$effect(() => { load(); });
 </script>
 
-<div class="header">
-	<h1>Receipts</h1>
-	<button class="add-btn" onclick={() => goto('/receipts/new')}>+ Add Receipt</button>
-</div>
+<PageHeader title="Receipts" marginBottom="1rem">
+	{#snippet right()}
+		<button class="add-btn" onclick={() => goto('/receipts/new')}>+ Add Receipt</button>
+	{/snippet}
+</PageHeader>
 
 <div class="filters">
 	<label>
@@ -86,19 +88,12 @@
 {/if}
 
 <style>
-	.header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 1rem;
-	}
-	h1 { color: #1a1a1a; margin: 0; }
 	.add-btn {
 		padding: 0.5rem 1.25rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.95rem;
 	}
@@ -107,7 +102,7 @@
 	}
 	.filters label {
 		font-size: 0.9rem;
-		color: #666;
+		color: var(--color-text-muted);
 		cursor: pointer;
 		display: flex;
 		align-items: center;
@@ -116,15 +111,15 @@
 	.loading, .empty {
 		text-align: center;
 		padding: 3rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.empty button {
 		margin-top: 1rem;
 		padding: 0.5rem 1.5rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 	}
 	.grid {
@@ -133,8 +128,8 @@
 		gap: 1rem;
 	}
 	.card {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		overflow: hidden;
 		cursor: pointer;
 		transition: box-shadow 0.15s;
@@ -158,10 +153,10 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: #999;
+		color: var(--color-text-faint);
 		font-size: 0.85rem;
 		font-style: italic;
-		background: #e5e7eb;
+		background: var(--color-border-light);
 	}
 	.pdf-placeholder {
 		width: 100%;
@@ -190,17 +185,17 @@
 		gap: 0.75rem;
 		margin-top: 0.25rem;
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.amount {
 		font-weight: 500;
-		color: #1a1a1a;
+		color: var(--color-text);
 	}
 	.status {
 		margin-top: 0.5rem;
 		font-size: 0.8rem;
 		font-weight: 500;
 	}
-	.linked { color: #16a34a; }
+	.linked { color: var(--color-income); }
 	.unlinked { color: #f59e0b; }
 </style>

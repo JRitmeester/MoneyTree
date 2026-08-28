@@ -3,6 +3,8 @@
 		getOwnAccounts, createOwnAccount, updateOwnAccount, deleteOwnAccount,
 		formatEuro, type OwnAccount
 	} from '$lib/api';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let accounts: OwnAccount[] = $state([]);
 	let loading = $state(true);
@@ -80,14 +82,14 @@
 
 <div class="page">
 	<a href="/settings" class="back">&larr; Settings</a>
-	<h1>Own Accounts</h1>
+	<PageHeader title="Own Accounts" marginBottom="0.5rem" />
 	<p class="explainer">
 		Transactions between these accounts are internal transfers: they are excluded
 		from income, expenses, and savings-capacity numbers.
 	</p>
 
 	{#if error}
-		<div class="error">{error}</div>
+		<ErrorBanner message={error} />
 	{/if}
 
 	{#if loading}
@@ -185,28 +187,26 @@
 	.back {
 		display: inline-block;
 		margin-bottom: 1rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 		font-size: 0.9rem;
 	}
-	h1 { margin: 0 0 0.5rem; color: #1a1a1a; }
 	h2 { font-size: 1.05rem; margin: 0 0 0.75rem; }
-	.explainer { color: #666; font-size: 0.9rem; margin-bottom: 1.25rem; }
-	.error { background: #fef2f2; color: #dc2626; padding: 0.6rem 0.9rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9rem; }
-	.loading, .muted { color: #999; }
+	.explainer { color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: 1.25rem; }
+	.loading, .muted { color: var(--color-text-faint); }
 	.account-list { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem; }
-	.account-card { background: white; border-radius: 8px; padding: 1rem 1.25rem; }
+	.account-card { background: var(--color-card-bg); border-radius: var(--radius-md); padding: 1rem 1.25rem; }
 	.account-head { display: flex; justify-content: space-between; align-items: center; }
-	.account-type { font-size: 0.75rem; color: #666; background: #f0f0f0; border-radius: 4px; padding: 0.1rem 0.4rem; margin-left: 0.5rem; }
+	.account-type { font-size: 0.75rem; color: var(--color-text-muted); background: var(--color-bg-subtle); border-radius: 4px; padding: 0.1rem 0.4rem; margin-left: 0.5rem; }
 	.iban { font-family: monospace; font-size: 0.85rem; color: #444; margin-top: 0.25rem; }
 	.starting-balance { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; margin-top: 0.75rem; }
-	.starting-balance label { display: flex; flex-direction: column; font-size: 0.75rem; color: #666; gap: 0.2rem; }
-	.starting-balance input { padding: 0.35rem 0.5rem; border: 1px solid #ddd; border-radius: 6px; }
-	.hint { font-size: 0.75rem; color: #999; }
-	.add-form { background: white; border-radius: 8px; padding: 1.25rem; }
+	.starting-balance label { display: flex; flex-direction: column; font-size: 0.75rem; color: var(--color-text-muted); gap: 0.2rem; }
+	.starting-balance input { padding: 0.35rem 0.5rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+	.hint { font-size: 0.75rem; color: var(--color-text-faint); }
+	.add-form { background: var(--color-card-bg); border-radius: var(--radius-md); padding: 1.25rem; }
 	.form-row { display: flex; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
-	.form-row label { display: flex; flex-direction: column; font-size: 0.75rem; color: #666; gap: 0.2rem; flex: 1; min-width: 140px; }
-	.form-row input, .form-row select { padding: 0.45rem 0.6rem; border: 1px solid #ddd; border-radius: 6px; }
-	button.primary { background: #2d6a4f; color: white; border: none; border-radius: 6px; padding: 0.5rem 1rem; cursor: pointer; }
-	button.danger { background: none; border: 1px solid #dc2626; color: #dc2626; border-radius: 6px; padding: 0.3rem 0.7rem; cursor: pointer; font-size: 0.8rem; }
+	.form-row label { display: flex; flex-direction: column; font-size: 0.75rem; color: var(--color-text-muted); gap: 0.2rem; flex: 1; min-width: 140px; }
+	.form-row input, .form-row select { padding: 0.45rem 0.6rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+	button.primary { background: var(--color-accent); color: white; border: none; border-radius: var(--radius-sm); padding: 0.5rem 1rem; cursor: pointer; }
+	button.danger { background: none; border: 1px solid var(--color-expense); color: var(--color-expense); border-radius: var(--radius-sm); padding: 0.3rem 0.7rem; cursor: pointer; font-size: 0.8rem; }
 </style>

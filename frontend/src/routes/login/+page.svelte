@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { startAuthentication } from '@simplewebauthn/browser';
 	import { goto } from '$app/navigation';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let username = $state('');
 	let password = $state('');
@@ -79,7 +80,7 @@
 		<h1>MoneyTree</h1>
 
 		{#if error}
-			<p class="error">{error}</p>
+			<ErrorBanner message={error} />
 		{/if}
 
 		<div class="field">
@@ -130,9 +131,9 @@
 		background: #f5f5f5;
 	}
 	.card {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 2rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		box-shadow: 0 2px 16px rgba(0, 0, 0, 0.1);
 		width: 100%;
 		max-width: 360px;
@@ -140,17 +141,8 @@
 	h1 {
 		margin: 0 0 1.5rem;
 		font-size: 1.5rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-align: center;
-	}
-	.error {
-		background: #fff0f0;
-		border: 1px solid #ffcccc;
-		color: #c00;
-		padding: 0.6rem 0.8rem;
-		border-radius: 4px;
-		margin-bottom: 1rem;
-		font-size: 0.9rem;
 	}
 	.field {
 		margin-bottom: 1rem;
@@ -171,13 +163,13 @@
 		outline: none;
 	}
 	input:focus {
-		border-color: #2d6a4f;
+		border-color: var(--color-accent);
 		box-shadow: 0 0 0 2px rgba(45, 106, 79, 0.15);
 	}
 	.btn-primary {
 		width: 100%;
 		padding: 0.65rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -197,7 +189,7 @@
 		align-items: center;
 		gap: 0.75rem;
 		margin: 1.25rem 0;
-		color: #999;
+		color: var(--color-text-faint);
 		font-size: 0.85rem;
 	}
 	.divider::before,
@@ -214,7 +206,7 @@
 		justify-content: center;
 		gap: 0.5rem;
 		padding: 0.65rem;
-		background: white;
+		background: var(--color-card-bg);
 		color: #333;
 		border: 1px solid #ccc;
 		border-radius: 4px;
@@ -223,7 +215,7 @@
 	}
 	.btn-passkey:hover:not(:disabled) {
 		background: #f5f5f5;
-		border-color: #999;
+		border-color: var(--color-text-faint);
 	}
 	.btn-passkey:disabled {
 		opacity: 0.6;

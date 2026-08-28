@@ -8,6 +8,7 @@
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import BalanceChart from '$lib/components/BalanceChart.svelte';
 	import SavingsCapacityPanel from '$lib/components/SavingsCapacityPanel.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
 	import { get } from 'svelte/store';
 
@@ -148,24 +149,25 @@
 </script>
 
 <div class="dashboard">
-	<div class="header">
-		<h1>Dashboard</h1>
-		<div class="header-filter">
-			{#if recurringNotices.length > 0}
-				<a class="recurring-notice-badge" href="/recurring">
-					{recurringNotices.length} recurring notice{recurringNotices.length === 1 ? '' : 's'}
-				</a>
-			{/if}
-			<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} periods={budgetPeriods} />
-			{#if dataThroughLabel}
-				<span
-					class="data-through"
-					class:amber={dataThroughStale}
-					title={dataThroughStale ? 'Import your latest bank export' : undefined}
-				>Data through {dataThroughLabel}</span>
-			{/if}
-		</div>
-	</div>
+	<PageHeader title="Dashboard">
+		{#snippet right()}
+			<div class="header-filter">
+				{#if recurringNotices.length > 0}
+					<a class="recurring-notice-badge" href="/recurring">
+						{recurringNotices.length} recurring notice{recurringNotices.length === 1 ? '' : 's'}
+					</a>
+				{/if}
+				<DateRangeFilter bind:dateFrom bind:dateTo onchange={handleDateChange} periods={budgetPeriods} />
+				{#if dataThroughLabel}
+					<span
+						class="data-through"
+						class:amber={dataThroughStale}
+						title={dataThroughStale ? 'Import your latest bank export' : undefined}
+					>Data through {dataThroughLabel}</span>
+				{/if}
+			</div>
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
 		<div class="loading">Loading...</div>
@@ -321,16 +323,7 @@
 
 <style>
 	.dashboard { max-width: 100%; }
-	.header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 1rem;
-		margin-bottom: 1.5rem;
-	}
-	h1 { margin: 0; color: #1a1a1a; }
-	.loading { text-align: center; padding: 3rem; color: #666; }
+	.loading { text-align: center; padding: 3rem; color: var(--color-text-muted); }
 
 	.header-filter {
 		display: flex;
@@ -340,16 +333,16 @@
 	}
 	.data-through {
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.data-through.amber {
-		color: #a16207;
+		color: var(--color-amber);
 		font-weight: 600;
 	}
 	.recurring-notice-badge {
 		font-size: 0.8rem;
 		font-weight: 600;
-		color: #a16207;
+		color: var(--color-amber);
 		background: #fef3c7;
 		padding: 0.3rem 0.6rem;
 		border-radius: 999px;
@@ -367,9 +360,9 @@
 		margin-bottom: 1.5rem;
 	}
 	.card {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 1.25rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		text-align: center;
 	}
 	.card-value {
@@ -378,17 +371,17 @@
 	}
 	.card-label {
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 		margin-top: 0.25rem;
 	}
-	.card.income .card-value { color: #16a34a; }
-	.card.expenses .card-value { color: #dc2626; }
-	.card.net .card-value { color: #2d6a4f; }
-	.card.saved .card-value { color: #2d6a4f; }
+	.card.income .card-value { color: var(--color-income); }
+	.card.expenses .card-value { color: var(--color-expense); }
+	.card.net .card-value { color: var(--color-accent); }
+	.card.saved .card-value { color: var(--color-accent); }
 	.card.burndown .card-value { font-size: 1.3rem; }
-	.card-detail { font-size: 0.75rem; color: #999; margin-top: 0.15rem; }
-	.positive { color: #16a34a !important; }
-	.negative { color: #dc2626 !important; }
+	.card-detail { font-size: 0.75rem; color: var(--color-text-faint); margin-top: 0.15rem; }
+	.positive { color: var(--color-income) !important; }
+	.negative { color: var(--color-expense) !important; }
 
 	.sections {
 		display: grid;
@@ -401,12 +394,12 @@
 	}
 
 	.section {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 1.5rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 	}
 	h2 { margin: 0 0 1rem; font-size: 1.1rem; }
-	.muted { color: #999; font-style: italic; }
+	.muted { color: var(--color-text-faint); font-style: italic; }
 
 	.category-list { display: flex; flex-direction: column; gap: 0.15rem; }
 	.category-row {
@@ -416,29 +409,29 @@
 		background: none;
 		border: none;
 		padding: 0.5rem 0.75rem;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: default;
 		font-size: 0.9rem;
 	}
 	.category-row.expandable { cursor: pointer; }
 	.category-row.expandable:hover { background: #f5f5f5; }
-	.category-row.selected { background: #f0fdf4; }
+	.category-row.selected { background: var(--color-warn-bg-green); }
 	.cat-info {
 		display: flex;
 		justify-content: space-between;
 		margin-bottom: 0.25rem;
 	}
 	.cat-name { font-weight: 500; }
-	.cat-amount { font-weight: 600; color: #1a1a1a; }
+	.cat-amount { font-weight: 600; color: var(--color-text); }
 	.bar-bg {
 		height: 6px;
-		background: #e5e7eb;
+		background: var(--color-border-light);
 		border-radius: 3px;
 		margin-bottom: 0.15rem;
 	}
 	.bar-fill {
 		height: 100%;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		border-radius: 3px;
 		transition: width 0.3s;
 	}
@@ -447,10 +440,10 @@
 		justify-content: space-between;
 		align-items: center;
 	}
-	.cat-count { font-size: 0.75rem; color: #999; }
+	.cat-count { font-size: 0.75rem; color: var(--color-text-faint); }
 	.view-link {
 		font-size: 0.75rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 		font-weight: 500;
 		opacity: 0;
@@ -463,12 +456,12 @@
 		display: inline-block;
 		width: 1em;
 		font-size: 0.65rem;
-		color: #999;
+		color: var(--color-text-faint);
 		margin-right: 0.25rem;
 	}
 
 	.children-panel {
-		border-left: 3px solid #2d6a4f;
+		border-left: 3px solid var(--color-accent);
 		margin-bottom: 0.25rem;
 	}
 
@@ -477,20 +470,20 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr 1fr 1fr;
 		padding: 0.5rem 0;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--color-border-light);
 		font-weight: 600;
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.trend-row {
 		display: grid;
 		grid-template-columns: 1fr 1fr 1fr 1fr;
 		padding: 0.4rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 	}
 	.right { text-align: right; }
 	.month-label { font-weight: 500; }
-	.income-text { color: #16a34a; }
-	.expense-text { color: #dc2626; }
+	.income-text { color: var(--color-income); }
+	.expense-text { color: var(--color-expense); }
 
 </style>

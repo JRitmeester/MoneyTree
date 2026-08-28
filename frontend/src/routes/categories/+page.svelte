@@ -7,6 +7,7 @@
 	import { focusOnMount } from '$lib/actions/focusOnMount';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import { extractErrorDetail } from '$lib/errors';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let categories: Category[] = $state([]);
 	let mappings: CategoryMapping[] = $state([]);
@@ -144,7 +145,11 @@
 			const target = userCategories.find((c) => c.id === targetId);
 			const targetName = target?.name ?? 'target';
 			const confirmed = confirm(
-				`Merge '${source.name}' into '${targetName}'? ${counts.transactions} transactions, ${counts.budget_lines} budget lines... will move. This cannot be undone.`
+				`Merge '${source.name}' into '${targetName}'? This will move ` +
+					`${counts.transactions} transactions, ${counts.line_items} line items, ` +
+					`${counts.budget_lines} budget lines, ${counts.budget_templates} budget templates, ` +
+					`${counts.category_mappings} category mappings, and ${counts.children} subcategories. ` +
+					`This cannot be undone.`
 			);
 			if (!confirmed) {
 				mergingId = null;
@@ -187,7 +192,7 @@
 			if (e.message?.includes('409')) {
 				error = 'This category already exists.';
 			} else {
-				error = e.message;
+				error = extractErrorDetail(e);
 			}
 		}
 	}
@@ -301,7 +306,7 @@
 </div>
 
 {#if error}
-	<div class="error">{error}</div>
+	<ErrorBanner message={error} />
 {/if}
 
 {#if loading}
@@ -463,7 +468,7 @@
 {/if}
 
 <style>
-	h1 { color: #1a1a1a; }
+	h1 { color: var(--color-text); }
 	.page-header {
 		display: flex;
 		align-items: flex-start;
@@ -479,7 +484,7 @@
 	}
 	.header-actions select {
 		padding: 0.35rem 0.5rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		font-size: 0.85rem;
 	}
@@ -488,39 +493,32 @@
 	}
 	.add-root-btn {
 		padding: 0.4rem 0.9rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.85rem;
 		font-weight: 500;
 		white-space: nowrap;
 	}
 	.add-root-btn:hover { background: #1b4332; }
-	.error {
-		padding: 1rem;
-		background: #fef2f2;
-		color: #dc2626;
-		border-radius: 8px;
-		margin: 1rem 0;
-	}
-	.loading { text-align: center; padding: 3rem; color: #666; }
-	.muted { color: #999; font-style: italic; }
+	.loading { text-align: center; padding: 3rem; color: var(--color-text-muted); }
+	.muted { color: var(--color-text-faint); font-style: italic; }
 
 	.tree {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		padding: 1rem;
 	}
 	.cat-item.top {
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 	}
 	.cat-item.top:last-child {
 		border-bottom: none;
 	}
 	.cat-item.child {
-		border-left: 2px solid #e5e7eb;
+		border-left: 2px solid var(--color-border-light);
 		padding-left: 0.75rem;
 	}
 	.cat-row {
@@ -550,7 +548,7 @@
 	.rename-input {
 		flex: 1;
 		padding: 0.25rem 0.4rem;
-		border: 1px solid #2d6a4f;
+		border: 1px solid var(--color-accent);
 		border-radius: 4px;
 		font-size: 0.9rem;
 		font-weight: 500;
@@ -569,11 +567,11 @@
 	.type-badge:hover { opacity: 0.8; }
 	.income-badge {
 		background: #dcfce7;
-		color: #16a34a;
+		color: var(--color-income);
 	}
 	.expense-badge {
-		background: #fef2f2;
-		color: #dc2626;
+		background: var(--color-warn-bg-red);
+		color: var(--color-expense);
 	}
 	.add-sub-btn {
 		display: flex;
@@ -596,9 +594,9 @@
 		opacity: 1;
 	}
 	.add-sub-btn:hover {
-		color: #2d6a4f;
-		border-color: #2d6a4f;
-		background: #f0fdf4;
+		color: var(--color-accent);
+		border-color: var(--color-accent);
+		background: var(--color-warn-bg-green);
 	}
 	.add-sub-inline {
 		display: flex;
@@ -606,7 +604,7 @@
 		gap: 0.35rem;
 		padding: 0.3rem 0.5rem 0.5rem 0.75rem;
 		margin-left: 1.5rem;
-		border-left: 2px solid #e5e7eb;
+		border-left: 2px solid var(--color-border-light);
 	}
 	.cancel-sub-btn {
 		display: flex;
@@ -624,24 +622,24 @@
 		color: #9ca3af;
 	}
 	.cancel-sub-btn:hover {
-		color: #dc2626;
-		border-color: #dc2626;
-		background: #fef2f2;
+		color: var(--color-expense);
+		border-color: var(--color-expense);
+		background: var(--color-warn-bg-red);
 	}
 	.del-btn {
 		padding: 0.2rem 0.6rem;
-		background: white;
-		border: 1px solid #dc2626;
-		color: #dc2626;
+		background: var(--color-card-bg);
+		border: 1px solid var(--color-expense);
+		color: var(--color-expense);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.75rem;
 	}
 	.merge-btn {
 		padding: 0.2rem 0.6rem;
-		background: white;
-		border: 1px solid #2d6a4f;
-		color: #2d6a4f;
+		background: var(--color-card-bg);
+		border: 1px solid var(--color-accent);
+		color: var(--color-accent);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.75rem;
@@ -653,11 +651,11 @@
 		gap: 0.5rem;
 		padding: 0.3rem 0.5rem 0.5rem 0.75rem;
 		margin-left: 1.5rem;
-		border-left: 2px solid #e5e7eb;
+		border-left: 2px solid var(--color-border-light);
 	}
 	.merge-label {
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 		white-space: nowrap;
 	}
 	.merge-picker {
@@ -666,9 +664,9 @@
 	}
 	.move-btn {
 		padding: 0.2rem 0.6rem;
-		background: white;
-		border: 1px solid #2563eb;
-		color: #2563eb;
+		background: var(--color-card-bg);
+		border: 1px solid var(--color-transfer);
+		color: var(--color-transfer);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.75rem;
@@ -680,11 +678,11 @@
 		gap: 0.5rem;
 		padding: 0.3rem 0.5rem 0.5rem 0.75rem;
 		margin-left: 1.5rem;
-		border-left: 2px solid #e5e7eb;
+		border-left: 2px solid var(--color-border-light);
 	}
 	.move-label {
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 		white-space: nowrap;
 	}
 	.move-picker {
@@ -693,8 +691,8 @@
 	}
 	.root-btn {
 		padding: 0.2rem 0.6rem;
-		background: white;
-		border: 1px solid #999;
+		background: var(--color-card-bg);
+		border: 1px solid var(--color-text-faint);
 		color: #444;
 		border-radius: 4px;
 		cursor: pointer;
@@ -705,17 +703,17 @@
 	.move-error {
 		margin: 0 0.5rem 0.5rem 2.25rem;
 		font-size: 0.8rem;
-		color: #dc2626;
+		color: var(--color-expense);
 	}
 
 	/* Mappings section */
 	.mappings-title {
 		margin: 2rem 0 0.25rem;
 		font-size: 1.1rem;
-		color: #1a1a1a;
+		color: var(--color-text);
 	}
 	.mappings-desc {
-		color: #666;
+		color: var(--color-text-muted);
 		font-size: 0.9rem;
 		margin-bottom: 1rem;
 	}
@@ -723,7 +721,7 @@
 	.unmapped-banner {
 		background: #fffbeb;
 		border: 1px solid #f59e0b;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		padding: 0.75rem 1rem;
 		margin-bottom: 1rem;
 		font-size: 0.9rem;
@@ -731,8 +729,8 @@
 	}
 
 	.mappings-section {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		padding: 1rem;
 	}
 
@@ -741,16 +739,16 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr auto;
 		padding: 0.5rem 0.5rem;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--color-border-light);
 		font-weight: 600;
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.mapping-row {
 		display: grid;
 		grid-template-columns: 1fr 1fr auto;
 		padding: 0.6rem 0.5rem;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		align-items: center;
 		gap: 0.5rem;
 	}
@@ -758,17 +756,17 @@
 		background: #fffbeb;
 	}
 	.bank-cat { font-weight: 500; }
-	.mapped-to { color: #2d6a4f; font-weight: 500; }
+	.mapped-to { color: var(--color-accent); font-weight: 500; }
 
 	.mapping-row select {
 		padding: 0.35rem 0.5rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		font-size: 0.85rem;
 	}
 	.map-btn {
 		padding: 0.3rem 0.8rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
 		border-radius: 4px;

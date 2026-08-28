@@ -8,6 +8,7 @@
 		type IncidentalLabelSummary, type TransactionDetail, type Transaction
 	} from '$lib/api';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let tx = $state<TransactionDetail | null>(null);
 	let loading = $state(true);
@@ -171,7 +172,7 @@
 {#if loading}
 	<div class="loading">Loading...</div>
 {:else if error}
-	<div class="error">{error}</div>
+	<ErrorBanner message={error} />
 {:else if tx}
 	<a href="/transactions" class="back">&larr; Back to transactions</a>
 
@@ -337,21 +338,20 @@
 {/if}
 
 <style>
-	.loading, .error {
+	.loading {
 		text-align: center;
 		padding: 3rem;
 	}
-	.error { color: #dc2626; }
 	.back {
 		display: inline-block;
 		margin-bottom: 1rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 		font-size: 0.9rem;
 	}
 	.card {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		padding: 1.5rem;
 		margin-bottom: 1rem;
 	}
@@ -365,7 +365,7 @@
 		margin: 0;
 	}
 	.date {
-		color: #666;
+		color: var(--color-text-muted);
 		font-size: 0.9rem;
 	}
 	.amount {
@@ -373,8 +373,8 @@
 		font-weight: 700;
 		font-variant-numeric: tabular-nums;
 	}
-	.positive { color: #16a34a; }
-	.negative { color: #1a1a1a; }
+	.positive { color: var(--color-income); }
+	.negative { color: var(--color-text); }
 	.category-selector {
 		display: flex;
 		align-items: center;
@@ -383,7 +383,7 @@
 	}
 	.cat-label {
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 		flex: 0 0 auto;
 	}
 	.cat-input-wrap {
@@ -391,7 +391,7 @@
 		max-width: 350px;
 		flex: 1;
 	}
-	.saving-indicator { font-size: 0.8rem; color: #666; }
+	.saving-indicator { font-size: 0.8rem; color: var(--color-text-muted); }
 	.details {
 		margin-top: 1.25rem;
 	}
@@ -400,13 +400,13 @@
 		align-items: center;
 		gap: 0.5rem;
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 		margin-left: 1.6rem;
 	}
 	.label-picker select {
 		padding: 0.3rem 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.85rem;
 	}
 	.flags {
@@ -415,7 +415,7 @@
 		gap: 0.5rem;
 		margin-top: 1rem;
 		padding-top: 1rem;
-		border-top: 1px solid #f0f0f0;
+		border-top: 1px solid var(--color-bg-subtle);
 	}
 	.flags label {
 		display: flex;
@@ -431,12 +431,12 @@
 	.row {
 		display: flex;
 		padding: 0.5rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		gap: 1rem;
 	}
 	.label {
 		flex: 0 0 160px;
-		color: #666;
+		color: var(--color-text-muted);
 		font-size: 0.85rem;
 	}
 	.value {
@@ -448,7 +448,7 @@
 		font-size: 1.1rem;
 	}
 	.muted {
-		color: #999;
+		color: var(--color-text-faint);
 		font-style: italic;
 	}
 	.receipt-row {
@@ -458,27 +458,27 @@
 		flex-wrap: wrap;
 	}
 	.receipt-link, .add-receipt-link {
-		color: #2d6a4f;
+		color: var(--color-accent);
 		font-weight: 500;
 		font-size: 0.9rem;
 	}
 	.split-btn {
 		padding: 0.3rem 0.75rem;
 		background: none;
-		border: 1px solid #2d6a4f;
-		color: #2d6a4f;
+		border: 1px solid var(--color-accent);
+		color: var(--color-accent);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.85rem;
 	}
-	.split-btn:hover { background: #f0fdf4; }
+	.split-btn:hover { background: var(--color-warn-bg-green); }
 	.split-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 	.add-row-btn {
 		padding: 0.3rem 0.75rem;
 		background: none;
-		border: 1px solid #2d6a4f;
-		color: #2d6a4f;
+		border: 1px solid var(--color-accent);
+		color: var(--color-accent);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.8rem;
@@ -486,7 +486,7 @@
 	.cancel-btn {
 		padding: 0.3rem 0.75rem;
 		background: #f5f5f5;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.8rem;
@@ -500,11 +500,11 @@
 		align-items: center;
 		gap: 0.75rem;
 		padding: 0.4rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 	}
 	.offset-link {
 		flex: 1;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 		font-size: 0.9rem;
 	}
@@ -518,14 +518,14 @@
 		font-size: 1.1rem;
 		padding: 0;
 	}
-	.offset-unlink:hover { color: #dc2626; }
+	.offset-unlink:hover { color: var(--color-expense); }
 	.offset-net {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
 		padding: 0.6rem 0 0;
 		margin-top: 0.25rem;
-		border-top: 2px solid #e5e7eb;
+		border-top: 2px solid var(--color-border-light);
 		font-weight: 600;
 		font-size: 0.9rem;
 	}
@@ -534,12 +534,12 @@
 	.offset-search input {
 		width: 100%;
 		padding: 0.4rem 0.6rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.9rem;
 	}
 	.offset-results {
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-top: none;
 		border-radius: 0 0 6px 6px;
 		max-height: 200px;
@@ -552,12 +552,12 @@
 		padding: 0.5rem 0.6rem;
 		background: none;
 		border: none;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		cursor: pointer;
 		text-align: left;
 		font-size: 0.85rem;
 	}
-	.offset-result-row:hover { background: #f0fdf4; }
+	.offset-result-row:hover { background: var(--color-warn-bg-green); }
 	.offset-result-row span:first-child { flex: 1; }
-	.offset-result-date { color: #999; font-size: 0.8rem; }
+	.offset-result-date { color: var(--color-text-faint); font-size: 0.8rem; }
 </style>

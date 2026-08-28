@@ -6,6 +6,8 @@
 		type ImportPreview,
 		type ImportResultResponse,
 	} from '$lib/api';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let since = $state('');
 	let exporting = $state(false);
@@ -68,7 +70,7 @@
 </script>
 
 <section class="container">
-	<h1>Sync</h1>
+	<PageHeader title="Sync" marginBottom="1rem" />
 
 	<article>
 		<h2>Export</h2>
@@ -110,7 +112,7 @@
 		</div>
 
 		{#if errorMsg}
-			<p class="error">{errorMsg}</p>
+			<ErrorBanner message={errorMsg} />
 		{/if}
 
 		{#if preview}
@@ -271,14 +273,13 @@ docker-compose start</pre>
 
 <style>
 	.container { max-width: 720px; padding: 1rem; }
-	article { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border, #ddd); border-radius: 8px; }
+	article { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border, var(--color-border)); border-radius: var(--radius-md); }
 	.row { display: flex; gap: 0.5rem; margin-block: 0.5rem; }
-	.error { color: tomato; }
 	.ok { color: seagreen; }
 	.hard { color: tomato; }
-	.muted { color: #666; font-size: 0.9em; }
+	.muted { color: var(--color-text-muted); font-size: 0.9em; }
 	label { display: block; margin-block: 0.5rem; }
-	.post-import { margin-top: 1rem; padding: 0.75rem; background: rgba(46, 139, 87, 0.08); border-radius: 6px; }
+	.post-import { margin-top: 1rem; padding: 0.75rem; background: rgba(46, 139, 87, 0.08); border-radius: var(--radius-sm); }
 	.backup-info { margin-top: 0.5rem; }
 	.backup-path { display: block; margin-block: 0.25rem; padding: 0.25rem 0.5rem; background: #f4f4f4; word-break: break-all; }
 	pre { background: #f4f4f4; padding: 0.5rem; border-radius: 4px; overflow-x: auto; }

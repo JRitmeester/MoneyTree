@@ -9,6 +9,7 @@
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
 	import { resolveAmount, evaluateExpression } from '$lib/calc';
 	import { focusOnMount } from '$lib/actions/focusOnMount';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let receipt: ReceiptDetail | null = $state(null);
 	let loading = $state(true);
@@ -115,7 +116,7 @@
 {#if loading}
 	<div class="loading">Loading...</div>
 {:else if error}
-	<div class="error">{error}</div>
+	<ErrorBanner message={error} />
 {:else if receipt}
 	<a href="/receipts" class="back">&larr; Back to receipts</a>
 
@@ -292,12 +293,11 @@
 {/if}
 
 <style>
-	.loading { text-align: center; padding: 3rem; color: #666; }
-	.error { padding: 1rem; background: #fef2f2; color: #dc2626; border-radius: 8px; }
+	.loading { text-align: center; padding: 3rem; color: var(--color-text-muted); }
 	.back {
 		display: inline-block;
 		margin-bottom: 1rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 		font-size: 0.9rem;
 	}
@@ -313,8 +313,8 @@
 	}
 
 	.card {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		padding: 1.5rem;
 		margin-bottom: 1rem;
 	}
@@ -334,14 +334,14 @@
 	.add-item-btn {
 		padding: 0.25rem 0.6rem;
 		background: none;
-		border: 1px solid #2d6a4f;
-		color: #2d6a4f;
+		border: 1px solid var(--color-accent);
+		color: var(--color-accent);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.8rem;
 	}
-	.add-item-btn:hover { background: #f0fdf4; }
-	.new-item-row td { background: #f9fafb; }
+	.add-item-btn:hover { background: var(--color-warn-bg-green); }
+	.new-item-row td { background: var(--color-bg-faint); }
 
 	.fields { margin-top: 1rem; }
 	.field-row {
@@ -349,11 +349,11 @@
 		align-items: center;
 		gap: 0.75rem;
 		padding: 0.5rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 	}
 	.label {
 		flex: 0 0 100px;
-		color: #666;
+		color: var(--color-text-muted);
 		font-size: 0.85rem;
 	}
 	.value {
@@ -365,13 +365,13 @@
 
 	.field-row input {
 		padding: 0.35rem 0.5rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		font-size: 0.9rem;
 	}
 	.save-btn {
 		padding: 0.25rem 0.75rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -381,16 +381,16 @@
 	.cancel-btn {
 		padding: 0.25rem 0.75rem;
 		background: #f5f5f5;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.8rem;
 	}
 	.delete-btn {
 		padding: 0.3rem 0.75rem;
-		background: white;
-		border: 1px solid #dc2626;
-		color: #dc2626;
+		background: var(--color-card-bg);
+		border: 1px solid var(--color-expense);
+		color: var(--color-expense);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.8rem;
@@ -398,30 +398,30 @@
 	.unlink-btn {
 		padding: 0.2rem 0.5rem;
 		background: none;
-		border: 1px solid #999;
+		border: 1px solid var(--color-text-faint);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.75rem;
-		color: #666;
+		color: var(--color-text-muted);
 		margin-left: 0.5rem;
 	}
 
 	.linked-tx {
 		margin-top: 1rem;
 		padding: 0.75rem;
-		background: #f0fdf4;
-		border-radius: 6px;
+		background: var(--color-warn-bg-green);
+		border-radius: var(--radius-sm);
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
 		flex-wrap: wrap;
 	}
-	.linked-tx a { color: #2d6a4f; font-weight: 500; }
+	.linked-tx a { color: var(--color-accent); font-weight: 500; }
 	.unlinked-notice {
 		margin-top: 1rem;
 		padding: 0.75rem;
 		background: #fffbeb;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		color: #92400e;
 		font-size: 0.9rem;
 	}
@@ -433,27 +433,27 @@
 	th {
 		text-align: left;
 		padding: 0.5rem;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--color-border-light);
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	td {
 		padding: 0.5rem;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		font-size: 0.9rem;
 	}
-	tr:hover { background: #f9fafb; cursor: pointer; }
+	tr:hover { background: var(--color-bg-faint); cursor: pointer; }
 	.right { text-align: right; }
 	.badge {
 		display: inline-block;
 		padding: 0.1rem 0.4rem;
-		background: #f0fdf4;
-		color: #2d6a4f;
+		background: var(--color-warn-bg-green);
+		color: var(--color-accent);
 		border-radius: 4px;
 		font-size: 0.8rem;
 		margin: 0.1rem 0.15rem 0.1rem 0;
 	}
-	.muted { color: #999; font-style: italic; }
+	.muted { color: var(--color-text-faint); font-style: italic; }
 	.remaining-row {
 		background: #f8fafc;
 		border-top: 2px dashed #d1d5db;
@@ -467,13 +467,13 @@
 	.remove-btn {
 		background: none;
 		border: none;
-		color: #dc2626;
+		color: var(--color-expense);
 		cursor: pointer;
 		font-size: 1rem;
 	}
 	.amt-input { width: 80px; }
 	tfoot td {
-		border-top: 2px solid #e5e7eb;
+		border-top: 2px solid var(--color-border-light);
 		border-bottom: none;
 	}
 
@@ -483,12 +483,12 @@
 	}
 	.image-section img {
 		width: 100%;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 	}
 	.pdf-embed {
 		width: 100%;
 		height: 500px;
-		border-radius: 8px;
-		border: 1px solid #ddd;
+		border-radius: var(--radius-md);
+		border: 1px solid var(--color-border);
 	}
 </style>

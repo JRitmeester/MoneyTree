@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Iterable, Sequence
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import RecurringPayment, RecurringPaymentOccurrence, Transaction
@@ -346,6 +347,31 @@ def next_expected_date(payment: RecurringPayment) -> date | None:
     if payment.cadence == "yearly" and payment.expected_day is not None:
         return _add_months(payment.anchor_date, 12, payment.expected_day)
     return None
+
+
+def find_salary_payment_id(db: Session) -> int | None:
+    """The confirmed income recurring payment most likely to be the salary:
+    most occurrences wins; ties broken by the latest occurrence date, then
+    by lowest id, so the pick is deterministic. Shared by the cashflow
+    router (periods/calendar) and the cashflow advisor so both agree on
+    which payment is "the" salary."""
+    row = db.execute(
+        select(
+            RecurringPaymentOccurrence.recurring_payment_id,
+            func.count(RecurringPaymentOccurrence.id).label("occurrence_count"),
+            func.max(RecurringPaymentOccurrence.date).label("latest_date"),
+        )
+        .join(RecurringPayment, RecurringPayment.id == RecurringPaymentOccurrence.recurring_payment_id)
+        .where(RecurringPayment.status == "confirmed", RecurringPayment.is_income.is_(True))
+        .group_by(RecurringPaymentOccurrence.recurring_payment_id)
+        .order_by(
+            func.count(RecurringPaymentOccurrence.id).desc(),
+            func.max(RecurringPaymentOccurrence.date).desc(),
+            RecurringPaymentOccurrence.recurring_payment_id.asc(),
+        )
+        .limit(1)
+    ).first()
+    return row[0] if row else None
 
 
 def backfill_occurrences(db: Session, payment: RecurringPayment) -> None:

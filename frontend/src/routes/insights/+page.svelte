@@ -2,6 +2,8 @@
 	import { getYearReview, getRecurringPayments, formatEuro, type YearReview, type RecurringPayment } from '$lib/api';
 	import { amortizedYearlyCosts } from '$lib/insights';
 	import { extractErrorDetail } from '$lib/errors';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let year = $state(new Date().getFullYear());
 	let review: YearReview | null = $state(null);
@@ -40,12 +42,10 @@
 </script>
 
 <div class="insights-page">
-	<div class="header">
-		<h1>Insights</h1>
-	</div>
+	<PageHeader title="Insights" />
 
 	{#if error}
-		<div class="error">{error}</div>
+		<ErrorBanner message={error} />
 	{/if}
 
 	{#if loading}
@@ -133,22 +133,13 @@
 
 <style>
 	.insights-page { max-width: 900px; }
-	.header { margin-bottom: 1.5rem; }
-	h1 { margin: 0; color: #1a1a1a; }
 	h2 { margin: 0; font-size: 1.1rem; }
-	.muted { color: #999; font-style: italic; }
-	.error {
-		background: #fef2f2;
-		color: #b91c1c;
-		padding: 0.75rem 1rem;
-		border-radius: 6px;
-		margin-bottom: 1rem;
-	}
+	.muted { color: var(--color-text-faint); font-style: italic; }
 
 	.section {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 1.5rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		margin-bottom: 1.5rem;
 	}
 
@@ -160,8 +151,8 @@
 	}
 	.nav-button {
 		background: none;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		padding: 0.25rem 0.6rem;
 		cursor: pointer;
 	}
@@ -178,12 +169,12 @@
 		flex-direction: column;
 		gap: 0.25rem;
 	}
-	.total-label { font-size: 0.8rem; color: #666; }
+	.total-label { font-size: 0.8rem; color: var(--color-text-muted); }
 	.total-value { font-size: 1.3rem; font-weight: 700; }
-	.total-value.income { color: #16a34a; }
-	.total-value.expenses { color: #dc2626; }
-	.positive { color: #16a34a !important; }
-	.negative { color: #dc2626 !important; }
+	.total-value.income { color: var(--color-income); }
+	.total-value.expenses { color: var(--color-expense); }
+	.positive { color: var(--color-income) !important; }
+	.negative { color: var(--color-expense) !important; }
 
 	table {
 		width: 100%;
@@ -193,13 +184,13 @@
 	th {
 		text-align: left;
 		padding: 0.5rem 0;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--color-border-light);
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	td {
 		padding: 0.4rem 0;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 	}
 	.right { text-align: right; }
 </style>

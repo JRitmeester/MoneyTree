@@ -6,6 +6,7 @@
 		deleteAllCategories, deleteEverything,
 		type VirtualReceipt
 	} from '$lib/api';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	interface DangerAction {
 		key: string;
@@ -126,7 +127,7 @@
 </script>
 
 <div class="page">
-	<h1>Settings</h1>
+	<PageHeader title="Settings" />
 
 	<section class="card">
 		<button class="logout-btn" onclick={handleLogout}>
@@ -246,18 +247,17 @@
 
 <style>
 	.page { max-width: 700px; }
-	h1 { margin: 0 0 1.5rem; color: #1a1a1a; }
 
 	.card {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		padding: 1.25rem 1.5rem;
 		margin-bottom: 1rem;
 	}
 	.card h2 {
 		margin: 0 0 1rem;
 		font-size: 1.1rem;
-		color: #1a1a1a;
+		color: var(--color-text);
 	}
 
 	.logout-btn {
@@ -268,7 +268,7 @@
 		border: none;
 		font-size: 1rem;
 		font-weight: 500;
-		color: #dc2626;
+		color: var(--color-expense);
 		cursor: pointer;
 		padding: 0.5rem 0;
 	}
@@ -281,13 +281,13 @@
 		align-items: center;
 		padding: 0.75rem 0;
 		text-decoration: none;
-		color: #1a1a1a;
+		color: var(--color-text);
 		font-weight: 500;
-		border-top: 1px solid #f0f0f0;
+		border-top: 1px solid var(--color-bg-subtle);
 	}
 	.settings-link:first-of-type { border-top: none; }
-	.settings-link:hover { color: #2d6a4f; }
-	.chevron { color: #999; font-size: 1.3rem; }
+	.settings-link:hover { color: var(--color-accent); }
+	.chevron { color: var(--color-text-faint); font-size: 1.3rem; }
 
 	.danger-item {
 		display: flex;
@@ -295,19 +295,19 @@
 		align-items: flex-start;
 		gap: 1.5rem;
 		padding: 1rem 0;
-		border-top: 1px solid #f0f0f0;
+		border-top: 1px solid var(--color-bg-subtle);
 	}
 	.danger-item:first-of-type { border-top: none; }
 	.danger-info { flex: 1; }
 	.danger-info h3 { margin: 0 0 0.25rem; font-size: 0.95rem; }
-	.danger-info p { margin: 0; font-size: 0.85rem; color: #666; }
+	.danger-info p { margin: 0; font-size: 0.85rem; color: var(--color-text-muted); }
 
 	.danger-btn {
 		padding: 0.4rem 0.9rem;
-		background: #dc2626;
+		background: var(--color-expense);
 		color: white;
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.85rem;
 		font-weight: 500;
@@ -320,7 +320,7 @@
 	.success-msg {
 		margin-top: 0.5rem;
 		font-size: 0.85rem;
-		color: #16a34a;
+		color: var(--color-income);
 		font-weight: 500;
 	}
 
@@ -335,7 +335,7 @@
 		z-index: 100;
 	}
 	.modal {
-		background: white;
+		background: var(--color-card-bg);
 		border-radius: 12px;
 		width: 90%;
 		max-width: 480px;
@@ -347,7 +347,7 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 1.25rem 1.5rem;
-		border-bottom: 1px solid #e5e7eb;
+		border-bottom: 1px solid var(--color-border-light);
 	}
 	.modal-header h2 { margin: 0; font-size: 1.1rem; }
 	.modal-close {
@@ -355,7 +355,7 @@
 		border: none;
 		font-size: 1.5rem;
 		cursor: pointer;
-		color: #666;
+		color: var(--color-text-muted);
 		line-height: 1;
 	}
 	.modal-body {
@@ -363,7 +363,7 @@
 	}
 	.warning-text {
 		margin: 0 0 1.25rem;
-		color: #dc2626;
+		color: var(--color-expense);
 		font-size: 0.9rem;
 		line-height: 1.5;
 	}
@@ -376,13 +376,13 @@
 	}
 	.confirm-input {
 		padding: 0.5rem 0.75rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.95rem;
 	}
 	.confirm-input:focus {
 		outline: none;
-		border-color: #dc2626;
+		border-color: var(--color-expense);
 		box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15);
 	}
 	.modal-footer {
@@ -390,16 +390,16 @@
 		justify-content: flex-end;
 		gap: 0.75rem;
 		padding: 1rem 1.5rem;
-		border-top: 1px solid #e5e7eb;
+		border-top: 1px solid var(--color-border-light);
 	}
 	.btn-secondary {
 		padding: 0.4rem 0.9rem;
-		background: white;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		background: var(--color-card-bg);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.btn-secondary:hover { background: #f5f5f5; }
 </style>

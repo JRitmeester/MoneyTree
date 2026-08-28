@@ -5,6 +5,8 @@
 		type CashflowCalendar, type CashflowAdvice
 	} from '$lib/api';
 	import { extractErrorDetail } from '$lib/errors';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let monthDate = $state(startOfMonth(new Date()));
 	let calendar: CashflowCalendar | null = $state(null);
@@ -102,12 +104,10 @@
 </script>
 
 <div class="cashflow-page">
-	<div class="header">
-		<h1>Cash flow</h1>
-	</div>
+	<PageHeader title="Cash flow" />
 
 	{#if error}
-		<div class="error">{error}</div>
+		<ErrorBanner message={error} />
 	{/if}
 
 	{#if loading}
@@ -153,6 +153,7 @@
 				{#if advice.standing_buffer > 0}
 					<p class="standing-buffer">
 						Standing buffer for small 4-weekly payments: {formatEuro(advice.standing_buffer)}
+						(included in the sweep, no separate transfer)
 					</p>
 				{/if}
 
@@ -213,35 +214,26 @@
 
 <style>
 	.cashflow-page { max-width: 1000px; }
-	.header { margin-bottom: 1.5rem; }
-	h1 { margin: 0; color: #1a1a1a; }
 	h2 { margin: 0 0 1rem; font-size: 1.1rem; }
 	h3 { margin: 1rem 0 0.5rem; font-size: 0.95rem; }
-	.muted { color: #999; font-style: italic; }
-	.error {
-		background: #fef2f2;
-		color: #b91c1c;
-		padding: 0.75rem 1rem;
-		border-radius: 6px;
-		margin-bottom: 1rem;
-	}
+	.muted { color: var(--color-text-faint); font-style: italic; }
 
 	.section {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 1.5rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		margin-bottom: 1.5rem;
 	}
 
 	.empty-state {
 		text-align: center;
 		padding: 2rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.confirm-link {
 		display: inline-block;
 		margin-top: 0.5rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		font-weight: 600;
 	}
 
@@ -255,8 +247,8 @@
 		flex-direction: column;
 		gap: 0.25rem;
 	}
-	.advice-label { font-size: 0.8rem; color: #666; }
-	.advice-value { font-size: 1.4rem; font-weight: 700; color: #1a1a1a; }
+	.advice-label { font-size: 0.8rem; color: var(--color-text-muted); }
+	.advice-value { font-size: 1.4rem; font-weight: 700; color: var(--color-text); }
 	.buffer-input-row {
 		display: flex;
 		align-items: center;
@@ -265,7 +257,7 @@
 	.buffer-input-row input {
 		width: 4.5rem;
 		padding: 0.3rem 0.5rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		font-size: 1rem;
 	}
@@ -285,8 +277,8 @@
 		font-size: 0.9rem;
 	}
 	.transfer-date { font-weight: 600; }
-	.transfer-amount { color: #1a1a1a; }
-	.transfer-covers { color: #666; font-size: 0.85rem; }
+	.transfer-amount { color: var(--color-text); }
+	.transfer-covers { color: var(--color-text-muted); font-size: 0.85rem; }
 	.keep-in-checking, .standing-buffer {
 		font-size: 0.85rem;
 		color: #444;
@@ -294,7 +286,7 @@
 	}
 	.warning-list li {
 		font-size: 0.85rem;
-		color: #a16207;
+		color: var(--color-amber);
 	}
 
 	.calendar-header {
@@ -305,8 +297,8 @@
 	.calendar-header h2 { margin: 0; }
 	.nav-button {
 		background: none;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		padding: 0.25rem 0.6rem;
 		cursor: pointer;
 	}
@@ -320,14 +312,14 @@
 	.weekday-row { margin: 1rem 0 0.35rem; }
 	.weekday-label {
 		font-size: 0.75rem;
-		color: #999;
+		color: var(--color-text-faint);
 		text-align: center;
 	}
 	.week-row { margin-bottom: 0.35rem; }
 	.day-cell {
 		min-height: 4.5rem;
 		border: 1px solid #eee;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		padding: 0.35rem;
 		font-size: 0.75rem;
 	}

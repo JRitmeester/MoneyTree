@@ -7,6 +7,7 @@
 	import DateRangeFilter from '$lib/components/DateRangeFilter.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
 	import { get } from 'svelte/store';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	const urlFrom = page.url.searchParams.get('date_from');
 	const urlTo = page.url.searchParams.get('date_to');
@@ -60,7 +61,7 @@
 {#if loading}
 	<div class="loading">Loading...</div>
 {:else if error}
-	<div class="error">{error}</div>
+	<ErrorBanner message={error} />
 {:else if data}
 	<a href="/" class="back">&larr; Back to dashboard</a>
 
@@ -184,12 +185,11 @@
 {/if}
 
 <style>
-	.loading { text-align: center; padding: 3rem; color: #666; }
-	.error { padding: 1rem; background: #fef2f2; color: #dc2626; border-radius: 8px; }
+	.loading { text-align: center; padding: 3rem; color: var(--color-text-muted); }
 	.back {
 		display: inline-block;
 		margin-bottom: 1rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 		font-size: 0.9rem;
 	}
@@ -211,11 +211,11 @@
 		font-weight: 700;
 	}
 	.breadcrumb a {
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 	}
 	.breadcrumb a:hover { text-decoration: underline; }
-	.breadcrumb .current { color: #1a1a1a; }
+	.breadcrumb .current { color: var(--color-text); }
 	.breadcrumb .sep { color: #9ca3af; font-weight: 400; }
 
 	.summary-cards {
@@ -225,50 +225,50 @@
 		margin-bottom: 1.5rem;
 	}
 	.card {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 1rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		text-align: center;
 	}
-	.card-value { font-size: 1.3rem; font-weight: 700; color: #1a1a1a; }
-	.card-label { font-size: 0.8rem; color: #666; margin-top: 0.15rem; }
+	.card-value { font-size: 1.3rem; font-weight: 700; color: var(--color-text); }
+	.card-label { font-size: 0.8rem; color: var(--color-text-muted); margin-top: 0.15rem; }
 
 	.table-wrap {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		padding: 1rem;
 		overflow-x: auto;
 	}
-	.muted { color: #999; font-style: italic; }
+	.muted { color: var(--color-text-faint); font-style: italic; }
 
 	table { width: 100%; border-collapse: collapse; }
 	th {
 		text-align: left;
 		padding: 0.6rem 0.75rem;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--color-border-light);
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 		font-weight: 600;
 	}
 	td {
 		padding: 0.5rem 0.75rem;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		font-size: 0.9rem;
 	}
 	.right { text-align: right; }
-	.date { white-space: nowrap; color: #666; }
+	.date { white-space: nowrap; color: var(--color-text-muted); }
 
 	.cat-badge {
 		display: inline-block;
 		padding: 0.1rem 0.4rem;
-		background: #f0fdf4;
-		color: #2d6a4f;
+		background: var(--color-warn-bg-green);
+		color: var(--color-accent);
 		border-radius: 4px;
 		font-size: 0.8rem;
 	}
 
 	.tx-link {
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 		font-size: 0.85rem;
 	}
@@ -284,7 +284,7 @@
 	}
 
 	tfoot td {
-		border-top: 2px solid #e5e7eb;
+		border-top: 2px solid var(--color-border-light);
 		border-bottom: none;
 	}
 	.group-header {
@@ -298,7 +298,7 @@
 		margin: 0;
 	}
 	.group-header h2 a {
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 	}
 	.group-header h2 a:hover { text-decoration: underline; }
@@ -309,8 +309,8 @@
 	.grand-total {
 		display: flex;
 		justify-content: space-between;
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		padding: 0.75rem 1rem;
 		margin-top: 1rem;
 	}

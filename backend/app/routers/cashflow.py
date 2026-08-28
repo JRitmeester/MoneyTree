@@ -2,7 +2,7 @@ import re
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import require_auth
@@ -23,6 +23,7 @@ from ..services.cashflow_advisor import (
     compute_advice,
     project_calendar_month,
 )
+from ..services.recurring_detector import find_salary_payment_id
 
 router = APIRouter(prefix="/api/cashflow", tags=["cashflow"], dependencies=[Depends(require_auth)])
 
@@ -39,39 +40,16 @@ def _format_period_date(d: date) -> str:
     return f"{d.day} {d.strftime('%b')}"
 
 
-def _find_salary_payment_id(db: Session) -> int | None:
-    """The confirmed income recurring payment most likely to be the salary:
-    most occurrences wins; ties broken by the latest occurrence date, then
-    by lowest id, so the pick is deterministic."""
-    row = db.execute(
-        select(
-            RecurringPaymentOccurrence.recurring_payment_id,
-            func.count(RecurringPaymentOccurrence.id).label("occurrence_count"),
-            func.max(RecurringPaymentOccurrence.date).label("latest_date"),
-        )
-        .join(RecurringPayment, RecurringPayment.id == RecurringPaymentOccurrence.recurring_payment_id)
-        .where(RecurringPayment.status == "confirmed", RecurringPayment.is_income.is_(True))
-        .group_by(RecurringPaymentOccurrence.recurring_payment_id)
-        .order_by(
-            func.count(RecurringPaymentOccurrence.id).desc(),
-            func.max(RecurringPaymentOccurrence.date).desc(),
-            RecurringPaymentOccurrence.recurring_payment_id.asc(),
-        )
-        .limit(1)
-    ).first()
-    return row[0] if row else None
-
-
 @router.get("/periods", response_model=list[CashflowPeriodOut])
 def get_periods(count: int = Query(6, ge=1, le=24), db: Session = Depends(get_db)):
     """Salary-anchored pay periods, newest first.
 
     The salary is the confirmed income recurring payment with the most
-    occurrences (see `_find_salary_payment_id`). Each period runs from one
+    occurrences (see `find_salary_payment_id`). Each period runs from one
     salary occurrence date (inclusive) to the day before the next; the
     newest period is open, running from its occurrence date through today.
     Returns [] when there is no confirmed income recurring payment."""
-    payment_id = _find_salary_payment_id(db)
+    payment_id = find_salary_payment_id(db)
     if payment_id is None:
         return []
 
@@ -111,7 +89,7 @@ def get_calendar(month: str = Query(...), db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="month must be in YYYY-MM format")
 
     payments = db.query(RecurringPayment).filter_by(status="confirmed").all()
-    salary_payment_id = _find_salary_payment_id(db)
+    salary_payment_id = find_salary_payment_id(db)
     items = project_calendar_month(payments, year, month_num, salary_payment_id)
 
     days: dict[date, list[CashflowCalendarItemOut]] = {}

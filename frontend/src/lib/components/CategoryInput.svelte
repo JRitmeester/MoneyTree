@@ -312,15 +312,15 @@
 		gap: 0.25rem;
 		align-items: center;
 		padding: 0.25rem 0.4rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
-		background: white;
+		background: var(--color-card-bg);
 		cursor: text;
 		min-height: 32px;
 	}
 
 	.tags-area:focus-within {
-		border-color: #2d6a4f;
+		border-color: var(--color-accent);
 		outline: none;
 		box-shadow: 0 0 0 2px rgba(45, 106, 79, 0.15);
 	}
@@ -330,8 +330,8 @@
 		align-items: center;
 		gap: 0.2rem;
 		padding: 0.1rem 0.4rem;
-		background: #f0fdf4;
-		color: #2d6a4f;
+		background: var(--color-warn-bg-green);
+		color: var(--color-accent);
 		border-radius: 4px;
 		font-size: 0.8rem;
 		white-space: nowrap;
@@ -340,7 +340,7 @@
 	.tag-remove {
 		background: none;
 		border: none;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		cursor: pointer;
 		font-size: 0.9rem;
 		padding: 0;
@@ -367,8 +367,8 @@
 		margin: 0;
 		padding: 0;
 		list-style: none;
-		background: white;
-		border: 1px solid #ddd;
+		background: var(--color-card-bg);
+		border: 1px solid var(--color-border);
 		border-top: none;
 		border-radius: 0 0 4px 4px;
 		max-height: 200px;
@@ -391,16 +391,16 @@
 
 	.dropdown-item:hover,
 	.dropdown-item.highlighted {
-		background: #f0fdf4;
-		color: #2d6a4f;
+		background: var(--color-warn-bg-green);
+		color: var(--color-accent);
 	}
 
-	.path-parent { color: #999; }
+	.path-parent { color: var(--color-text-faint); }
 	.path-sep { color: #ccc; }
 	.path-leaf { font-weight: 500; }
 
 	.dropdown-item.add-new {
-		color: #666;
+		color: var(--color-text-muted);
 		border-top: 1px solid #eee;
 		font-style: italic;
 	}

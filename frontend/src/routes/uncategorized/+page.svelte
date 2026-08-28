@@ -9,6 +9,8 @@
 	import UndoBar from '$lib/components/UndoBar.svelte';
 	import { computeUndoGroups } from '$lib/undo';
 	import { extractErrorDetail } from '$lib/errors';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let groups: UncategorizedGroup[] = $state([]);
 	let loading = $state(true);
@@ -256,7 +258,7 @@
 </script>
 
 <div class="page">
-	<h1>Uncategorized</h1>
+	<PageHeader title="Uncategorized" />
 
 	{#if loading}
 		<p class="muted">Loading...</p>
@@ -267,7 +269,7 @@
 		</div>
 	{:else}
 		{#if error}
-			<div class="error">{error}</div>
+			<ErrorBanner message={error} />
 		{/if}
 
 		{#if undoInfo}
@@ -413,31 +415,22 @@
 
 <style>
 	.page { max-width: 900px; }
-	h1 { margin: 0 0 0.25rem; color: #1a1a1a; }
-	.subtitle { margin: 0 0 1.5rem; color: #666; font-size: 0.9rem; }
+	.subtitle { margin: 0 0 1.5rem; color: var(--color-text-muted); font-size: 0.9rem; }
 	.date-filter-row { margin-bottom: 0.75rem; }
-	.muted { color: #999; font-style: italic; }
-
-	.error {
-		padding: 1rem;
-		background: #fef2f2;
-		color: #dc2626;
-		border-radius: 8px;
-		margin-bottom: 1rem;
-	}
+	.muted { color: var(--color-text-faint); font-style: italic; }
 
 	.empty {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		padding: 3rem;
 		text-align: center;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 
 	.back {
 		display: inline-block;
 		margin-top: 0.75rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 		font-size: 0.9rem;
 	}
@@ -452,8 +445,8 @@
 		gap: 1rem;
 		padding: 0.75rem 1rem;
 		margin-bottom: 1rem;
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 	}
 
@@ -478,7 +471,7 @@
 	}
 	.search-input:focus {
 		outline: none;
-		border-color: #2d6a4f;
+		border-color: var(--color-accent);
 		box-shadow: 0 0 0 2px rgba(45, 106, 79, 0.15);
 	}
 
@@ -489,7 +482,7 @@
 		border: none;
 		cursor: pointer;
 		font-size: 1.1rem;
-		color: #999;
+		color: var(--color-text-faint);
 		padding: 0 4px;
 		line-height: 1;
 	}
@@ -506,7 +499,7 @@
 		right: 0;
 		max-height: 200px;
 		overflow-y: auto;
-		background: white;
+		background: var(--color-card-bg);
 		border: 1px solid #d1d5db;
 		border-top: none;
 		border-radius: 0 0 4px 4px;
@@ -569,7 +562,7 @@
 
 	.apply-btn {
 		padding: 0.35rem 0.9rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -587,8 +580,8 @@
 	}
 
 	.group-card {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		overflow: hidden;
 	}
 
@@ -597,7 +590,7 @@
 		align-items: center;
 		gap: 0.75rem;
 		padding: 0.75rem 1rem;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--color-border-light);
 	}
 
 	.group-check {
@@ -644,13 +637,13 @@
 	}
 
 	.mapped-badge {
-		background: #e0f2fe;
-		color: #0369a1;
+		background: var(--color-offset-bg);
+		color: var(--color-offset);
 	}
 
 	.group-meta {
 		font-size: 0.8rem;
-		color: #999;
+		color: var(--color-text-faint);
 		white-space: nowrap;
 	}
 
@@ -663,14 +656,14 @@
 		text-align: left;
 		padding: 0.5rem 1rem;
 		font-size: 0.8rem;
-		color: #999;
+		color: var(--color-text-faint);
 		font-weight: 500;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 	}
 
 	td {
 		padding: 0.5rem 1rem;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		font-size: 0.875rem;
 	}
 
@@ -679,7 +672,7 @@
 	}
 
 	tbody tr:hover {
-		background: #f9fafb;
+		background: var(--color-bg-faint);
 	}
 
 	.clickable {
@@ -701,7 +694,7 @@
 
 	.date {
 		white-space: nowrap;
-		color: #666;
+		color: var(--color-text-muted);
 		width: 90px;
 	}
 
@@ -712,7 +705,7 @@
 
 	.description {
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 		max-width: 300px;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -726,5 +719,5 @@
 		width: 100px;
 	}
 
-	.negative { color: #1a1a1a; }
+	.negative { color: var(--color-text); }
 </style>

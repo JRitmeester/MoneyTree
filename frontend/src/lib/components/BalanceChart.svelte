@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getBalanceHistory, formatEuro, type BalancePoint } from '$lib/api';
 	import { buildBalancePath } from '$lib/balancePath';
+	import ErrorBanner from './ErrorBanner.svelte';
 
 	let { dateFrom = '', dateTo = '' }: { dateFrom?: string; dateTo?: string } = $props();
 
@@ -32,7 +33,7 @@
 	{#if loading}
 		<p class="muted">Loading...</p>
 	{:else if error}
-		<p class="error">{error}</p>
+		<ErrorBanner message={error} />
 	{:else if points.length < 2}
 		<p class="muted">Not enough data for a balance chart yet.</p>
 	{:else}
@@ -43,7 +44,7 @@
 		</div>
 		<svg viewBox="0 -8 {WIDTH} {HEIGHT + 16}" preserveAspectRatio="none" role="img"
 			aria-label="Checking account balance over time, from {formatEuro(chart.min)} to {formatEuro(chart.max)}">
-			<path d={chart.path} fill="none" stroke="#2d6a4f" stroke-width="2" vector-effect="non-scaling-stroke" />
+			<path d={chart.path} fill="none" stroke="var(--color-accent)" stroke-width="2" vector-effect="non-scaling-stroke" />
 		</svg>
 		<div class="chart-dates">
 			<span>{points[0].date}</span>
@@ -53,12 +54,11 @@
 </div>
 
 <style>
-	.section { background: white; padding: 1.5rem; border-radius: 8px; }
+	.section { background: var(--color-card-bg); padding: 1.5rem; border-radius: var(--radius-md); }
 	h2 { margin: 0 0 1rem; font-size: 1.1rem; }
-	.muted { color: #999; font-style: italic; }
-	.error { color: #dc2626; font-size: 0.85rem; }
+	.muted { color: var(--color-text-faint); font-style: italic; }
 	svg { width: 100%; height: 160px; display: block; }
-	.chart-meta { display: flex; justify-content: space-between; font-size: 0.75rem; color: #666; margin-bottom: 0.35rem; }
-	.chart-meta .current { font-weight: 600; color: #2d6a4f; }
-	.chart-dates { display: flex; justify-content: space-between; font-size: 0.7rem; color: #999; margin-top: 0.25rem; }
+	.chart-meta { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 0.35rem; }
+	.chart-meta .current { font-weight: 600; color: var(--color-accent); }
+	.chart-dates { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--color-text-faint); margin-top: 0.25rem; }
 </style>

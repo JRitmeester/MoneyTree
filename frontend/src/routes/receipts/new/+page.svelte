@@ -4,6 +4,7 @@
 	import { resolveAmount, evaluateExpression } from '$lib/calc';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	// Auto-link to transaction if passed via query param
 	let transactionId = $derived(page.url.searchParams.get('transaction_id'));
@@ -240,38 +241,38 @@
 {/if}
 
 {#if error}
-	<div class="error">{error}</div>
+	<ErrorBanner message={error} />
 {/if}
 
 <style>
 	.back {
 		display: inline-block;
 		margin-bottom: 1rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 		font-size: 0.9rem;
 	}
-	h1 { color: #1a1a1a; }
+	h1 { color: var(--color-text); }
 	h2 { font-size: 1.1rem; margin-top: 1.5rem; }
 
 	.upload-area {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 2rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		text-align: center;
 	}
 	.preview {
 		max-width: 300px;
 		max-height: 300px;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		margin-bottom: 1rem;
 	}
 	.preview-pdf {
 		width: 100%;
 		height: 400px;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		margin-bottom: 1rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 	}
 	.upload-controls {
 		display: flex;
@@ -281,19 +282,19 @@
 	}
 	.file-btn {
 		padding: 0.6rem 1.5rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.95rem;
 	}
 	.file-btn.secondary {
-		background: white;
-		color: #2d6a4f;
-		border: 2px solid #2d6a4f;
+		background: var(--color-card-bg);
+		color: var(--color-accent);
+		border: 2px solid var(--color-accent);
 	}
 	.filename {
-		color: #666;
+		color: var(--color-text-muted);
 		font-size: 0.85rem;
 		margin: 0.5rem 0;
 	}
@@ -305,23 +306,23 @@
 	.preset-select label {
 		display: block;
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 		margin-bottom: 0.25rem;
 	}
 	.preset-select select {
 		width: 100%;
 		padding: 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.95rem;
-		background: white;
+		background: var(--color-card-bg);
 	}
 	.submit-btn {
 		padding: 0.6rem 2rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 1rem;
 		margin-top: 1rem;
@@ -343,9 +344,9 @@
 		}
 	}
 	.form-section {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 1.5rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 	}
 	.preview-section {
 		position: sticky;
@@ -353,7 +354,7 @@
 	}
 	.preview-section img {
 		width: 100%;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 	}
 	.field {
 		margin-bottom: 1rem;
@@ -361,14 +362,14 @@
 	.field label {
 		display: block;
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 		margin-bottom: 0.25rem;
 	}
 	.field input {
 		width: 100%;
 		padding: 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.95rem;
 	}
 
@@ -384,7 +385,7 @@
 	}
 	.line-item-row input {
 		padding: 0.4rem 0.5rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		font-size: 0.9rem;
 	}
@@ -395,7 +396,7 @@
 	.remove-btn {
 		background: none;
 		border: none;
-		color: #dc2626;
+		color: var(--color-expense);
 		cursor: pointer;
 		font-size: 1.1rem;
 		padding: 0.25rem 0.5rem;
@@ -409,19 +410,19 @@
 	}
 	.add-item-btn {
 		padding: 0.35rem 0.75rem;
-		background: white;
-		border: 1px solid #2d6a4f;
-		color: #2d6a4f;
+		background: var(--color-card-bg);
+		border: 1px solid var(--color-accent);
+		color: var(--color-accent);
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.85rem;
 	}
 	.items-total {
 		font-size: 0.9rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
-	.diff-warning { color: #dc2626; font-weight: 600; }
-	.diff-ok { color: #16a34a; }
+	.diff-warning { color: var(--color-expense); font-weight: 600; }
+	.diff-ok { color: var(--color-income); }
 
 	.done {
 		text-align: center;
@@ -435,23 +436,15 @@
 	}
 	.done-actions button {
 		padding: 0.5rem 1.5rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 	}
 	.done-actions button.secondary {
-		background: white;
-		color: #2d6a4f;
-		border: 2px solid #2d6a4f;
-	}
-
-	.error {
-		padding: 1rem;
-		background: #fef2f2;
-		color: #dc2626;
-		border-radius: 8px;
-		margin-top: 1rem;
+		background: var(--color-card-bg);
+		color: var(--color-accent);
+		border: 2px solid var(--color-accent);
 	}
 </style>

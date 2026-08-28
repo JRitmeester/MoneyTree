@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getIncidentalLabels, getSavingsCapacity, formatEuro, type IncidentalLabelSummary, type SavingsCapacitySummary } from '$lib/api';
+	import ErrorBanner from './ErrorBanner.svelte';
 
 	let data = $state<SavingsCapacitySummary | null>(null);
 	let labelSummaries: IncidentalLabelSummary[] = $state([]);
@@ -27,7 +28,7 @@
 	{#if loading}
 		<p class="muted">Loading...</p>
 	{:else if error}
-		<p class="error">{error}</p>
+		<ErrorBanner message={error} />
 	{:else if !data || data.months.length === 0}
 		<p class="muted">No data yet. Import transactions first.</p>
 	{:else}
@@ -87,28 +88,27 @@
 </div>
 
 <style>
-	.section { background: white; padding: 1.5rem; border-radius: 8px; }
+	.section { background: var(--color-card-bg); padding: 1.5rem; border-radius: var(--radius-md); }
 	h2 { margin: 0 0 1rem; font-size: 1.1rem; }
-	.muted { color: #999; font-style: italic; }
-	.error { color: #dc2626; font-size: 0.85rem; }
+	.muted { color: var(--color-text-faint); font-style: italic; }
 	.headline { margin-bottom: 1rem; }
 	.headline-value { font-size: 1.6rem; font-weight: 700; }
-	.headline-label { display: block; font-size: 0.8rem; color: #666; }
-	.positive { color: #16a34a; }
-	.negative { color: #dc2626; }
+	.headline-label { display: block; font-size: 0.8rem; color: var(--color-text-muted); }
+	.positive { color: var(--color-income); }
+	.negative { color: var(--color-expense); }
 	.capacity-table { font-size: 0.85rem; }
-	.row { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr; padding: 0.35rem 0; border-bottom: 1px solid #f0f0f0; }
-	.row.head { font-weight: 600; font-size: 0.75rem; color: #666; border-bottom: 2px solid #e5e7eb; }
-	.row.partial { color: #999; }
+	.row { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr; padding: 0.35rem 0; border-bottom: 1px solid var(--color-bg-subtle); }
+	.row.head { font-weight: 600; font-size: 0.75rem; color: var(--color-text-muted); border-bottom: 2px solid var(--color-border-light); }
+	.row.partial { color: var(--color-text-faint); }
 	.right { text-align: right; }
-	.income-text { color: #16a34a; }
-	.expense-text { color: #dc2626; }
-	.incidental-text { color: #a16207; }
-	.footnote { font-size: 0.7rem; color: #999; margin: 0.4rem 0 0; }
-	.labels { margin-top: 1rem; border-top: 1px solid #f0f0f0; padding-top: 0.75rem; }
-	h3 { font-size: 0.85rem; margin: 0 0 0.5rem; color: #666; }
+	.income-text { color: var(--color-income); }
+	.expense-text { color: var(--color-expense); }
+	.incidental-text { color: var(--color-amber); }
+	.footnote { font-size: 0.7rem; color: var(--color-text-faint); margin: 0.4rem 0 0; }
+	.labels { margin-top: 1rem; border-top: 1px solid var(--color-bg-subtle); padding-top: 0.75rem; }
+	h3 { font-size: 0.85rem; margin: 0 0 0.5rem; color: var(--color-text-muted); }
 	.label-row { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.85rem; padding: 0.2rem 0; }
 	.label-name { font-weight: 500; }
-	.label-range { color: #999; font-size: 0.75rem; flex: 1; text-align: right; }
-	.label-total { font-weight: 600; color: #a16207; }
+	.label-range { color: var(--color-text-faint); font-size: 0.75rem; flex: 1; text-align: right; }
+	.label-total { font-weight: 600; color: var(--color-amber); }
 </style>

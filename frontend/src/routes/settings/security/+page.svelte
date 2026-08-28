@@ -4,6 +4,7 @@
 		getPasskeys, deletePasskey, formatDate,
 		type PasskeySummary
 	} from '$lib/api';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	let passkeys: PasskeySummary[] = $state([]);
 	let loading = $state(true);
@@ -67,7 +68,7 @@
 
 <div class="page">
 	<a href="/settings" class="back">&larr; Settings</a>
-	<h1>Login & Passkeys</h1>
+	<PageHeader title="Login & Passkeys" />
 
 	<section class="card">
 		<div class="card-header">
@@ -118,15 +119,14 @@
 	.back {
 		display: inline-block;
 		margin-bottom: 1rem;
-		color: #2d6a4f;
+		color: var(--color-accent);
 		text-decoration: none;
 		font-size: 0.9rem;
 	}
-	h1 { margin: 0 0 1.5rem; color: #1a1a1a; }
 
 	.card {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 		padding: 1.25rem 1.5rem;
 	}
 	.card-header {
@@ -139,10 +139,10 @@
 
 	.add-btn {
 		padding: 0.4rem 0.9rem;
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.85rem;
 		font-weight: 500;
@@ -150,23 +150,23 @@
 	.add-btn:hover:not(:disabled) { background: #1b4332; }
 	.add-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-	.muted { color: #999; font-style: italic; }
+	.muted { color: var(--color-text-faint); font-style: italic; }
 
 	.success-msg {
 		margin-bottom: 1rem;
 		padding: 0.5rem 0.75rem;
-		background: #f0fdf4;
-		color: #16a34a;
-		border-radius: 6px;
+		background: var(--color-warn-bg-green);
+		color: var(--color-income);
+		border-radius: var(--radius-sm);
 		font-size: 0.85rem;
 		font-weight: 500;
 	}
 	.error-msg {
 		margin-bottom: 1rem;
 		padding: 0.5rem 0.75rem;
-		background: #fef2f2;
-		color: #dc2626;
-		border-radius: 6px;
+		background: var(--color-warn-bg-red);
+		color: var(--color-expense);
+		border-radius: var(--radius-sm);
 		font-size: 0.85rem;
 		font-weight: 500;
 	}
@@ -175,24 +175,24 @@
 	th {
 		text-align: left;
 		padding: 0.6rem 0.75rem;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--color-border-light);
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 		font-weight: 600;
 	}
 	td {
 		padding: 0.5rem 0.75rem;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		font-size: 0.9rem;
 	}
 	.name { font-weight: 500; }
-	.date { color: #666; white-space: nowrap; }
+	.date { color: var(--color-text-muted); white-space: nowrap; }
 	.actions { text-align: right; }
 
 	.delete-btn {
 		background: none;
 		border: none;
-		color: #dc2626;
+		color: var(--color-expense);
 		cursor: pointer;
 		font-size: 0.85rem;
 		font-weight: 500;

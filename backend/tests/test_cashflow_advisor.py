@@ -321,9 +321,15 @@ class TestAdvisor:
             expected_day=22, anchor_date=date(2026, 7, 22), is_income=True,
         )
         today = date(2026, 8, 1)
+        # expected_day=15 lands on 2026-08-15, a Saturday; the warning should
+        # report the weekend-shifted date (Monday 2026-08-17), not the raw
+        # calendar date, since that's the date the debit will actually hit.
         _confirmed(
             db, name="Car insurance", expected_amount=-400, cadence="yearly",
             expected_day=15, anchor_date=date(2025, 8, 15),
         )
         advice = compute_advice(db, buffer_pct=10.0, today=today)
-        assert any("Car insurance" in w and "yearly" in w for w in advice.warnings)
+        matching = [w for w in advice.warnings if "Car insurance" in w and "yearly" in w]
+        assert len(matching) == 1
+        assert "2026-08-17" in matching[0]
+        assert "2026-08-15" not in matching[0]

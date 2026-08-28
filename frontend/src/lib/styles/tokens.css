@@ -1,0 +1,39 @@
+/* Design tokens: shared palette and radii used across MoneyTree's frontend. */
+:root {
+	/* Brand / accent */
+	--color-accent: #2d6a4f;
+
+	/* Transaction semantics */
+	--color-income: #16a34a;
+	--color-expense: #dc2626;
+	--color-amber: #a16207;
+
+	/* Transfers */
+	--color-transfer: #2563eb;
+	--color-transfer-bg: #eff6ff;
+
+	/* Offset accounts (variant of the transfer blue) */
+	--color-offset: #0369a1;
+	--color-offset-bg: #e0f2fe;
+
+	/* Warning / status backgrounds */
+	--color-warn-bg-red: #fef2f2;
+	--color-warn-bg-amber: #fefce8;
+	--color-warn-bg-green: #f0fdf4;
+
+	/* Greys */
+	--color-text: #1a1a1a;
+	--color-text-muted: #666;
+	--color-text-faint: #999;
+	--color-border: #ddd;
+	--color-border-light: #e5e7eb;
+	--color-bg-subtle: #f0f0f0;
+	--color-bg-faint: #f9fafb;
+
+	/* Surfaces */
+	--color-card-bg: #fff;
+
+	/* Radii */
+	--radius-sm: 6px;
+	--radius-md: 8px;
+}

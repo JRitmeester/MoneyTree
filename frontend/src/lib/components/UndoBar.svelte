@@ -44,9 +44,9 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 1rem;
-		background: #1a1a1a;
+		background: var(--color-text);
 		color: white;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		padding: 0.6rem 1rem;
 		margin-bottom: 0.75rem;
 	}
@@ -55,10 +55,10 @@
 	}
 	.undo-btn {
 		padding: 0.3rem 0.9rem;
-		background: white;
-		color: #1a1a1a;
+		background: var(--color-card-bg);
+		color: var(--color-text);
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		font-size: 0.8rem;
 		font-weight: 600;
 		cursor: pointer;

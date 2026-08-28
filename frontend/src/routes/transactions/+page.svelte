@@ -12,6 +12,8 @@
 	import { computeUndoGroups } from '$lib/undo';
 	import { extractErrorDetail } from '$lib/errors';
 	import UndoBar from '$lib/components/UndoBar.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 	import { dateRange } from '$lib/stores/dateRange';
 	import { get } from 'svelte/store';
 
@@ -255,7 +257,7 @@
 	}
 </script>
 
-<h1>Transactions</h1>
+<PageHeader title="Transactions" />
 
 <div class="filters">
 	<div class="filter-row">
@@ -272,7 +274,7 @@
 </div>
 
 {#if error}
-	<div class="error">{error}</div>
+	<ErrorBanner message={error} />
 {/if}
 
 {#if undoInfo}
@@ -393,7 +395,6 @@
 {/if}
 
 <style>
-	h1 { color: #1a1a1a; }
 	.filters {
 		display: flex;
 		flex-direction: column;
@@ -407,8 +408,8 @@
 	}
 	.filters input {
 		padding: 0.5rem 0.75rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.9rem;
 	}
 	.filter-row input[type="text"] {
@@ -421,18 +422,13 @@
 	}
 	.info {
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 		margin-bottom: 0.5rem;
 	}
 	.loading {
 		text-align: center;
 		padding: 3rem;
-		color: #666;
-	}
-	.error {
-		color: #dc2626;
-		font-size: 0.85rem;
-		margin-bottom: 0.75rem;
+		color: var(--color-text-muted);
 	}
 	.bulk-bar {
 		position: sticky;
@@ -442,9 +438,9 @@
 		align-items: center;
 		gap: 0.5rem;
 		flex-wrap: wrap;
-		background: #1a1a1a;
+		background: var(--color-text);
 		color: white;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		padding: 0.5rem 0.9rem;
 		margin-bottom: 0.75rem;
 	}
@@ -460,16 +456,16 @@
 	}
 	.bulk-label select, .bulk-label input {
 		padding: 0.3rem 0.5rem;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		border: 1px solid #444;
 		font-size: 0.8rem;
 	}
 	.bulk-btn {
 		padding: 0.35rem 0.7rem;
-		background: white;
-		color: #1a1a1a;
+		background: var(--color-card-bg);
+		color: var(--color-text);
 		border: none;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		font-size: 0.8rem;
 		cursor: pointer;
 	}
@@ -491,8 +487,8 @@
 	}
 	.table-wrap {
 		overflow-x: auto;
-		background: white;
-		border-radius: 8px;
+		background: var(--color-card-bg);
+		border-radius: var(--radius-md);
 	}
 	table {
 		width: 100%;
@@ -501,26 +497,26 @@
 	th {
 		text-align: left;
 		padding: 0.75rem 1rem;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--color-border-light);
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 		font-weight: 600;
 	}
 	td {
 		padding: 0.625rem 1rem;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--color-bg-subtle);
 		font-size: 0.9rem;
 	}
 	tr.date-divider td {
-		border-top: 2px solid #e5e7eb;
+		border-top: 2px solid var(--color-border-light);
 	}
 	tr:hover {
-		background: #f9fafb;
+		background: var(--color-bg-faint);
 		cursor: pointer;
 	}
 	.date {
 		white-space: nowrap;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.merchant {
 		font-weight: 500;
@@ -530,32 +526,32 @@
 		font-variant-numeric: tabular-nums;
 		white-space: nowrap;
 	}
-	.positive { color: #16a34a; }
-	.negative { color: #1a1a1a; }
+	.positive { color: var(--color-income); }
+	.negative { color: var(--color-text); }
 	.badge {
 		display: inline-block;
 		padding: 0.15rem 0.5rem;
-		background: #f0fdf4;
-		color: #2d6a4f;
+		background: var(--color-warn-bg-green);
+		color: var(--color-accent);
 		border-radius: 4px;
 		font-size: 0.8rem;
 	}
 	.receipt-col {
 		text-align: center;
 		width: 60px;
-		color: #16a34a;
+		color: var(--color-income);
 	}
 	.badge.transfer {
-		background: #eff6ff;
-		color: #2563eb;
+		background: var(--color-transfer-bg);
+		color: var(--color-transfer);
 		font-size: 0.65rem;
 		border-radius: 4px;
 		padding: 0.05rem 0.35rem;
 		margin-left: 0.35rem;
 	}
 	.badge.incidental {
-		background: #fefce8;
-		color: #a16207;
+		background: var(--color-warn-bg-amber);
+		color: var(--color-amber);
 		font-size: 0.65rem;
 		border-radius: 4px;
 		padding: 0.05rem 0.35rem;
@@ -573,7 +569,7 @@
 		background: none;
 		border: none;
 		cursor: pointer;
-		color: #a16207;
+		color: var(--color-amber);
 		font-size: 0.9rem;
 		margin-left: 0.35rem;
 	}
@@ -586,9 +582,9 @@
 	}
 	.pagination button {
 		padding: 0.4rem 1rem;
-		background: white;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		background: var(--color-card-bg);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.85rem;
 	}
@@ -598,14 +594,14 @@
 	}
 	.pagination span {
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.per-page-select {
 		padding: 0.4rem 0.5rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--color-text-muted);
 		margin-left: 0.5rem;
 	}
 </style>

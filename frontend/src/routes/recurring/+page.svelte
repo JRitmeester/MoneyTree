@@ -7,6 +7,8 @@
 	import { extractErrorDetail } from '$lib/errors';
 	import { invalidatePayPeriods } from '$lib/stores/dateRange';
 	import CategoryInput from '$lib/components/CategoryInput.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 
 	let suggested: RecurringPayment[] = $state([]);
 	let confirmed: RecurringPayment[] = $state([]);
@@ -214,15 +216,16 @@
 </script>
 
 <div class="recurring-page">
-	<div class="header">
-		<h1>Recurring Payments</h1>
-		<button class="rescan-button" onclick={rescan} disabled={rescanning}>
-			{rescanning ? 'Rescanning...' : 'Rescan'}
-		</button>
-	</div>
+	<PageHeader title="Recurring Payments">
+		{#snippet right()}
+			<button class="rescan-button" onclick={rescan} disabled={rescanning}>
+				{rescanning ? 'Rescanning...' : 'Rescan'}
+			</button>
+		{/snippet}
+	</PageHeader>
 
 	{#if error}
-		<p class="error">{error}</p>
+		<ErrorBanner message={error} />
 	{/if}
 
 	{#if loading}
@@ -394,13 +397,6 @@
 
 <style>
 	.recurring-page { max-width: 900px; }
-	.header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 1.5rem;
-	}
-	h1 { margin: 0; color: #1a1a1a; }
 	h2 { margin: 0 0 1rem; font-size: 1.1rem; }
 	.collapse-toggle {
 		background: none;
@@ -411,35 +407,28 @@
 		width: 100%;
 	}
 	.collapse-toggle h2 { color: #444; }
-	.muted { color: #999; font-style: italic; }
-	.error {
-		background: #fef2f2;
-		color: #b91c1c;
-		padding: 0.75rem 1rem;
-		border-radius: 6px;
-		margin-bottom: 1rem;
-	}
+	.muted { color: var(--color-text-faint); font-style: italic; }
 
 	.section {
-		background: white;
+		background: var(--color-card-bg);
 		padding: 1.5rem;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		margin-bottom: 1.5rem;
 	}
 
 	.empty-state {
 		text-align: center;
 		padding: 2rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.empty-state p { margin-bottom: 1rem; }
 
 	.rescan-button {
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
 		padding: 0.5rem 1rem;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.9rem;
 	}
@@ -449,7 +438,7 @@
 	.row-list { display: flex; flex-direction: column; gap: 0.75rem; }
 	.row-card {
 		border: 1px solid #eee;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		padding: 1rem;
 	}
 	.row-main {
@@ -476,7 +465,7 @@
 		color: #444;
 	}
 	.row-detail.hint {
-		color: #16a34a;
+		color: var(--color-income);
 		font-style: italic;
 	}
 
@@ -496,7 +485,7 @@
 		font-weight: 500;
 		padding: 0.2rem 0;
 	}
-	.notice.amount-changed { color: #a16207; }
+	.notice.amount-changed { color: var(--color-amber); }
 	.notice.possibly-missed { color: #b91c1c; }
 
 	.row-actions {
@@ -506,11 +495,11 @@
 	}
 
 	.confirm-button, .edit-button, .save-button {
-		background: #2d6a4f;
+		background: var(--color-accent);
 		color: white;
 		border: none;
 		padding: 0.4rem 0.8rem;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.85rem;
 	}
@@ -518,10 +507,10 @@
 
 	.dismiss-button, .cancel-button {
 		background: none;
-		border: 1px solid #ddd;
-		color: #666;
+		border: 1px solid var(--color-border);
+		color: var(--color-text-muted);
 		padding: 0.4rem 0.8rem;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.85rem;
 	}
@@ -540,11 +529,11 @@
 		flex-direction: column;
 		gap: 0.25rem;
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--color-text-muted);
 	}
 	.inline-form input {
 		padding: 0.4rem 0.5rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--color-border);
 		border-radius: 4px;
 		font-size: 0.9rem;
 	}

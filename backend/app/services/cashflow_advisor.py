@@ -21,7 +21,11 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from app.models import RecurringPayment
-from app.services.recurring_detector import compute_notices, next_expected_date
+from app.services.recurring_detector import (
+    compute_notices,
+    find_salary_payment_id,
+    next_expected_date,
+)
 
 DEFAULT_BUFFER_PCT = 10.0
 
@@ -210,33 +214,13 @@ class Advice:
 
 
 def _find_salary_payment(db: Session) -> RecurringPayment | None:
-    """The confirmed income recurring payment most likely to be the salary:
-    most occurrences wins; ties broken by the latest occurrence date, then
-    by lowest id, so the pick is deterministic and agrees with the
-    calendar/periods endpoints' `_find_salary_payment_id`."""
-    from sqlalchemy import func, select
-
-    from app.models import RecurringPaymentOccurrence
-
-    row = db.execute(
-        select(
-            RecurringPaymentOccurrence.recurring_payment_id,
-            func.count(RecurringPaymentOccurrence.id).label("occurrence_count"),
-            func.max(RecurringPaymentOccurrence.date).label("latest_date"),
-        )
-        .join(RecurringPayment, RecurringPayment.id == RecurringPaymentOccurrence.recurring_payment_id)
-        .where(RecurringPayment.status == "confirmed", RecurringPayment.is_income.is_(True))
-        .group_by(RecurringPaymentOccurrence.recurring_payment_id)
-        .order_by(
-            func.count(RecurringPaymentOccurrence.id).desc(),
-            func.max(RecurringPaymentOccurrence.date).desc(),
-            RecurringPaymentOccurrence.recurring_payment_id.asc(),
-        )
-        .limit(1)
-    ).first()
-    if row is None:
+    """The confirmed income recurring payment most likely to be the salary.
+    See `find_salary_payment_id` for the tie-break rules; shared with the
+    calendar/periods endpoints so both agree on which payment is salary."""
+    payment_id = find_salary_payment_id(db)
+    if payment_id is None:
         return None
-    return db.get(RecurringPayment, row[0])
+    return db.get(RecurringPayment, payment_id)
 
 
 def _next_payday_after(payment: RecurringPayment, after: date) -> date:
@@ -399,6 +383,8 @@ def compute_advice(db: Session, buffer_pct: float, today: date | None = None) ->
         if payment.cadence != "yearly":
             continue
         expected = next_expected_date(payment)
+        if expected is not None:
+            expected = next_business_day(expected)
         if expected is not None and 0 <= (expected - today).days <= YEARLY_DUE_SOON_DAYS:
             warnings.append(f"{payment.name} (yearly) is due on {expected.isoformat()}")
 
