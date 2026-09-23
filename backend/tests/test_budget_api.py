@@ -263,3 +263,43 @@ class TestHighlightsEndpoint:
         resp = client.get(f"/api/budgets/{budget_id}/highlights")
         assert resp.status_code == 200
         assert resp.json()["closed"] is False
+
+
+class TestSavingsBalances:
+    def test_balance_is_starting_plus_net_transfers_minus_spending(self, client, db: Session):
+        """Pot balance = starting balance + net categorized internal
+        transfers (deposits positive, withdrawals negative) minus real
+        (non-transfer) spending in the category. Regression: deposits used
+        to be counted as spending because internal transfers were not
+        excluded."""
+        from .conftest import make_transaction
+
+        pot = Category(name="Autovervanging", category_type="savings",
+                       is_fixed=True, savings_starting_balance=800.0)
+        db.add(pot)
+        db.commit()
+        start, end = _current_period()
+        budget_id = client.post("/api/budgets", json={
+            "start_date": start, "end_date": end,
+            "lines": [{"category_id": pot.id, "amount": 50.0}],
+        }).json()["id"]
+
+        deposit = make_transaction(db, bedrag=-150.0, datum=date.today(), category_id=pot.id)
+        deposit.is_internal_transfer = True
+        withdrawal = make_transaction(db, bedrag=40.0, datum=date.today(), category_id=pot.id)
+        withdrawal.is_internal_transfer = True
+        make_transaction(db, bedrag=-25.0, datum=date.today(), category_id=pot.id)  # real spend
+        db.commit()
+
+        body = client.get(f"/api/budgets/{budget_id}").json()
+        line = next(l for l in body["lines"] if l["category_id"] == pot.id)
+        # 800 + (150 - 40) - 25 = 885; the 50 budgeted plan plays no role.
+        assert line["balance"] == 885.0
+
+    def test_starting_balance_patchable(self, client, db: Session):
+        pot = Category(name="Noodfonds", category_type="savings", is_fixed=True)
+        db.add(pot)
+        db.commit()
+        resp = client.patch(f"/api/categories/{pot.id}", json={"savings_starting_balance": 3900.60})
+        assert resp.status_code == 200
+        assert resp.json()["savings_starting_balance"] == 3900.60

@@ -129,6 +129,9 @@ class Category(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     parent_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
     is_fixed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Savings goals only: pot balance that predates the app's categorized
+    # transfer history; set so the computed balance matches the bank.
+    savings_starting_balance: Mapped[float | None] = mapped_column(Float)
     category_type: Mapped[str] = mapped_column(String(10), default="expense", nullable=False)
 
     children: Mapped[list["Category"]] = relationship(back_populates="parent")

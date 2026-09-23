@@ -264,6 +264,19 @@ import Loading from '$lib/components/Loading.svelte';
 	}
 
 	// Flatten categories for parent selector
+	async function handleStartingBalance(cat: Category, raw: string) {
+		const trimmed = raw.trim();
+		const value = trimmed === '' ? null : Number(trimmed);
+		if (value !== null && Number.isNaN(value)) return;
+		if (value === (cat.savings_starting_balance ?? null)) return;
+		try {
+			await updateCategory(cat.id, { savings_starting_balance: value });
+			await load();
+		} catch (e: any) {
+			error = extractErrorDetail(e);
+		}
+	}
+
 	function flatList(cats: Category[], depth = 0): { id: number; name: string; category_type: string; depth: number }[] {
 		let result: { id: number; name: string; category_type: string; depth: number }[] = [];
 		for (const cat of cats) {
@@ -348,9 +361,22 @@ import Loading from '$lib/components/Loading.svelte';
 								onclick={() => handleToggleType(cat)}
 								title="Click to toggle type"
 							>
-								{cat.category_type === 'income' ? 'Income' : 'Expense'}
+								{cat.category_type === 'income' ? 'Income' : cat.category_type === 'savings' ? 'Savings' : 'Expense'}
 							</button>
 						</span>
+						{#if cat.category_type === 'savings'}
+							<span class="start-balance" title="Money already in this pot before MoneyTree's history; set it so the shown balance matches your bank">
+								<span class="start-balance-label">start</span>
+								<input
+									type="number"
+									step="0.01"
+									placeholder="0"
+									value={cat.savings_starting_balance ?? ''}
+									onblur={(e) => handleStartingBalance(cat, (e.currentTarget as HTMLInputElement).value)}
+									onkeydown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
+								/>
+							</span>
+						{/if}
 						<button class="merge-btn" onclick={() => startMerge(cat.id)}>Merge into...</button>
 						<button class="move-btn" onclick={() => startMove(cat.id)}>Move to...</button>
 						<span class="col-delete">
@@ -774,4 +800,23 @@ import Loading from '$lib/components/Loading.svelte';
 		font-size: 0.8rem;
 	}
 	.map-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+	.start-balance {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+	.start-balance-label {
+		font-size: 0.7rem;
+		color: var(--color-text-faint);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.start-balance input {
+		width: 5.5rem;
+		padding: 0.2rem 0.4rem;
+		border: 1px solid var(--color-border);
+		border-radius: 4px;
+		font-size: 0.85rem;
+	}
 </style>

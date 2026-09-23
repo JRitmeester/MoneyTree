@@ -106,6 +106,9 @@ def update_category(category_id: int, data: CategoryUpdate, db: Session = Depend
     if "name" in fields:
         _validate_name(fields["name"])
 
+    if "savings_starting_balance" in fields:
+        cat.savings_starting_balance = fields["savings_starting_balance"]
+
     old_name = cat.name
     new_parent_id = fields.get("parent_id", cat.parent_id)
     new_category_type = fields.get("category_type", cat.category_type)

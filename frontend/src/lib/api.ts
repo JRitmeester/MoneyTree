@@ -471,6 +471,7 @@ export interface Category {
 	parent_id: number | null;
 	is_fixed: boolean;
 	category_type: string;
+	savings_starting_balance: number | null;
 	children: Category[];
 }
 
@@ -486,7 +487,7 @@ export async function createCategory(name: string, parent_id?: number, category_
 	});
 }
 
-export async function updateCategory(id: number, data: { name?: string; parent_id?: number | null; category_type?: string; is_fixed?: boolean }): Promise<Category> {
+export async function updateCategory(id: number, data: { name?: string; parent_id?: number | null; category_type?: string; is_fixed?: boolean; savings_starting_balance?: number | null }): Promise<Category> {
 	return request(`/api/categories/${id}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },

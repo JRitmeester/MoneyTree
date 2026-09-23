@@ -33,6 +33,7 @@ def build_export(db: Session, since: Optional[date]) -> ExportFile:
             parent_name=cat_by_id[c.parent_id].name if c.parent_id else None,
             is_fixed=c.is_fixed,
             category_type=c.category_type,
+            savings_starting_balance=c.savings_starting_balance,
             path=full_category_path(c.id, cat_by_id),
         )
         for c in cats

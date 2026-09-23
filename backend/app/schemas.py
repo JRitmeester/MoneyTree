@@ -191,6 +191,7 @@ class CategoryOut(BaseModel):
     parent_id: Optional[int]
     is_fixed: bool
     category_type: str
+    savings_starting_balance: Optional[float] = None
     children: list["CategoryOut"] = []
 
     model_config = {"from_attributes": True}
@@ -208,6 +209,7 @@ class CategoryUpdate(BaseModel):
     parent_id: Optional[int] = None
     category_type: Optional[str] = None
     is_fixed: Optional[bool] = None
+    savings_starting_balance: Optional[float] = None
 
 
 class CategoryMergeCounts(BaseModel):

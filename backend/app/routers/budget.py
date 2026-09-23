@@ -50,38 +50,44 @@ def _create_from_template(db: Session, start_date: date, end_date: date) -> Budg
 
 
 def _savings_balances(db: Session) -> dict[int, float]:
-    """Calculate running balance for all savings categories.
+    """Running balance per savings category.
 
-    Balance = sum(budgeted across all periods) - sum(actual spending all time).
+    Balance = starting balance (money in the pot before the app's
+    categorized history) + net categorized internal transfers (deposits
+    positive, withdrawals negative) - real (non-transfer) spending in the
+    category. Budget lines play no role: plans are plans, balances are
+    money.
     """
-    savings_cat_ids = set(
-        db.execute(
-            select(Category.id).where(Category.category_type == "savings")
-        ).scalars().all()
-    )
-    if not savings_cat_ids:
+    savings_cats = db.execute(
+        select(Category).where(Category.category_type == "savings")
+    ).scalars().all()
+    if not savings_cats:
         return {}
+    savings_cat_ids = {c.id for c in savings_cats}
 
-    # Total budgeted per savings category across all budget periods
-    budgeted_rows = db.execute(
-        select(BudgetLine.category_id, func.sum(BudgetLine.amount))
-        .where(BudgetLine.category_id.in_(savings_cat_ids))
-        .group_by(BudgetLine.category_id)
+    transfer_rows = db.execute(
+        select(Transaction.category_id, func.sum(Transaction.bedrag))
+        .where(
+            Transaction.category_id.in_(savings_cat_ids),
+            Transaction.is_internal_transfer.is_(True),
+        )
+        .group_by(Transaction.category_id)
     ).all()
-    budgeted = {cat_id: total or 0.0 for cat_id, total in budgeted_rows}
+    # Outgoing (to savings) is negative on the imported checking account,
+    # so contributions = -sum(bedrag).
+    net_transfers = {cat_id: -(total or 0.0) for cat_id, total in transfer_rows}
 
-    # Total spent: direct transactions (no receipt)
     direct_rows = db.execute(
         select(Transaction.category_id, func.sum(func.abs(Transaction.bedrag)))
         .where(
             Transaction.category_id.in_(savings_cat_ids),
             Transaction.bedrag < 0,
+            Transaction.is_internal_transfer.is_(False),
             ~select(Receipt.id).where(Receipt.transaction_id == Transaction.id).exists(),
         )
         .group_by(Transaction.category_id)
     ).all()
 
-    # Total spent: line items from receipts
     li_rows = db.execute(
         select(LineItem.category_id, func.sum(LineItem.amount * LineItem.quantity))
         .join(Receipt)
@@ -98,10 +104,14 @@ def _savings_balances(db: Session) -> dict[int, float]:
         spent[cat_id] = spent.get(cat_id, 0.0) + (total or 0.0)
 
     return {
-        cat_id: round(budgeted.get(cat_id, 0.0) - spent.get(cat_id, 0.0), 2)
-        for cat_id in savings_cat_ids
+        c.id: round(
+            (c.savings_starting_balance or 0.0)
+            + net_transfers.get(c.id, 0.0)
+            - spent.get(c.id, 0.0),
+            2,
+        )
+        for c in savings_cats
     }
-
 
 def _budget_to_out(budget: Budget, db: Session) -> BudgetOut:
     """Convert a budget to output format with template-awareness."""

@@ -17,6 +17,7 @@ class ExportCategory(BaseModel):
     parent_name: Optional[str] = None
     is_fixed: bool = False
     category_type: str = "expense"
+    savings_starting_balance: Optional[float] = None
     # Authoritative in format_version 3: the full "Parent > Child" path,
     # using the same " > " separator as the dashboard/budget hierarchical
     # display. `name` is kept for backward tooling/display but is no longer

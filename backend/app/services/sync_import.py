@@ -650,6 +650,7 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
             new_cat = Category(
                 name=segments[-1], parent_id=parent.id if parent else None,
                 is_fixed=ec.is_fixed, category_type=ec.category_type,
+                savings_starting_balance=ec.savings_starting_balance,
             )
             db.add(new_cat)
             db.flush()
@@ -675,6 +676,7 @@ def commit_import(db: Session, export: ExportFile, update_duplicates: bool) -> I
                 new_cat = Category(
                     name=ec.name, parent_id=parent_id,
                     is_fixed=ec.is_fixed, category_type=ec.category_type,
+                    savings_starting_balance=ec.savings_starting_balance,
                 )
                 db.add(new_cat)
                 db.flush()
