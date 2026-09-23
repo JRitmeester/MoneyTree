@@ -147,7 +147,10 @@ transaction id.
 
 "N of M flexible categories within plan; savings plan X of Y pots
 executed." Within plan = not flagged by R4. Executed = contributed >= plan.
-The same numbers appear in `summary`.
+The same numbers appear in `summary`. Amendment (final review,
+2026-09-23): the R4 flagged SET is computed for the summary regardless of
+`closed`, so `flexible_within_plan` is truthful on open periods; the R4
+CARDS remain closed-only as specified.
 
 ### R10: climate detection (DEFERRED, v1.1)
 
