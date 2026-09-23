@@ -170,3 +170,96 @@ class TestSavingsContributions:
         body = client.get(f"/api/dashboard/budget-vs-actual/{budget_id}").json()
         line = next(l for l in body["expense_lines"] if l["category_id"] == pot.id)
         assert line["actual"] == 100.0  # 150 in, 50 back out
+
+
+class TestHighlightsEndpoint:
+    def test_highlights_response_shape(self, client, db: Session):
+        """Test highlights endpoint returns correct response shape."""
+        from .conftest import make_transaction
+
+        fixed_cat = _category(db, "Huur")
+        flexible_cat = _category(db, "Boodschappen", is_fixed=False)
+        _rent_payment(db, fixed_cat.id)
+        start, end = _current_period()
+
+        budget_id = client.post("/api/budgets", json={
+            "start_date": start, "end_date": end,
+            "lines": [
+                {"category_id": fixed_cat.id, "amount": 1233.0},
+                {"category_id": flexible_cat.id, "amount": 300.0},
+            ],
+        }).json()["id"]
+
+        make_transaction(db, bedrag=-50.0, datum=date.today(), category_id=flexible_cat.id)
+        db.commit()
+
+        resp = client.get(f"/api/budgets/{budget_id}/highlights")
+        assert resp.status_code == 200
+
+        body = resp.json()
+        assert "budget_id" in body
+        assert body["budget_id"] == budget_id
+        assert "start_date" in body
+        assert "end_date" in body
+        assert "closed" in body
+        assert isinstance(body["closed"], bool)
+        assert "summary" in body
+
+        summary = body["summary"]
+        assert "raw_net" in summary
+        assert "incidental_total" in summary
+        assert "incidental_by_label" in summary
+        assert isinstance(summary["incidental_by_label"], list)
+        assert "unlabeled_incidental" in summary
+        assert "structural_net" in summary
+        assert "flexible_within_plan" in summary
+        assert "flexible_total" in summary
+        assert "pots_executed" in summary
+        assert "pots_planned" in summary
+
+        assert "highlights" in body
+        assert isinstance(body["highlights"], list)
+        for h in body["highlights"]:
+            assert "rule" in h
+            assert "severity" in h
+            assert "title" in h
+            assert "detail" in h
+            assert "category_id" in h
+            assert "amount" in h
+
+    def test_highlights_404_on_unknown_budget(self, client):
+        """Test highlights endpoint returns 404 for unknown budget."""
+        resp = client.get("/api/budgets/99999/highlights")
+        assert resp.status_code == 404
+
+    def test_highlights_closed_flag_for_past_budget(self, client, db: Session):
+        """Test closed flag is true for a past budget period."""
+        fixed_cat = _category(db, "Huur")
+        _rent_payment(db, fixed_cat.id)
+
+        past_start = (date.today() - timedelta(days=60)).isoformat()
+        past_end = (date.today() - timedelta(days=30)).isoformat()
+
+        budget_id = client.post("/api/budgets", json={
+            "start_date": past_start, "end_date": past_end,
+            "lines": [{"category_id": fixed_cat.id, "amount": 1233.0}],
+        }).json()["id"]
+
+        resp = client.get(f"/api/budgets/{budget_id}/highlights")
+        assert resp.status_code == 200
+        assert resp.json()["closed"] is True
+
+    def test_highlights_closed_flag_for_current_budget(self, client, db: Session):
+        """Test closed flag is false for a current/open budget period."""
+        fixed_cat = _category(db, "Huur")
+        _rent_payment(db, fixed_cat.id)
+        start, end = _current_period()
+
+        budget_id = client.post("/api/budgets", json={
+            "start_date": start, "end_date": end,
+            "lines": [{"category_id": fixed_cat.id, "amount": 1233.0}],
+        }).json()["id"]
+
+        resp = client.get(f"/api/budgets/{budget_id}/highlights")
+        assert resp.status_code == 200
+        assert resp.json()["closed"] is False

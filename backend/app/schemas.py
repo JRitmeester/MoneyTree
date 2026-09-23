@@ -802,3 +802,43 @@ class CashflowSettingsOut(BaseModel):
 
 class CashflowSettingsUpdate(BaseModel):
     buffer_pct: float = Field(ge=0, le=100)
+
+
+# --- Budget Highlights ---
+
+
+class HighlightLabelAmount(BaseModel):
+    label: str
+    amount: float
+
+
+class HighlightsSummaryOut(BaseModel):
+    raw_net: float
+    incidental_total: float
+    incidental_by_label: list[HighlightLabelAmount]
+    unlabeled_incidental: float
+    structural_net: float
+    flexible_within_plan: int
+    flexible_total: int
+    pots_executed: int
+    pots_planned: int
+
+
+class HighlightOut(BaseModel):
+    rule: str
+    severity: str
+    title: str
+    detail: str
+    category_id: Optional[int]
+    amount: Optional[float]
+
+
+class BudgetHighlightsOut(BaseModel):
+    budget_id: int
+    start_date: date
+    end_date: date
+    closed: bool
+    summary: HighlightsSummaryOut
+    highlights: list[HighlightOut]
+
+    model_config = {"from_attributes": True}

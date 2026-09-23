@@ -16,6 +16,10 @@ from ..schemas import (
     BudgetPatch,
     BudgetSummary,
     BudgetUpdate,
+    BudgetHighlightsOut,
+    HighlightOut,
+    HighlightsSummaryOut,
+    HighlightLabelAmount,
 )
 
 router = APIRouter(prefix="/api/budgets", tags=["budgets"], dependencies=[Depends(require_auth)])
@@ -223,6 +227,57 @@ def get_budget(budget_id: int, db: Session = Depends(get_db)):
     refresh_derived_lines(db, budget)
     db.commit()
     return _budget_to_out(budget, db)
+
+
+@router.get("/{budget_id}/highlights", response_model=BudgetHighlightsOut)
+def get_budget_highlights(budget_id: int, db: Session = Depends(get_db)):
+    """Get highlights for a budget period."""
+    from ..services.budget_highlights import compute_highlights
+
+    budget = db.get(Budget, budget_id)
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+
+    refresh_derived_lines(db, budget)
+    db.commit()
+
+    result = compute_highlights(db, budget)
+
+    summary_out = HighlightsSummaryOut(
+        raw_net=result.summary.raw_net,
+        incidental_total=result.summary.incidental_total,
+        incidental_by_label=[
+            HighlightLabelAmount(label=ila.label, amount=ila.amount)
+            for ila in result.summary.incidental_by_label
+        ],
+        unlabeled_incidental=result.summary.unlabeled_incidental,
+        structural_net=result.summary.structural_net,
+        flexible_within_plan=result.summary.flexible_within_plan,
+        flexible_total=result.summary.flexible_total,
+        pots_executed=result.summary.pots_executed,
+        pots_planned=result.summary.pots_planned,
+    )
+
+    highlights_out = [
+        HighlightOut(
+            rule=h.rule,
+            severity=h.severity,
+            title=h.title,
+            detail=h.detail,
+            category_id=h.category_id,
+            amount=h.amount,
+        )
+        for h in result.highlights
+    ]
+
+    return BudgetHighlightsOut(
+        budget_id=result.budget_id,
+        start_date=result.start_date,
+        end_date=result.end_date,
+        closed=result.closed,
+        summary=summary_out,
+        highlights=highlights_out,
+    )
 
 
 @router.put("/{budget_id}", response_model=BudgetOut)
