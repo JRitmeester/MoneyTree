@@ -754,6 +754,28 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
         budgeted_by_cat[line.category_id] = line.amount
         source_by_cat[line.category_id] = line.source
 
+    # Savings goals: "actual" answers "did I put money toward this goal this
+    # period". Spending analytics exclude internal transfers, so a savings
+    # line's spending-actual is (correctly) ~0 and tells the user nothing.
+    # Instead, use the net of internal transfers categorized to the pot:
+    # deposits from checking count positive, withdrawals negative.
+    savings_cat_ids = {c.id for c in all_cats if c.category_type == "savings"}
+    if savings_cat_ids:
+        contribution_rows = db.execute(
+            select(Transaction.category_id, func.sum(Transaction.bedrag))
+            .where(
+                Transaction.is_internal_transfer.is_(True),
+                Transaction.category_id.in_(savings_cat_ids),
+                Transaction.datum >= first_day,
+                Transaction.datum <= last_day,
+            )
+            .group_by(Transaction.category_id)
+        ).all()
+        for cat_id, net_bedrag in contribution_rows:
+            # Outgoing transfers (to savings) have negative bedrag on the
+            # imported checking account, so contributions = -net.
+            actuals[cat_id] = round(-net_bedrag, 2)
+
     all_cat_ids = set(budgeted_by_cat.keys()) | set(actuals.keys())
 
     income_lines = []

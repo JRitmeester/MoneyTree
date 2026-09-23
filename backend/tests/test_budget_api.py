@@ -142,3 +142,31 @@ class TestBudgetVsActualSource:
         by_cat = {l["category_id"]: l for l in body["expense_lines"]}
         assert by_cat[cat.id]["source"] == "recurring"
         assert by_cat[loose.id]["source"] == "manual"
+
+
+class TestSavingsContributions:
+    def test_savings_actual_is_net_contributed_transfers(self, client, db: Session):
+        """For savings-type categories, 'actual' answers 'did I put money
+        toward this goal this period': the net of internal transfers
+        categorized to the pot (deposits positive, withdrawals negative),
+        instead of always-zero spending."""
+        from .conftest import make_transaction
+
+        pot = Category(name="Autofonds", category_type="savings", is_fixed=True)
+        db.add(pot)
+        db.commit()
+        start, end = _current_period()
+        budget_id = client.post("/api/budgets", json={
+            "start_date": start, "end_date": end,
+            "lines": [{"category_id": pot.id, "amount": 100.0}],
+        }).json()["id"]
+
+        deposit = make_transaction(db, bedrag=-150.0, datum=date.today(), category_id=pot.id)
+        deposit.is_internal_transfer = True
+        withdrawal = make_transaction(db, bedrag=50.0, datum=date.today(), category_id=pot.id)
+        withdrawal.is_internal_transfer = True
+        db.commit()
+
+        body = client.get(f"/api/dashboard/budget-vs-actual/{budget_id}").json()
+        line = next(l for l in body["expense_lines"] if l["category_id"] == pot.id)
+        assert line["actual"] == 100.0  # 150 in, 50 back out

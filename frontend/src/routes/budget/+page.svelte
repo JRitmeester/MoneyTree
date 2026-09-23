@@ -1146,11 +1146,15 @@
 			{#if bvaSinkingLines.length > 0}
 				<div class="section">
 					<h2>Sinking Funds</h2>
+					<p class="section-hint">
+						Contributed = net transfers into the pot this period (categorize
+						your savings transfers to see them here).
+					</p>
 					<div class="bva-table bva-table-fixed">
 						<div class="bva-header">
 							<span>Category</span>
-							<span class="right">Budgeted</span>
-							<span class="right">Actual</span>
+							<span class="right">Planned</span>
+							<span class="right">Contributed</span>
 							<span class="right">Balance</span>
 						</div>
 						{#each bvaSinkingTree as node (node.path)}
@@ -1171,11 +1175,15 @@
 			{#if bvaWishListLines.length > 0}
 				<div class="section">
 					<h2>Saving Goals</h2>
+					<p class="section-hint">
+						Contributed = net transfers into the pot this period (categorize
+						your savings transfers to see them here).
+					</p>
 					<div class="bva-table bva-table-fixed">
 						<div class="bva-header">
 							<span>Category</span>
-							<span class="right">Budgeted</span>
-							<span class="right">Actual</span>
+							<span class="right">Planned</span>
+							<span class="right">Contributed</span>
 							<span class="right">Balance</span>
 						</div>
 						{#each bvaWishListTree as node (node.path)}
@@ -1877,4 +1885,10 @@
 		border-radius: 4px;
 	}
 	.parent-spending-link:hover { background: #dcfce7; }
+
+	.section-hint {
+		font-size: 0.75rem;
+		color: var(--color-text-faint);
+		margin: -0.5rem 0 0.5rem;
+	}
 </style>
