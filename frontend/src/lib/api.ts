@@ -707,6 +707,47 @@ export async function getBudgetVsActual(budgetId: number): Promise<BudgetVsActua
 	return request(`/api/dashboard/budget-vs-actual/${budgetId}`);
 }
 
+// --- Budget Highlights ---
+
+export interface HighlightLabelAmount {
+	label: string;
+	amount: number;
+}
+
+export interface HighlightsSummary {
+	raw_net: number;
+	incidental_total: number;
+	incidental_by_label: HighlightLabelAmount[];
+	unlabeled_incidental: number;
+	structural_net: number;
+	flexible_within_plan: number;
+	flexible_total: number;
+	pots_executed: number;
+	pots_planned: number;
+}
+
+export interface Highlight {
+	rule: string;
+	severity: 'good' | 'info' | 'warn';
+	title: string;
+	detail: string;
+	category_id: number | null;
+	amount: number | null;
+}
+
+export interface BudgetHighlights {
+	budget_id: number;
+	start_date: string;
+	end_date: string;
+	closed: boolean;
+	summary: HighlightsSummary;
+	highlights: Highlight[];
+}
+
+export async function getBudgetHighlights(budgetId: number): Promise<BudgetHighlights> {
+	return request(`/api/budgets/${budgetId}/highlights`);
+}
+
 export function formatPeriodLabel(startDate: string, endDate: string): string {
 	const start = new Date(startDate);
 	const end = new Date(endDate);

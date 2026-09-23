@@ -9,6 +9,7 @@
 	import { buildBudgetTree, buildBvaTree, type BudgetTreeNode, type BvaTreeNode } from '$lib/buildBudgetTree';
 	import ErrorBanner from '$lib/components/ErrorBanner.svelte';
 	import Loading from '$lib/components/Loading.svelte';
+	import BudgetHighlights from '$lib/components/BudgetHighlights.svelte';
 
 	// --- State ---
 	let allPeriods: BudgetSummary[] = $state([]);
@@ -932,6 +933,10 @@
 		<!-- ================ ACTUALS TAB ================ -->
 
 		{#if bvaData}
+			{#key currentPeriod?.id}
+				<BudgetHighlights budgetId={currentPeriod!.id} {spendingLinkSuffix} />
+			{/key}
+
 			<!-- Summary cards -->
 			<div class="summary-cards">
 				<div class="card">
