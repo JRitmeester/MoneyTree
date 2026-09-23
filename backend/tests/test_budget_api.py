@@ -95,3 +95,29 @@ class TestDerivedLinesInApi:
         # The derived line wins; the stale template amount never lands.
         assert line["amount"] == 1233.0
         assert line["source"] == "recurring"
+
+
+class TestBudgetVsActualBoundary:
+    def test_end_date_transaction_belongs_to_next_period(self, client, db: Session):
+        """Budget periods are half-open [start_date, end_date): a salary
+        landing exactly on end_date is the NEXT period's income. Regression:
+        the actuals query used an inclusive end, double-counting boundary-day
+        transactions in consecutive periods."""
+        from .conftest import make_transaction
+
+        salaris = Category(name="Salaris", category_type="income")
+        db.add(salaris)
+        db.commit()
+
+        client.post("/api/budgets", json={"start_date": "2026-08-21", "end_date": "2026-09-23"})
+        client.post("/api/budgets", json={"start_date": "2026-09-23", "end_date": "2026-10-22"})
+        first_id, second_id = [b["id"] for b in reversed(client.get("/api/budgets").json())]
+
+        make_transaction(db, bedrag=3227.34, datum=date(2026, 8, 21), category_id=salaris.id)
+        make_transaction(db, bedrag=3583.48, datum=date(2026, 9, 23), category_id=salaris.id)
+        db.commit()
+
+        first = client.get(f"/api/dashboard/budget-vs-actual/{first_id}").json()
+        second = client.get(f"/api/dashboard/budget-vs-actual/{second_id}").json()
+        assert first["total_actual_income"] == 3227.34
+        assert second["total_actual_income"] == 3583.48

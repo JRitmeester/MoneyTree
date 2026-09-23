@@ -1,5 +1,5 @@
 from calendar import monthrange
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -690,8 +690,11 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
 
+    # Budget periods are half-open [start_date, end_date): a transaction on
+    # end_date belongs to the NEXT period. The queries below filter with an
+    # inclusive `datum <= last_day`, so step the boundary back one day.
     first_day = budget.start_date
-    last_day = budget.end_date
+    last_day = budget.end_date - timedelta(days=1)
 
     all_cats = db.execute(select(CategoryModel)).scalars().all()
     categories = {c.id: c for c in all_cats}
