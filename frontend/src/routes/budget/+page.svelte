@@ -56,6 +56,18 @@
 
 	let hasBudget = $derived(budgetData !== null && budgetData.lines.length > 0);
 
+	// Spending-page links use INCLUSIVE date filters, while budget periods
+	// are half-open [start, end): pass end minus one day.
+	function bvaDateTo(): string {
+		if (!bvaData) return '';
+		const end = new Date(bvaData.end_date + 'T00:00:00');
+		end.setDate(end.getDate() - 1);
+		return end.toISOString().slice(0, 10);
+	}
+	let spendingLinkSuffix = $derived(
+		bvaData ? `?date_from=${bvaData.start_date}&date_to=${bvaDateTo()}` : ''
+	);
+
 	// Actuals tab: split BVA lines. Mirrors the Plan tab: derived lines are
 	// sectioned by their SOURCE (recurring -> Fixed Bills, allocation ->
 	// Savings), not the category's is_fixed flag.
@@ -954,6 +966,14 @@
 					<span class="cat-name" style="padding-left: {depth * 1.25}rem">
 						<span class="tree-toggle">{isBvaExpanded(section, node.path) ? '▼' : '▶'}</span>
 						{node.name}
+						{#if node.categoryId !== null}
+							<a
+								class="parent-spending-link"
+								href="/spending/category/{node.categoryId}{spendingLinkSuffix}"
+								title="View these transactions"
+								onclick={(e) => e.stopPropagation()}
+							>↗</a>
+						{/if}
 					</span>
 					<span class="right">{formatEuro(node.budgeted)}</span>
 					<span class="right">{formatEuro(node.actual)}</span>
@@ -975,7 +995,7 @@
 				{:else if node.categoryId !== null}
 					{@const line = bvaIncomeLines.find((l: BudgetVsActualLine) => l.category_id === node.categoryId)}
 					{#if line && bvaData}
-						<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
+						<a href="/spending/category/{line.category_id}{spendingLinkSuffix}" class="bva-row bva-row-link">
 							<span class="cat-name" style="padding-left: {depth * 1.25}rem">{node.name}</span>
 							<span class="right">{formatEuro(line.budgeted)}</span>
 							<span class="right">{formatEuro(line.actual)}</span>
@@ -999,7 +1019,7 @@
 				{:else if node.categoryId !== null}
 					{@const line = bvaFixedExpenses.find((l: BudgetVsActualLine) => l.category_id === node.categoryId)}
 					{#if line && bvaData}
-						<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
+						<a href="/spending/category/{line.category_id}{spendingLinkSuffix}" class="bva-row bva-row-link">
 							<span class="cat-name" style="padding-left: {depth * 1.25}rem">{node.name}</span>
 							<span class="right">{formatEuro(line.budgeted)}</span>
 							<span class="right">{formatEuro(line.actual)}</span>
@@ -1024,7 +1044,7 @@
 				{:else if node.categoryId !== null}
 					{@const line = lines.find((l: BudgetVsActualLine) => l.category_id === node.categoryId)}
 					{#if line && bvaData}
-						<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link">
+						<a href="/spending/category/{line.category_id}{spendingLinkSuffix}" class="bva-row bva-row-link">
 							<span class="cat-name" style="padding-left: {depth * 1.25}rem">{node.name}</span>
 							<span class="right">{formatEuro(line.budgeted)}</span>
 							<span class="right">{formatEuro(line.actual)}</span>
@@ -1047,7 +1067,7 @@
 				{:else if node.categoryId !== null}
 					{@const line = bvaFlexibleExpenses.find((l: BudgetVsActualLine) => l.category_id === node.categoryId)}
 					{#if line && bvaData}
-						<a href="/spending/category/{line.category_id}?date_from={bvaData.start_date}&date_to={bvaData.end_date}" class="bva-row bva-row-link" class:over-budget={isOverBudget(line)}>
+						<a href="/spending/category/{line.category_id}{spendingLinkSuffix}" class="bva-row bva-row-link" class:over-budget={isOverBudget(line)}>
 							<span class="cat-name" style="padding-left: {depth * 1.25}rem">{node.name}</span>
 							<span class="right">{formatEuro(line.budgeted)}</span>
 							<span class="right">{formatEuro(line.actual)}</span>
@@ -1847,4 +1867,14 @@
 		text-decoration: none;
 	}
 	.source-badge:hover { background: #dcfce7; }
+
+	.parent-spending-link {
+		margin-left: 0.4rem;
+		color: var(--color-accent);
+		text-decoration: none;
+		font-size: 0.85rem;
+		padding: 0.1rem 0.3rem;
+		border-radius: 4px;
+	}
+	.parent-spending-link:hover { background: #dcfce7; }
 </style>
