@@ -127,7 +127,8 @@
 		if (!allocation?.payday) return;
 		const trimmed = raw.trim();
 		try {
-			if (trimmed === '' || Number(trimmed) === 0) {
+			// Empty = back to the default; "0" is a real value (skip once).
+			if (trimmed === '') {
 				if (overrides[bucketId] !== undefined) {
 					await deleteAllocationOverride(bucketId, allocation.payday);
 				}

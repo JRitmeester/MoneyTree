@@ -248,3 +248,21 @@ class TestOverrides:
 
         result = compute_allocation(db, buffer_pct=0.0, today=date(2026, 8, 25))
         assert result.lines[0].amount == 200.0
+
+
+    def test_zero_override_skips_bucket_once(self, db: Session):
+        from app.models import AllocationBucket, AllocationOverride
+
+        _salary(db, occurrence=(date(2026, 8, 21), 1000.0))
+        bucket = AllocationBucket(name="Beleggen", rule_type="fixed", value=200, position=0)
+        db.add(bucket)
+        db.flush()
+        db.add(AllocationOverride(bucket_id=bucket.id, payday=date(2026, 8, 21), value=0.0))
+        db.commit()
+
+        result = compute_allocation(db, buffer_pct=0.0, today=date(2026, 8, 25))
+        line = result.lines[0]
+        assert line.amount == 0.0
+        assert line.is_override is True
+        assert line.shortfall is False
+        assert result.free_to_spend == 1000.0

@@ -256,8 +256,12 @@ class TestOverrideApi:
 
     def test_override_value_validation(self, client):
         bid = self._mk(client)
+        # 0 is a valid one-payday value: it means "skip this bucket once".
         assert client.put(f"/api/allocation-buckets/{bid}/override", json={
             "payday": "2026-09-23", "value": 0,
+        }).status_code == 200
+        assert client.put(f"/api/allocation-buckets/{bid}/override", json={
+            "payday": "2026-09-23", "value": -5,
         }).status_code == 422
         assert client.put(f"/api/allocation-buckets/9999/override", json={
             "payday": "2026-09-23", "value": 10,

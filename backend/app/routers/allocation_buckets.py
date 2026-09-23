@@ -190,10 +190,12 @@ def upsert_override(bucket_id: int, data: AllocationOverrideUpsert, db: Session 
     bucket = db.get(AllocationBucket, bucket_id)
     if not bucket:
         raise HTTPException(status_code=404, detail="Bucket not found")
-    try:
-        AllocationBucketBase._validate_rule(bucket.rule_type, data.value)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    # Unlike bucket defaults, an override of 0 is valid: it skips the
+    # bucket for exactly this payday.
+    if data.value < 0:
+        raise HTTPException(status_code=422, detail="Override value must be 0 or more")
+    if bucket.rule_type == "percent" and data.value > 100:
+        raise HTTPException(status_code=422, detail="Percentage must be at most 100")
 
     if bucket.rule_type == "percent":
         # Effective percent sum for THIS payday must stay within 100.
