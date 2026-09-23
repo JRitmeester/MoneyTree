@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.models import Budget, BudgetLine, Category, IncidentalLabel
+from app.models import Budget, BudgetLine, Category, IncidentalLabel, LineItem, Receipt
 from app.services.budget_highlights import (
     BILL_INCREASE_FACTOR,
     ONE_OFF_FRACTION,
@@ -112,6 +112,32 @@ class TestR1Normalization:
         assert result.summary.raw_net == 2500.0
         assert result.summary.incidental_total == 500.0
         assert result.summary.structural_net == 3000.0
+
+    def test_incidental_total_equals_sum_of_displayed_breakdown(self, db: Session):
+        """Regression: incidental_total must equal the sum of the exact
+        (already-rounded) parts shown in the breakdown, labeled and
+        unlabeled alike. Rounding the label total (round(100.005, 2) ==
+        100.0, a float-representation quirk) and then adding an UNROUNDED
+        unlabeled figure (50.005) before a final round produced 150.0, while
+        the displayed parts (100.0 label + round(50.005, 2) == 50.01
+        unlabeled) sum to 150.01. incidental_total must match the latter."""
+        cat = _category(db, "Vakantie kosten")
+        label = IncidentalLabel(name="Vakantie")
+        db.add(label)
+        db.commit()
+        budget = _budget(db)
+        _line(db, budget, cat, 500.0)
+
+        labeled = make_transaction(db, bedrag=-100.005, category_id=cat.id, datum=START, is_incidental=True)
+        labeled.incidental_label_id = label.id
+        make_transaction(db, bedrag=-50.005, category_id=cat.id, datum=START, is_incidental=True)
+        db.commit()
+
+        result = compute_highlights(db, budget, today=date(2026, 9, 23))
+
+        by_label_total = sum(e.amount for e in result.summary.incidental_by_label)
+        assert round(by_label_total + result.summary.unlabeled_incidental, 2) == result.summary.incidental_total
+        assert result.summary.incidental_total == 150.01
 
 
 class TestR2FixedGhost:
@@ -291,6 +317,91 @@ class TestR4FlexibleOverrun:
         cards = _highlights_for(result, "flexible_overrun")
         assert len(cards) == 1
         assert "Restaurant X" not in cards[0].detail
+
+    def test_one_off_detector_one_cent_under_boundary_no_mention(self, db: Session):
+        cat = _category(db, "Uit eten", is_fixed=False)
+        budget = _budget(db)
+        plan = 100.0
+        _line(db, budget, cat, plan)
+        threshold = max(plan * OVERRUN_PCT, OVERRUN_MIN_EUR)
+        total_actual = plan + threshold + 10
+        one_off_amount = total_actual * ONE_OFF_FRACTION - 0.01
+        make_transaction(
+            db, bedrag=-one_off_amount, category_id=cat.id, datum=START,
+            naam="Restaurant X", merchant_name="Restaurant X",
+        )
+        make_transaction(db, bedrag=-(total_actual - one_off_amount), category_id=cat.id, datum=START)
+        db.commit()
+
+        result = compute_highlights(db, budget, today=date(2026, 9, 23))
+        cards = _highlights_for(result, "flexible_overrun")
+        assert len(cards) == 1
+        assert "Restaurant X" not in cards[0].detail
+
+    def test_one_off_detector_attributes_split_receipt_by_line_item(self, db: Session):
+        """Regression: the one-off detector must attribute a receipted,
+        split transaction the same way compute_budget_actuals does (per
+        line item category/amount), not by Transaction.category_id and the
+        whole bedrag. Transaction.category_id only ever syncs from the
+        'remaining' line item, so a naive whole-bedrag check keyed off it
+        would miss (or misattribute) a dominant purchase living in a
+        different line item's category."""
+        cat = _category(db, "Uit eten", is_fixed=False)
+        other_cat = _category(db, "Boodschappen", is_fixed=False)
+        budget = _budget(db)
+        plan = 10.0
+        _line(db, budget, cat, plan)
+
+        # tx.category_id points at the OTHER category (as it would if that
+        # were the "remaining" line item's category), while the dominant
+        # 80 EUR line item is categorized to `cat`.
+        tx = make_transaction(
+            db, bedrag=-100.0, category_id=other_cat.id, datum=START,
+            naam="Restaurant X", merchant_name="Restaurant X",
+        )
+        receipt = Receipt(transaction_id=tx.id, total_amount=100.0)
+        db.add(receipt)
+        db.flush()
+        db.add(LineItem(
+            receipt_id=receipt.id, description="Dinner", amount=80.0, quantity=1,
+            category_id=cat.id, sort_order=0,
+        ))
+        db.add(LineItem(
+            receipt_id=receipt.id, description="Groceries", amount=20.0, quantity=1,
+            category_id=other_cat.id, sort_order=1,
+        ))
+        db.commit()
+
+        result = compute_highlights(db, budget, today=date(2026, 9, 23))
+        cards = _highlights_for(result, "flexible_overrun")
+        assert len(cards) == 1
+        assert cards[0].category_id == cat.id
+        # Effective actual on `cat` is 80 (the line item), not 100.
+        assert cards[0].amount == 70.0
+        assert "Restaurant X" in cards[0].detail
+        assert "EUR 80.00" in cards[0].detail
+
+    def test_one_off_detector_with_subtree_aggregation(self, db: Session):
+        """Plan on the parent, spend on a child, one dominant purchase in
+        that child: the one-off detector must search across the folded
+        descendant set, not just the parent category itself."""
+        parent = _category(db, "Vrije Tijd", is_fixed=False)
+        child = _category(db, "Bioscoop", is_fixed=False, parent_id=parent.id)
+        budget = _budget(db)
+        plan = 20.0
+        _line(db, budget, parent, plan)
+        make_transaction(
+            db, bedrag=-90.0, category_id=child.id, datum=START,
+            naam="Cinema City", merchant_name="Cinema City",
+        )
+        make_transaction(db, bedrag=-10.0, category_id=child.id, datum=START)
+        db.commit()
+
+        result = compute_highlights(db, budget, today=date(2026, 9, 23))
+        cards = _highlights_for(result, "flexible_overrun")
+        assert len(cards) == 1
+        assert cards[0].category_id == parent.id
+        assert "Cinema City" in cards[0].detail
 
 
 class TestR5Underrun:
@@ -474,6 +585,32 @@ class TestR7IncomeChange:
 
         result = compute_highlights(db, budget, today=date(2026, 9, 23))
         assert _highlights_for(result, "income_change") == []
+
+    def test_income_change_exact_threshold_does_not_fire(self, db: Session):
+        cat = _category(db, "Salaris", category_type="income")
+        budget = _budget(db)
+        plan = 3000.0
+        _line(db, budget, cat, plan)
+        make_transaction(db, bedrag=plan * (1 + SALARY_CHANGE_PCT), category_id=cat.id, datum=START)
+        db.commit()
+
+        result = compute_highlights(db, budget, today=date(2026, 9, 23))
+        assert _highlights_for(result, "income_change") == []
+
+    def test_income_change_one_cent_over_threshold_fires(self, db: Session):
+        cat = _category(db, "Salaris", category_type="income")
+        budget = _budget(db)
+        plan = 3000.0
+        _line(db, budget, cat, plan)
+        make_transaction(
+            db, bedrag=plan * (1 + SALARY_CHANGE_PCT) + 0.01, category_id=cat.id, datum=START,
+        )
+        db.commit()
+
+        result = compute_highlights(db, budget, today=date(2026, 9, 23))
+        cards = _highlights_for(result, "income_change")
+        assert len(cards) == 1
+        assert cards[0].severity == "good"
 
     def test_multiple_income_lines_each_evaluated(self, db: Session):
         salary = _category(db, "Salaris", category_type="income")

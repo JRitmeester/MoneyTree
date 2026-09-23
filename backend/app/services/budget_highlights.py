@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Budget, Category as CategoryModel, IncidentalLabel, Transaction
-from .budget_actuals import BudgetActualLine, compute_budget_actuals
+from .budget_actuals import BudgetActualLine, _iter_expense_items, compute_budget_actuals
 from .category_paths import full_category_path
 
 logger = logging.getLogger(__name__)
@@ -170,10 +170,13 @@ def _compute_summary_inputs(db: Session, budget: Budget, actuals) -> tuple[
         IncidentalLabelAmount(label=labels.get(label_id, "Unknown"), amount=_r(amount))
         for label_id, amount in sorted(by_label.items(), key=lambda kv: labels.get(kv[0], ""))
     )
-    incidental_total = sum(a.amount for a in incidental_by_label) + unlabeled
+    unlabeled_incidental = _r(unlabeled)
+    # Round every displayed part first, then total = sum of the parts, so the
+    # incidental breakdown always adds up exactly to incidental_total.
+    incidental_total = _r(sum(a.amount for a in incidental_by_label) + unlabeled_incidental)
     structural_net = raw_net + incidental_total
 
-    return _r(raw_net), _r(incidental_total), incidental_by_label, _r(unlabeled), _r(structural_net)
+    return _r(raw_net), incidental_total, incidental_by_label, unlabeled_incidental, _r(structural_net)
 
 
 # ---------------------------------------------------------------------------
@@ -253,23 +256,24 @@ def _one_off_detail(
     """Search transactions across target_cat_ids for a single transaction
     whose spend is >= ONE_OFF_FRACTION of the effective (aggregated) actual.
     Returns an extra sentence to append to the overrun detail, or "".
+
+    Reuses `_iter_expense_items` (the same helper `compute_budget_actuals`
+    uses) so a receipted, split transaction is attributed the same way here
+    as in the actuals: per line item category and amount, not the whole
+    transaction `bedrag`. Receipt-less transactions come through as a single
+    item at the already offset-adjusted, floor-at-0 amount, again matching
+    the actuals computation exactly.
     """
     if effective_actual <= 0 or not target_cat_ids:
         return ""
-    rows = db.execute(
-        select(Transaction).where(
-            Transaction.category_id.in_(target_cat_ids),
-            Transaction.bedrag < 0,
-            Transaction.is_internal_transfer.is_(False),
-            Transaction.datum >= budget.start_date,
-            Transaction.datum < budget.end_date,
-        )
-    ).scalars().all()
+    last_day = budget.end_date - timedelta(days=1)
     totals: dict[int, float] = {}
     tx_by_id: dict[int, Transaction] = {}
-    for tx in rows:
-        totals[tx.id] = totals.get(tx.id, 0.0) + abs(tx.bedrag)
-        tx_by_id[tx.id] = tx
+    for item in _iter_expense_items(db, budget.start_date, last_day):
+        if item.category_id not in target_cat_ids:
+            continue
+        totals[item.tx.id] = totals.get(item.tx.id, 0.0) + item.amount
+        tx_by_id[item.tx.id] = item.tx
     if not totals:
         return ""
     best_id = max(totals, key=lambda i: totals[i])
