@@ -1,6 +1,6 @@
 """Tests for the deterministic budget highlights engine.
 
-Spec: .superpowers/sdd/2026-09-23-budget-highlights/spec.md (binding),
+Spec: docs/superpowers/specs/2026-09-23-budget-highlights-design.md (binding),
 task-2-brief.md.
 """
 from datetime import date, timedelta
@@ -138,6 +138,70 @@ class TestR1Normalization:
         by_label_total = sum(e.amount for e in result.summary.incidental_by_label)
         assert round(by_label_total + result.summary.unlabeled_incidental, 2) == result.summary.incidental_total
         assert result.summary.incidental_total == 150.01
+
+    def test_uncategorized_incidental_expense_does_not_raise_structural_net(self, db: Session):
+        """raw_net already excludes uncategorized spend (it never lands on
+        any expense line's `actual`). incidental_total must exclude it too,
+        or structural_net = raw_net + incidental_total would add back money
+        raw_net never subtracted in the first place."""
+        income = _category(db, "Salaris", category_type="income")
+        budget = _budget(db)
+        _line(db, budget, income, 3000.0)
+        make_transaction(db, bedrag=3000.0, category_id=income.id, datum=START)
+        # Uncategorized incidental expense: category_id=None.
+        make_transaction(db, bedrag=-500.0, category_id=None, datum=START, is_incidental=True)
+        db.commit()
+
+        result = compute_highlights(db, budget, today=date(2026, 9, 23))
+
+        assert result.summary.raw_net == 3000.0
+        assert result.summary.incidental_total == 0.0
+        assert result.summary.unlabeled_incidental == 0.0
+        assert result.summary.structural_net == 3000.0
+
+    def test_incidental_expense_with_offset_refund_adds_back_only_netted_amount(self, db: Session):
+        """An incidental expense with a linked offset refund must contribute
+        only the netted amount to incidental_total, mirroring how raw_net's
+        underlying actuals already net the offset (never double-counting the
+        refund by also treating it as separate incidental income)."""
+        from app.models import TransactionOffset
+
+        cat = _category(db, "Vakantie kosten")
+        budget = _budget(db)
+        _line(db, budget, cat, 0.0)
+        expense = make_transaction(db, bedrag=-500.0, category_id=cat.id, datum=START, is_incidental=True)
+        refund = make_transaction(db, bedrag=200.0, category_id=cat.id, datum=START, is_incidental=True)
+        db.commit()
+        db.add(TransactionOffset(expense_transaction_id=expense.id, income_transaction_id=refund.id))
+        db.commit()
+
+        result = compute_highlights(db, budget, today=date(2026, 9, 23))
+
+        # Expense side nets the offset via _iter_expense_items (500 - 200 =
+        # 300); the refund itself must NOT also be subtracted again as
+        # incidental income, since it is excluded via offset_income_ids.
+        assert result.summary.unlabeled_incidental == 300.0
+        assert result.summary.incidental_total == 300.0
+
+    def test_incidental_internal_transfer_contributes_nothing(self, db: Session):
+        """An internal transfer flagged incidental must not affect
+        incidental_total or structural_net at all, matching how raw_net's
+        underlying actuals exclude internal transfers from spending."""
+        income = _category(db, "Salaris", category_type="income")
+        pot = _category(db, "Vakantiepot", category_type="savings")
+        budget = _budget(db)
+        _line(db, budget, income, 3000.0)
+        _line(db, budget, pot, 100.0)
+        make_transaction(db, bedrag=3000.0, category_id=income.id, datum=START)
+        transfer = make_transaction(db, bedrag=-100.0, category_id=pot.id, datum=START, is_incidental=True)
+        transfer.is_internal_transfer = True
+        db.commit()
+
+        result = compute_highlights(db, budget, today=date(2026, 9, 23))
+
+        assert result.summary.raw_net == 3000.0
+        assert result.summary.incidental_total == 0.0
+        assert result.summary.structural_net == 3000.0
 
 
 class TestR2FixedGhost:
@@ -720,6 +784,27 @@ class TestOrderingAndCatalog:
         assert "fixed_ghost" not in rules_fired
         assert "flexible_overrun" not in rules_fired
         assert "scorecard" not in rules_fired
+
+    def test_open_period_scorecard_honest_despite_no_r4_card(self, db: Session):
+        """An over-plan flexible category on an OPEN period must still be
+        reflected in summary.flexible_within_plan (so the header is honest
+        "so far"), even though the R4 card itself is suppressed until the
+        period closes."""
+        overrun_cat = _category(db, "Uit eten", is_fixed=False)
+        ok_cat = _category(db, "Kleding", is_fixed=False)
+        budget = _budget(db)
+        _line(db, budget, overrun_cat, 100.0)
+        _line(db, budget, ok_cat, 100.0)
+        threshold = max(100.0 * OVERRUN_PCT, OVERRUN_MIN_EUR)
+        make_transaction(db, bedrag=-(100.0 + threshold + 1), category_id=overrun_cat.id, datum=START)
+        make_transaction(db, bedrag=-50.0, category_id=ok_cat.id, datum=START)
+        db.commit()
+
+        result = compute_highlights(db, budget, today=date(2026, 9, 1))
+        assert result.closed is False
+        assert _highlights_for(result, "flexible_overrun") == []
+        assert result.summary.flexible_total == 2
+        assert result.summary.flexible_within_plan == 1
 
     def test_closed_flag_boundary(self, db: Session):
         budget = _budget(db)

@@ -933,8 +933,8 @@
 		<!-- ================ ACTUALS TAB ================ -->
 
 		{#if bvaData}
-			{#key currentPeriod?.id}
-				<BudgetHighlights budgetId={currentPeriod!.id} {spendingLinkSuffix} />
+			{#key bvaData.budget_id}
+				<BudgetHighlights budgetId={bvaData.budget_id} {spendingLinkSuffix} />
 			{/key}
 
 			<!-- Summary cards -->

@@ -68,7 +68,7 @@
 			<p class="empty-note">Nothing notable yet.</p>
 		{:else}
 			<div class="cards">
-				{#each data.highlights as highlight (highlight.rule + highlight.title)}
+				{#each data.highlights as highlight, i (highlight.rule + ':' + (highlight.category_id ?? '') + ':' + i)}
 					{#snippet cardBody()}
 						<div class="card-title">{highlight.title}</div>
 						<div class="card-detail">{highlight.detail}</div>

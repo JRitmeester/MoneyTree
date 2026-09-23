@@ -1,6 +1,6 @@
 """Deterministic budget highlights engine.
 
-Spec: .superpowers/sdd/2026-09-23-budget-highlights/spec.md (binding),
+Spec: docs/superpowers/specs/2026-09-23-budget-highlights-design.md (binding),
 "Rule catalog" section, R1-R9 (R10 deferred to v1.1).
 
 Consumes `compute_budget_actuals` (does not re-derive actuals) and the
@@ -18,8 +18,8 @@ from typing import Optional as Opt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Budget, Category as CategoryModel, IncidentalLabel, Transaction
-from .budget_actuals import BudgetActualLine, _iter_expense_items, compute_budget_actuals
+from ..models import Budget, Category as CategoryModel, IncidentalLabel, LineItem, Receipt, Transaction
+from .budget_actuals import BudgetActualLine, _iter_expense_items, _offset_totals, compute_budget_actuals
 from .category_paths import full_category_path
 
 logger = logging.getLogger(__name__)
@@ -142,6 +142,21 @@ def _foldable_descendants(
 def _compute_summary_inputs(db: Session, budget: Budget, actuals) -> tuple[
     float, float, tuple[IncidentalLabelAmount, ...], float, float
 ]:
+    """raw_net (from compute_budget_actuals) already excludes uncategorized
+    spend, internal transfers, and offset-netted amounts. incidental_total
+    must be built from the same streams so structural_net = raw_net +
+    incidental_total never adds back money raw_net never subtracted:
+    - Expense side: `_iter_expense_items`, the same helper the actuals use,
+      filtered to `tx.is_incidental` and a non-null `category_id`. This
+      inherits the actuals' offset-netting and internal-transfer exclusion
+      for free.
+    - Income side: mirrors how `compute_budget_actuals` counts income
+      (receipted line items, then direct transactions), filtered to
+      `is_incidental`, a non-null category, not an internal transfer, and
+      excluding any income transaction linked as an offset (its amount is
+      already netted into the expense side above; counting it again here
+      would double-subtract it).
+    """
     consumption = sum(
         line.actual for line in actuals.expense_lines if line.category_type != "savings"
     )
@@ -149,23 +164,47 @@ def _compute_summary_inputs(db: Session, budget: Budget, actuals) -> tuple[
 
     labels = {l.id: l.name for l in db.execute(select(IncidentalLabel)).scalars().all()}
 
-    incidental_tx = db.execute(
-        select(Transaction).where(
-            Transaction.is_incidental.is_(True),
-            Transaction.datum >= budget.start_date,
-            Transaction.datum < budget.end_date,
-        )
-    ).scalars().all()
+    last_day = budget.end_date - timedelta(days=1)
+    expense_offsets, offset_income_ids = _offset_totals(db)
 
-    by_label: dict[int, float] = {}
-    unlabeled = 0.0
-    for tx in incidental_tx:
-        net = -tx.bedrag  # expense (bedrag<0) adds spend; income (bedrag>0) reduces it
-        if tx.incidental_label_id is None:
-            unlabeled += net
-        else:
-            by_label[tx.incidental_label_id] = by_label.get(tx.incidental_label_id, 0.0) + net
+    by_label: dict[Opt[int], float] = {}
 
+    for item in _iter_expense_items(db, budget.start_date, last_day, expense_offsets):
+        if not item.tx.is_incidental or item.category_id is None:
+            continue
+        key = item.tx.incidental_label_id
+        by_label[key] = by_label.get(key, 0.0) + item.amount
+
+    income_li_query = (
+        select(Transaction, LineItem)
+        .join(Receipt, Receipt.transaction_id == Transaction.id)
+        .join(LineItem, LineItem.receipt_id == Receipt.id)
+        .where(Transaction.bedrag > 0)
+        .where(Transaction.is_incidental.is_(True))
+        .where(Transaction.is_internal_transfer.is_(False))
+        .where(Transaction.datum >= budget.start_date, Transaction.datum <= last_day)
+    )
+    for tx, li in db.execute(income_li_query).all():
+        if tx.id in offset_income_ids or li.category_id is None:
+            continue
+        key = tx.incidental_label_id
+        by_label[key] = by_label.get(key, 0.0) - li.amount * li.quantity
+
+    direct_income_query = (
+        select(Transaction)
+        .where(Transaction.bedrag > 0)
+        .where(Transaction.is_incidental.is_(True))
+        .where(Transaction.is_internal_transfer.is_(False))
+        .where(Transaction.datum >= budget.start_date, Transaction.datum <= last_day)
+        .where(~select(Receipt.id).where(Receipt.transaction_id == Transaction.id).exists())
+    )
+    for tx in db.execute(direct_income_query).scalars().all():
+        if tx.id in offset_income_ids or tx.category_id is None:
+            continue
+        key = tx.incidental_label_id
+        by_label[key] = by_label.get(key, 0.0) - tx.bedrag
+
+    unlabeled = by_label.pop(None, 0.0)
     incidental_by_label = tuple(
         IncidentalLabelAmount(label=labels.get(label_id, "Unknown"), amount=_r(amount))
         for label_id, amount in sorted(by_label.items(), key=lambda kv: labels.get(kv[0], ""))
@@ -402,7 +441,7 @@ def _r6_savings_execution(
                 )
                 detail = f"Net withdrawal of EUR {abs(contributed):.2f}."
                 if listing:
-                    detail += f" Recent withdrawals: {listing}."
+                    detail += f" Largest withdrawals: {listing}."
                 highlights.append(Highlight(
                     rule="savings_withdrawal",
                     severity=SEVERITY_WARN,
@@ -558,14 +597,19 @@ def compute_highlights(
 
     highlights: list[Highlight] = []
     flexible_total = len(flexible_lines)
-    flagged_overrun: set[int] = set()
+
+    # The R4-flagged set feeds `summary.flexible_within_plan`, which must be
+    # honest on open periods too (a category already over plan mid-period
+    # should count as "not within plan" even before the period closes), so
+    # it is always computed. The R4 highlight CARDS themselves stay
+    # closed-only per spec: only closed periods get them appended below.
+    r4_highlights, flagged_overrun = _r4_flexible_overrun(
+        db, budget, flexible_lines, actual_by_cat, children, line_category_ids
+    )
 
     if closed:
         highlights.extend(_r2_fixed_ghost(fixed_lines))
         highlights.extend(_r3_bill_change(fixed_lines))
-        r4_highlights, flagged_overrun = _r4_flexible_overrun(
-            db, budget, flexible_lines, actual_by_cat, children, line_category_ids
-        )
         highlights.extend(r4_highlights)
         highlights.extend(_r5_flexible_underrun(flexible_lines, actual_by_cat, children, line_category_ids))
 
