@@ -338,3 +338,62 @@ class TestIntentBasedSavings:
         assert lines[cat_f.id].amount == 500.0
         # (2000 - 0 bills - 500 fixed) * 50% = 750
         assert lines[cat_p.id].amount == 750.0
+
+
+class TestIncomeActualAmounts:
+    def test_income_line_uses_actual_occurrence_amount(self, db: Session):
+        """Income differs from bills: once the salary has landed in the
+        period, the budget derives the ACTUAL amount (raises, vakantiegeld),
+        not the recurring payment's expected_amount."""
+        cat = _category(db, "Salaris", category_type="income", is_fixed=False)
+        payment = _payment(
+            db, name="Salary", amount=3291.36, expected_day=22,
+            anchor=date(2026, 7, 22), is_income=True, category_id=cat.id,
+        )
+        tx = make_transaction(db, bedrag=3583.48, datum=date(2026, 8, 24), naam="Salary")
+        db.add(RecurringPaymentOccurrence(
+            recurring_payment_id=payment.id, transaction_id=tx.id,
+            amount=3583.48, date=date(2026, 8, 24),
+        ))
+        db.commit()
+        budget = _budget(db)
+
+        refresh_derived_lines(db, budget, today=TODAY)
+        db.commit()
+
+        assert _lines(db, budget)[cat.id].amount == 3583.48
+
+    def test_income_line_sums_multiple_occurrences(self, db: Session):
+        """A period with salary plus a 13e-maand payout derives their sum."""
+        cat = _category(db, "Salaris", category_type="income", is_fixed=False)
+        payment = _payment(
+            db, name="Salary", amount=3000, expected_day=22,
+            anchor=date(2026, 7, 22), is_income=True, category_id=cat.id,
+        )
+        for d, amount in [(date(2026, 8, 21), 3000.0), (date(2026, 8, 22), 1500.0)]:
+            tx = make_transaction(db, bedrag=amount, datum=d, naam="Salary")
+            db.add(RecurringPaymentOccurrence(
+                recurring_payment_id=payment.id, transaction_id=tx.id,
+                amount=amount, date=d,
+            ))
+        db.commit()
+        budget = _budget(db)
+
+        refresh_derived_lines(db, budget, today=TODAY)
+        db.commit()
+
+        assert _lines(db, budget)[cat.id].amount == 4500.0
+
+    def test_income_line_falls_back_to_expected_before_payday(self, db: Session):
+        """No occurrence in the period yet: preview with expected_amount."""
+        cat = _category(db, "Salaris", category_type="income", is_fixed=False)
+        _payment(
+            db, name="Salary", amount=3291.36, expected_day=22,
+            anchor=date(2026, 7, 22), is_income=True, category_id=cat.id,
+        )
+        budget = _budget(db)
+
+        refresh_derived_lines(db, budget, today=TODAY)
+        db.commit()
+
+        assert _lines(db, budget)[cat.id].amount == 3291.36

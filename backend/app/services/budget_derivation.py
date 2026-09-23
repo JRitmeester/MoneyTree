@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -46,16 +46,40 @@ def _fixed_targets(db: Session, budget: Budget) -> dict[int, float]:
     targets: dict[int, float] = {}
     for payment in payments:
         try:
-            occurrences = occurrences_in_range(
-                payment, budget.start_date, budget.end_date, shift_weekend=True
-            )
+            amount = _period_amount(db, payment, budget)
         except Exception:
             logger.exception("Skipping fixed derivation for payment %s", payment.id)
             continue
-        if occurrences:
-            amount = abs(payment.expected_amount) * len(occurrences)
+        if amount > 0:
             targets[payment.category_id] = round(targets.get(payment.category_id, 0.0) + amount, 2)
     return targets
+
+
+def _period_amount(db: Session, payment: RecurringPayment, budget: Budget) -> float:
+    """A payment's derived amount for the period.
+
+    Income is handled differently from bills: once real occurrences have
+    landed in the period, their ACTUAL amounts win (raises, vakantiegeld,
+    13e maand), and expected_amount is only the pre-payday preview. Bills
+    keep deriving from expected_amount so the plan stays a plan: their
+    actual-vs-plan comparison is the budget's job, not the derivation's.
+    """
+    if payment.is_income:
+        actual = db.execute(
+            select(func.coalesce(func.sum(func.abs(RecurringPaymentOccurrence.amount)), 0.0))
+            .where(
+                RecurringPaymentOccurrence.recurring_payment_id == payment.id,
+                RecurringPaymentOccurrence.date >= budget.start_date,
+                RecurringPaymentOccurrence.date < budget.end_date,
+            )
+        ).scalar_one()
+        if actual > 0:
+            return float(actual)
+
+    occurrences = occurrences_in_range(
+        payment, budget.start_date, budget.end_date, shift_weekend=True
+    )
+    return abs(payment.expected_amount) * len(occurrences)
 
 
 def _paydays_in_period(db: Session, budget: Budget) -> list[tuple[date, float]]:
