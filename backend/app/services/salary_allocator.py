@@ -17,7 +17,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import AllocationBucket, Category, RecurringPayment, RecurringPaymentOccurrence
+from ..models import AllocationBucket, AllocationOverride, Category, RecurringPayment, RecurringPaymentOccurrence
 from .category_paths import full_category_path
 from .cashflow_advisor import _next_payday_after, compute_advice
 from .recurring_detector import (
@@ -36,11 +36,25 @@ class AllocationLine:
     bucket_id: int
     name: str
     rule_type: str
-    value: float
+    value: float  # effective value for this payday (override when present)
     amount: float
     category_id: int | None
     category_name: str | None
     shortfall: bool
+    is_override: bool = False
+    default_value: float | None = None
+
+
+def effective_bucket_values(db: Session, payday: date) -> dict[int, float]:
+    """bucket_id -> value for this payday: the one-payday override when one
+    exists, else the bucket's default. Shared by the waterfall and the
+    budget derivation so both always agree."""
+    return {
+        o.bucket_id: o.value
+        for o in db.execute(
+            select(AllocationOverride).where(AllocationOverride.payday == payday)
+        ).scalars().all()
+    }
 
 
 @dataclass(frozen=True)
@@ -167,6 +181,10 @@ def compute_allocation_at(
         .where(AllocationBucket.is_active.is_(True))
         .order_by(AllocationBucket.position, AllocationBucket.id)
     ).scalars().all()
+    overrides = effective_bucket_values(db, anchor)
+
+    def _value(bucket: AllocationBucket) -> float:
+        return overrides.get(bucket.id, bucket.value)
 
     cat_by_id = (
         {c.id: c for c in db.execute(select(Category)).scalars().all()}
@@ -179,7 +197,9 @@ def compute_allocation_at(
             bucket_id=bucket.id,
             name=bucket.name,
             rule_type=bucket.rule_type,
-            value=bucket.value,
+            value=_value(bucket),
+            is_override=bucket.id in overrides,
+            default_value=bucket.value if bucket.id in overrides else None,
             amount=round(amount, 2),
             category_id=bucket.category_id,
             category_name=(
@@ -218,8 +238,8 @@ def compute_allocation_at(
     for bucket in buckets:
         if bucket.rule_type != "fixed":
             continue
-        amount = round(min(bucket.value, remaining), 2)
-        shortfall = amount < bucket.value - _EPSILON
+        amount = round(min(_value(bucket), remaining), 2)
+        shortfall = amount < _value(bucket) - _EPSILON
         if shortfall and not shortfall_warned:
             warnings.append(f"Not enough left to fully fund '{bucket.name}'")
             shortfall_warned = True
@@ -230,7 +250,7 @@ def compute_allocation_at(
     for bucket in buckets:
         if bucket.rule_type != "percent":
             continue
-        amount = _floor_to_cent(percent_base * bucket.value / 100)
+        amount = _floor_to_cent(percent_base * _value(bucket) / 100)
         lines.append(_line(bucket, amount, shortfall=False))
 
     # Preserve configured bucket order in the output (fixed and percent

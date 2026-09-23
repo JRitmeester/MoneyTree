@@ -7,6 +7,7 @@ from ..auth import require_auth
 from ..database import get_db
 from ..models import (
     AllocationBucket,
+    AllocationOverride,
     AppSetting,
     Budget,
     BudgetLine,
@@ -194,6 +195,7 @@ def delete_everything(db: Session = Depends(get_db)):
     from sqlalchemy import update
     db.execute(update(Category).values(parent_id=None))
     db.execute(delete(Category))
+    db.execute(delete(AllocationOverride))
     db.execute(delete(AllocationBucket))
     db.execute(delete(OwnAccount))
     # Keep the account usable after a data wipe: auth_* settings

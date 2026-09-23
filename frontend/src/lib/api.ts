@@ -1269,6 +1269,8 @@ export interface SalaryAllocationLine {
 	category_id: number | null;
 	category_name: string | null;
 	shortfall: boolean;
+	is_override: boolean;
+	default_value: number | null;
 }
 
 export interface SalaryAllocationBillsItem {
@@ -1332,6 +1334,34 @@ export async function updateAllocationBucket(
 
 export async function deleteAllocationBucket(id: number): Promise<void> {
 	return request(`/api/allocation-buckets/${id}`, { method: 'DELETE' });
+}
+
+export interface AllocationOverride {
+	bucket_id: number;
+	payday: string;
+	value: number;
+}
+
+export async function listAllocationOverrides(payday: string): Promise<AllocationOverride[]> {
+	return request(`/api/allocation-buckets/overrides?payday=${payday}`);
+}
+
+export async function upsertAllocationOverride(
+	bucketId: number,
+	payday: string,
+	value: number
+): Promise<AllocationOverride> {
+	return request(`/api/allocation-buckets/${bucketId}/override`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ payday, value })
+	});
+}
+
+export async function deleteAllocationOverride(bucketId: number, payday: string): Promise<void> {
+	return request(`/api/allocation-buckets/${bucketId}/override?payday=${payday}`, {
+		method: 'DELETE'
+	});
 }
 
 export async function reorderAllocationBuckets(ids: number[]): Promise<AllocationBucket[]> {

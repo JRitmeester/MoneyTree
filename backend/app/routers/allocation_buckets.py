@@ -9,8 +9,12 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
-from ..models import AllocationBucket, Category
+from datetime import date
+
+from ..models import AllocationBucket, AllocationOverride, Category
 from ..schemas import (
+    AllocationOverrideOut,
+    AllocationOverrideUpsert,
     AllocationBucketBase,
     AllocationBucketCreate,
     AllocationBucketOrderUpdate,
@@ -144,6 +148,7 @@ def delete_bucket(bucket_id: int, db: Session = Depends(get_db)):
     bucket = db.get(AllocationBucket, bucket_id)
     if not bucket:
         raise HTTPException(status_code=404, detail="Bucket not found")
+    db.query(AllocationOverride).filter(AllocationOverride.bucket_id == bucket_id).delete()
     db.delete(bucket)
     db.flush()
     _recompact_positions(db)
@@ -163,3 +168,74 @@ def reorder_buckets(data: AllocationBucketOrderUpdate, db: Session = Depends(get
         buckets[bucket_id].position = position
     db.commit()
     return _all_ordered(db)
+
+
+@router.get("/overrides", response_model=list[AllocationOverrideOut])
+def list_overrides(payday: date, db: Session = Depends(get_db)):
+    rows = db.execute(
+        select(AllocationOverride)
+        .where(AllocationOverride.payday == payday)
+        .order_by(AllocationOverride.bucket_id)
+    ).scalars().all()
+    return [
+        AllocationOverrideOut(bucket_id=o.bucket_id, payday=o.payday, value=o.value)
+        for o in rows
+    ]
+
+
+@router.put("/{bucket_id}/override", response_model=AllocationOverrideOut)
+def upsert_override(bucket_id: int, data: AllocationOverrideUpsert, db: Session = Depends(get_db)):
+    """Set a one-payday value for a bucket. The default is untouched; the
+    override applies to exactly this payday and expires with it."""
+    bucket = db.get(AllocationBucket, bucket_id)
+    if not bucket:
+        raise HTTPException(status_code=404, detail="Bucket not found")
+    try:
+        AllocationBucketBase._validate_rule(bucket.rule_type, data.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    if bucket.rule_type == "percent":
+        # Effective percent sum for THIS payday must stay within 100.
+        overrides = {
+            o.bucket_id: o.value
+            for o in db.execute(
+                select(AllocationOverride).where(AllocationOverride.payday == data.payday)
+            ).scalars().all()
+        }
+        overrides[bucket_id] = data.value
+        active_percent = db.execute(
+            select(AllocationBucket).where(
+                AllocationBucket.is_active.is_(True),
+                AllocationBucket.rule_type == "percent",
+            )
+        ).scalars().all()
+        total = sum(overrides.get(b.id, b.value) for b in active_percent)
+        if total > 100:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Percentage buckets would total {total:g}% on {data.payday}; the maximum is 100%",
+            )
+
+    existing = db.execute(
+        select(AllocationOverride).where(
+            AllocationOverride.bucket_id == bucket_id,
+            AllocationOverride.payday == data.payday,
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.value = data.value
+    else:
+        db.add(AllocationOverride(bucket_id=bucket_id, payday=data.payday, value=data.value))
+    db.commit()
+    return AllocationOverrideOut(bucket_id=bucket_id, payday=data.payday, value=data.value)
+
+
+@router.delete("/{bucket_id}/override")
+def delete_override(bucket_id: int, payday: date, db: Session = Depends(get_db)):
+    db.query(AllocationOverride).filter(
+        AllocationOverride.bucket_id == bucket_id,
+        AllocationOverride.payday == payday,
+    ).delete()
+    db.commit()
+    return {"ok": True}

@@ -194,6 +194,8 @@ def get_allocation(db: Session = Depends(get_db)):
                 category_id=l.category_id,
                 category_name=l.category_name,
                 shortfall=l.shortfall,
+                is_override=l.is_override,
+                default_value=l.default_value,
             )
             for l in allocation.lines
         ],

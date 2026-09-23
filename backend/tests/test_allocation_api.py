@@ -218,3 +218,67 @@ class TestAllocationEndpoint:
         assert body["salary_confirmed"] is True
         assert body["lines"] == []
         assert body["free_to_spend"] == body["salary_amount"]
+
+
+class TestOverrideApi:
+    def _mk(self, client, name="Repairs", rule_type="fixed", value=50.0):
+        return client.post("/api/allocation-buckets", json={
+            "name": name, "rule_type": rule_type, "value": value,
+        }).json()["id"]
+
+    def test_upsert_and_delete_override(self, client):
+        bid = self._mk(client)
+        resp = client.put(f"/api/allocation-buckets/{bid}/override", json={
+            "payday": "2026-09-23", "value": 300.0,
+        })
+        assert resp.status_code == 200
+        assert resp.json() == {"bucket_id": bid, "payday": "2026-09-23", "value": 300.0}
+
+        # Upsert replaces
+        client.put(f"/api/allocation-buckets/{bid}/override", json={
+            "payday": "2026-09-23", "value": 250.0,
+        })
+        resp = client.get(f"/api/allocation-buckets/overrides?payday=2026-09-23")
+        assert resp.json() == [{"bucket_id": bid, "payday": "2026-09-23", "value": 250.0}]
+
+        assert client.delete(
+            f"/api/allocation-buckets/{bid}/override?payday=2026-09-23"
+        ).status_code == 200
+        assert client.get(f"/api/allocation-buckets/overrides?payday=2026-09-23").json() == []
+
+    def test_override_percent_cap(self, client):
+        a = self._mk(client, name="A", rule_type="percent", value=60.0)
+        self._mk(client, name="B", rule_type="percent", value=30.0)
+        resp = client.put(f"/api/allocation-buckets/{a}/override", json={
+            "payday": "2026-09-23", "value": 75.0,
+        })
+        assert resp.status_code == 409
+
+    def test_override_value_validation(self, client):
+        bid = self._mk(client)
+        assert client.put(f"/api/allocation-buckets/{bid}/override", json={
+            "payday": "2026-09-23", "value": 0,
+        }).status_code == 422
+        assert client.put(f"/api/allocation-buckets/9999/override", json={
+            "payday": "2026-09-23", "value": 10,
+        }).status_code == 404
+
+    def test_bucket_delete_removes_overrides(self, client, db: Session):
+        from app.models import AllocationOverride
+
+        bid = self._mk(client)
+        client.put(f"/api/allocation-buckets/{bid}/override", json={
+            "payday": "2026-09-23", "value": 300.0,
+        })
+        assert client.delete(f"/api/allocation-buckets/{bid}").status_code == 200
+        assert db.query(AllocationOverride).count() == 0
+
+    def test_delete_everything_wipes_overrides(self, client, db: Session):
+        from app.models import AllocationOverride
+
+        bid = self._mk(client)
+        client.put(f"/api/allocation-buckets/{bid}/override", json={
+            "payday": "2026-09-23", "value": 300.0,
+        })
+        assert client.delete("/api/settings/everything").status_code == 200
+        assert db.query(AllocationOverride).count() == 0

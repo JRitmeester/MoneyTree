@@ -3,6 +3,8 @@
 		getSalaryAllocation, listAllocationBuckets,
 		createAllocationBucket, updateAllocationBucket, deleteAllocationBucket,
 		reorderAllocationBuckets, formatEuro, getSavingsCapacity,
+		listAllocationOverrides, upsertAllocationOverride, deleteAllocationOverride,
+		type AllocationOverride,
 		getCashflowAdvice, updateCashflowSettings,
 		type SalaryAllocation, type AllocationBucket, type CashflowAdvice
 	} from '$lib/api';
@@ -14,6 +16,7 @@
 	let buckets: AllocationBucket[] = $state([]);
 	let bufferPct = $state(10);
 	let bufferSaving = $state(false);
+	let overrides: Record<number, number> = $state({});
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let rowErrors: Record<number, string> = $state({});
@@ -46,6 +49,12 @@
 			buckets = bucketsResult;
 			advice = adviceResult;
 			bufferPct = adviceResult.buffer_pct;
+			if (allocationResult.payday) {
+				const rows = await listAllocationOverrides(allocationResult.payday);
+				overrides = Object.fromEntries(rows.map((o: AllocationOverride) => [o.bucket_id, o.value]));
+			} else {
+				overrides = {};
+			}
 			error = null;
 		} catch (e) {
 			error = extractErrorDetail(e);
@@ -111,6 +120,24 @@
 			await load();
 		} catch (e) {
 			rowErrors = { ...rowErrors, [bucket.id]: extractErrorDetail(e) };
+		}
+	}
+
+	async function saveOverride(bucketId: number, raw: string) {
+		if (!allocation?.payday) return;
+		const trimmed = raw.trim();
+		try {
+			if (trimmed === '' || Number(trimmed) === 0) {
+				if (overrides[bucketId] !== undefined) {
+					await deleteAllocationOverride(bucketId, allocation.payday);
+				}
+			} else {
+				await upsertAllocationOverride(bucketId, allocation.payday, Number(trimmed));
+			}
+			rowErrors = { ...rowErrors, [bucketId]: '' };
+			await load();
+		} catch (e) {
+			rowErrors = { ...rowErrors, [bucketId]: extractErrorDetail(e) };
 		}
 	}
 
@@ -190,7 +217,14 @@
 										<span class="shortfall-note">not fully funded</span>
 									{/if}
 								</td>
-								<td class="col-rule">{line.rule_type === 'fixed' ? '€ fixed' : `${line.value}%`}</td>
+								<td class="col-rule">
+								{line.rule_type === 'fixed' ? '€ fixed' : `${line.value}%`}
+								{#if line.is_override}
+									<span class="override-badge" title="One-time change for this payday; next payday uses the default again">
+										this payday only (normally {line.rule_type === 'fixed' ? formatEuro(line.default_value ?? 0) : `${line.default_value}%`})
+									</span>
+								{/if}
+							</td>
 								<td class="col-goal">{line.category_name ?? '—'}</td>
 								<td class="col-amount">{formatEuro(line.amount)}</td>
 							</tr>
@@ -315,6 +349,18 @@
 								onkeydown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
 							/>
 							<span class="unit">{bucket.rule_type === 'fixed' ? '€' : '%'}</span>
+						</span>
+						<span class="value-wrap once-wrap" title="One-time value for this payday only; leave empty to use the default">
+							<span class="once-label">once</span>
+							<input
+								class="value-input"
+								type="number"
+								min="0"
+								placeholder="–"
+								value={overrides[bucket.id] ?? ''}
+								onblur={(e) => saveOverride(bucket.id, (e.currentTarget as HTMLInputElement).value)}
+								onkeydown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
+							/>
 						</span>
 						<div class="category-wrap">
 							<CategoryInput
@@ -580,4 +626,23 @@
 		border-radius: 4px;
 		margin-left: 0.5rem;
 	}
+
+	.override-badge {
+		display: inline-block;
+		margin-left: 0.4rem;
+		font-size: 0.7rem;
+		padding: 0.05rem 0.4rem;
+		border-radius: 999px;
+		background: var(--color-warn-bg-amber);
+		border: 1px solid var(--color-amber);
+		color: var(--color-amber);
+		white-space: nowrap;
+	}
+	.once-label {
+		font-size: 0.7rem;
+		color: var(--color-text-faint);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.once-wrap .value-input { width: 4.5rem; }
 </style>

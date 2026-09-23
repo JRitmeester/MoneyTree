@@ -210,3 +210,41 @@ class TestBillsBreakdown:
         # items + buffer == bills_pot + kept_in_checking
         total = sum(i.amount for i in result.bills_items) + result.bills_buffer_amount
         assert round(total, 2) == round(result.bills_pot + result.kept_in_checking, 2)
+
+
+class TestOverrides:
+    def test_override_applies_to_its_payday_only(self, db: Session):
+        from app.models import AllocationBucket, AllocationOverride
+
+        _salary(db, occurrence=(date(2026, 8, 21), 1000.0))
+        bucket = AllocationBucket(name="Repairs", rule_type="fixed", value=50, position=0)
+        db.add(bucket)
+        db.flush()
+        db.add(AllocationOverride(bucket_id=bucket.id, payday=date(2026, 8, 21), value=300.0))
+        db.commit()
+
+        result = compute_allocation(db, buffer_pct=0.0, today=date(2026, 8, 25))
+        line = result.lines[0]
+        assert line.amount == 300.0
+        assert line.value == 300.0
+        assert line.is_override is True
+        assert line.default_value == 50.0
+
+        # A different payday is untouched by the override.
+        from app.services.salary_allocator import compute_allocation_at
+        other = compute_allocation_at(db, 0.0, date(2026, 9, 22), 1000.0)
+        assert other.lines[0].amount == 50.0
+        assert other.lines[0].is_override is False
+
+    def test_percent_override(self, db: Session):
+        from app.models import AllocationBucket, AllocationOverride
+
+        _salary(db, occurrence=(date(2026, 8, 21), 1000.0))
+        bucket = AllocationBucket(name="LT", rule_type="percent", value=50, position=0)
+        db.add(bucket)
+        db.flush()
+        db.add(AllocationOverride(bucket_id=bucket.id, payday=date(2026, 8, 21), value=20.0))
+        db.commit()
+
+        result = compute_allocation(db, buffer_pct=0.0, today=date(2026, 8, 25))
+        assert result.lines[0].amount == 200.0

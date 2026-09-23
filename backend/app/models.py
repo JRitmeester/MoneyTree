@@ -299,6 +299,20 @@ class AllocationBucket(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
+class AllocationOverride(Base):
+    """A one-payday override of an allocation bucket's value. Applies to
+    exactly one payday (the allocation anchor date) and expires naturally:
+    the next payday derives from the bucket's default again."""
+    __tablename__ = "allocation_overrides"
+    __table_args__ = (UniqueConstraint("bucket_id", "payday", name="uq_override_bucket_payday"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("allocation_buckets.id"), nullable=False)
+    payday: Mapped[date] = mapped_column(Date, nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 
 class IncidentalLabel(Base):
     """Groups related one-off transactions across categories, e.g. a holiday

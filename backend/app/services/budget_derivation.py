@@ -22,6 +22,7 @@ from ..models import (
 )
 from .cashflow_advisor import DEFAULT_BUFFER_PCT, compute_advice, occurrences_in_range
 from .recurring_detector import find_salary_payment_id
+from .salary_allocator import effective_bucket_values
 
 logger = logging.getLogger(__name__)
 
@@ -130,24 +131,29 @@ def _savings_targets(db: Session, budget: Budget) -> dict[int, float]:
     import math
 
     buffer_pct = _buffer_pct(db)
-    total_fixed = sum(b.value for b in buckets if b.rule_type == "fixed")
 
     targets: dict[int, float] = {}
     for payday, salary_amount in _paydays_in_period(db, budget):
         try:
             advice = compute_advice(db, buffer_pct, anchor_payday=payday)
             earmarked = (advice.sweep_amount or 0.0) + advice.keep_in_checking
+            overrides = effective_bucket_values(db, payday)
         except Exception:
             logger.exception("Skipping savings derivation for payday %s", payday)
             continue
+
+        def _value(b):
+            return overrides.get(b.id, b.value)
+
+        total_fixed = sum(_value(b) for b in buckets if b.rule_type == "fixed")
         percent_base = max(0.0, salary_amount - earmarked - total_fixed)
         for bucket in buckets:
             if bucket.category_id is None:
                 continue
             if bucket.rule_type == "fixed":
-                amount = bucket.value
+                amount = _value(bucket)
             else:
-                amount = math.floor(percent_base * bucket.value / 100 * 100 + 1e-9) / 100
+                amount = math.floor(percent_base * _value(bucket) / 100 * 100 + 1e-9) / 100
             if amount > 0:
                 targets[bucket.category_id] = round(
                     targets.get(bucket.category_id, 0.0) + amount, 2

@@ -278,6 +278,17 @@ class AllocationBucketOrderUpdate(BaseModel):
     ids: list[int]
 
 
+class AllocationOverrideUpsert(BaseModel):
+    payday: date
+    value: float
+
+
+class AllocationOverrideOut(BaseModel):
+    bucket_id: int
+    payday: date
+    value: float
+
+
 class AllocationBucketOut(BaseModel):
     id: int
     name: str
@@ -299,6 +310,8 @@ class SalaryAllocationLineOut(BaseModel):
     category_id: Optional[int] = None
     category_name: Optional[str] = None
     shortfall: bool = False
+    is_override: bool = False
+    default_value: Optional[float] = None
 
 
 class SalaryAllocationBillsItemOut(BaseModel):

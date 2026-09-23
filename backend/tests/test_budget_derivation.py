@@ -397,3 +397,20 @@ class TestIncomeActualAmounts:
         db.commit()
 
         assert _lines(db, budget)[cat.id].amount == 3291.36
+
+
+class TestOverrideDerivation:
+    def test_budget_savings_line_uses_payday_override(self, db: Session):
+        from app.models import AllocationOverride
+
+        _salary(db)  # occurrence 2026-08-21
+        cat = _category(db, "Autofonds", category_type="savings")
+        bucket = _bucket(db, name="Repairs", rule_type="fixed", value=50, category_id=cat.id)
+        db.add(AllocationOverride(bucket_id=bucket.id, payday=date(2026, 8, 21), value=300.0))
+        db.commit()
+        budget = _budget(db)
+
+        refresh_derived_lines(db, budget, today=TODAY)
+        db.commit()
+
+        assert _lines(db, budget)[cat.id].amount == 300.0
