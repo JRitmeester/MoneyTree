@@ -56,13 +56,21 @@
 
 	let hasBudget = $derived(budgetData !== null && budgetData.lines.length > 0);
 
-	// Actuals tab: split BVA lines
+	// Actuals tab: split BVA lines. Mirrors the Plan tab: derived lines are
+	// sectioned by their SOURCE (recurring -> Fixed Bills, allocation ->
+	// Savings), not the category's is_fixed flag.
 	let bvaIncomeLines = $derived(bvaData?.income_lines ?? []);
-	let bvaFixedExpenses = $derived(bvaData?.expense_lines.filter(l => l.is_fixed && l.category_type !== 'savings') ?? []);
-	let bvaSavingsExpenses = $derived(bvaData?.expense_lines.filter(l => l.category_type === 'savings') ?? []);
+	let bvaFixedExpenses = $derived(bvaData?.expense_lines.filter(l =>
+		l.category_type !== 'savings' && (l.source === 'recurring' || (l.source === 'manual' && l.is_fixed))
+	) ?? []);
+	let bvaSavingsExpenses = $derived(bvaData?.expense_lines.filter(l =>
+		l.category_type === 'savings' || (l.source === 'allocation')
+	) ?? []);
 	let bvaSinkingLines = $derived(bvaSavingsExpenses.filter(l => l.is_fixed));
 	let bvaWishListLines = $derived(bvaSavingsExpenses.filter(l => !l.is_fixed));
-	let bvaFlexibleExpenses = $derived(bvaData?.expense_lines.filter(l => !l.is_fixed && l.category_type !== 'savings') ?? []);
+	let bvaFlexibleExpenses = $derived(bvaData?.expense_lines.filter(l =>
+		l.category_type !== 'savings' && l.source === 'manual' && !l.is_fixed
+	) ?? []);
 
 	// Actuals tab: section subtotals
 	let bvaIncomeTotals = $derived({ budgeted: bvaIncomeLines.reduce((s, l) => s + l.budgeted, 0), actual: bvaIncomeLines.reduce((s, l) => s + l.actual, 0) });

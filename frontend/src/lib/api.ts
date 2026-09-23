@@ -642,6 +642,7 @@ export interface BudgetVsActualLine {
 	difference: number;
 	percentage: number;
 	balance: number;
+	source: 'manual' | 'recurring' | 'allocation';
 }
 
 export interface BudgetVsActualSummary {

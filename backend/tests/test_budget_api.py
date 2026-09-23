@@ -121,3 +121,24 @@ class TestBudgetVsActualBoundary:
         second = client.get(f"/api/dashboard/budget-vs-actual/{second_id}").json()
         assert first["total_actual_income"] == 3227.34
         assert second["total_actual_income"] == 3583.48
+
+
+class TestBudgetVsActualSource:
+    def test_bva_lines_carry_budget_line_source(self, client, db: Session):
+        """The Actuals view sections lines the same way the Plan tab does:
+        by the budget line's source. The BVA payload must therefore carry
+        it (default 'manual' for actuals-only categories)."""
+        from .conftest import make_transaction
+
+        cat = _category(db, "Huur")
+        loose = _category(db, "Snacks", is_fixed=False)
+        _rent_payment(db, cat.id)
+        start, end = _current_period()
+        budget_id = client.post("/api/budgets", json={"start_date": start, "end_date": end}).json()["id"]
+        make_transaction(db, bedrag=-9.5, datum=date.today(), category_id=loose.id)
+        db.commit()
+
+        body = client.get(f"/api/dashboard/budget-vs-actual/{budget_id}").json()
+        by_cat = {l["category_id"]: l for l in body["expense_lines"]}
+        assert by_cat[cat.id]["source"] == "recurring"
+        assert by_cat[loose.id]["source"] == "manual"

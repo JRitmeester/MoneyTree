@@ -537,6 +537,7 @@ class BudgetVsActualLine(BaseModel):
     difference: float
     percentage: float
     balance: float = 0.0
+    source: str = "manual"
 
 
 class BudgetVsActualSummary(BaseModel):

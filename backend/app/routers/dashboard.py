@@ -749,8 +749,10 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
             actuals[tx.category_id] = actuals.get(tx.category_id, 0.0) + tx.bedrag
 
     budgeted_by_cat: dict[int, float] = {}
+    source_by_cat: dict[int, str] = {}
     for line in budget.lines:
         budgeted_by_cat[line.category_id] = line.amount
+        source_by_cat[line.category_id] = line.source
 
     all_cat_ids = set(budgeted_by_cat.keys()) | set(actuals.keys())
 
@@ -793,6 +795,7 @@ def get_budget_vs_actual(budget_id: int, db: Session = Depends(get_db)):
             difference=difference,
             percentage=percentage,
             balance=balances.get(cat_id, 0.0),
+            source=source_by_cat.get(cat_id, "manual"),
         )
 
         if cat.category_type == "income":
